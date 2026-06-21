@@ -1,0 +1,51 @@
+# dependencies
+node_modules
+
+# build output
+out
+dist
+*.tgz
+src/dashboard/dist/
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+
+# dotenv (never commit real secrets)
+.env
+.env.*.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IDE / OS
+.idea
+.DS_Store
+
+# local Claude Code state
+.claude/settings.local.json
+.claude/worktrees/
+
+# pipeline state (contains work item data)
+.pipeline/
+
+# worktrees
+.worktrees/
+
+# database backups
+backups/
+
+# A/B test results
+scripts/ab-results/
+
+.mcp.json
+
+# private overlay — proprietary/site-specific content lives in a separate overlay
+# repo cloned to ./private (see README "Private Overlay"). Never committed here.
+/private/

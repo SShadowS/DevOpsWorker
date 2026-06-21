@@ -1,0 +1,10 @@
+node_modules
+.git
+.pipeline
+docs/
+tests/
+.env
+.env.*
+README.md
+CLAUDE.md
+ProjectStatus.md

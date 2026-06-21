@@ -1,0 +1,5 @@
+{
+  "//": "Local/overlay build. Extends the public core tsconfig and additionally type-checks the gitignored private/ overlay workspace. The public repo's default `tsc` uses tsconfig.json, which never references private/ — so a clean public clone compiles without the overlay present.",
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "private/**/*.ts"]
+}

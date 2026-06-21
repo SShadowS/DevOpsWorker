@@ -1,0 +1,127 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pipeline
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-pipeline}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pipeline"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - pipeline-net
+
+  watcher:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    entrypoint: ["/root/.bun/bin/bun", "run", "src/cli/index.ts"]
+    command: ["watch"]
+    user: root
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://pipeline:${PG_PASSWORD:-pipeline}@postgres:5432/pipeline
+      # No-post replay control (empty = post normally in production; set to 1 for measurement replays).
+      # Takes precedence over any PR_REVIEW_NO_POST in .env. Forwarded into spawned review containers
+      # by getPrReviewContainerEnv() in src/cli/watch.ts.
+      PR_REVIEW_NO_POST: ${PR_REVIEW_NO_POST:-}
+      # ABSOLUTE host path to this repo's private/ overlay. The watcher passes it as the
+      # bind-mount source when spawning pipeline/review containers (docker.ts), so they
+      # load the same overlay. Leave empty to run spawned containers generic. Set in .env.
+      HOST_PRIVATE_DIR: ${HOST_PRIVATE_DIR:-}
+    volumes:
+      - do-pipeline-state:/state
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Private overlay (gitignored) injected read-only at runtime. The image stays
+      # generic/public-safe; the proprietary registry/env/prompts load from here.
+      - ./private:/app/private:ro
+    networks:
+      - pipeline-net
+
+  dashboard:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    entrypoint: ["/root/.bun/bin/bun", "run", "src/cli/index.ts"]
+    command: ["dashboard"]
+    user: root
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://pipeline:${PG_PASSWORD:-pipeline}@postgres:5432/pipeline
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./private:/app/private:ro
+    networks:
+      - pipeline-net
+
+  webhook-server:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    entrypoint: ["/root/.bun/bin/bun", "run", "src/cli/index.ts"]
+    command: ["webhook-server"]
+    user: root
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://pipeline:${PG_PASSWORD:-pipeline}@postgres:5432/pipeline
+    ports:
+      - "3001:3002"
+    volumes:
+      - ./private:/app/private:ro
+    networks:
+      - pipeline-net
+
+  pg-backup:
+    image: postgres:17-alpine
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PGPASSWORD: ${PG_PASSWORD:-pipeline}
+    volumes:
+      - ./backups:/backups
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "pg-backup: starting (daily backups, keeping 7 days)"
+        while true; do
+          # Wait until postgres accepts connections before attempting a dump.
+          until pg_isready -h postgres -U pipeline -d pipeline -t 5; do
+            echo "pg-backup: postgres not ready, retrying in 10s"
+            sleep 10
+          done
+          STAMP=$$(date +%Y%m%d-%H%M%S)
+          TMPFILE=/backups/.pipeline-$$STAMP.sql.gz.tmp
+          if pg_dump -h postgres -U pipeline pipeline | gzip > "$$TMPFILE" && [ "$$(stat -c%s "$$TMPFILE")" -gt 1024 ]; then
+            mv "$$TMPFILE" "/backups/pipeline-$$STAMP.sql.gz"
+            echo "pg-backup: created pipeline-$$STAMP.sql.gz ($$(stat -c%s "/backups/pipeline-$$STAMP.sql.gz") bytes)"
+          else
+            rm -f "$$TMPFILE"
+            echo "pg-backup: ERROR — pg_dump failed or output too small (<1KB), no backup written"
+          fi
+          # Remove backups older than 7 days
+          find /backups -name 'pipeline-*.sql.gz' -mtime +7 -delete
+          sleep 86400
+        done
+    restart: unless-stopped
+    networks:
+      - pipeline-net
+
+networks:
+  pipeline-net:
+    name: pipeline-net
+
+volumes:
+  pgdata:
+  do-pipeline-state:

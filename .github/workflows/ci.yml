@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Typecheck covers the public core, tests/, and private.example/ — including
+      # the OverlayManifest drift guard (tests/overlay/manifest-contract.test.ts).
+      # The private/ overlay is absent in CI, so this also verifies the public
+      # clone is green with no overlay installed.
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit tests
+        run: bun run test

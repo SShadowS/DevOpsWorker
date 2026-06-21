@@ -1,0 +1,17 @@
+{
+  "claude-plugins-official": {
+    "source": {
+      "source": "github",
+      "repo": "anthropics/claude-plugins-official"
+    },
+    "installLocation": "/home/pipeline/.claude/plugins/marketplaces/claude-plugins-official"
+  },
+  "claude-code-lsps": {
+    "source": {
+      "source": "github",
+      "repo": "SShadowS/claude-code-lsps"
+    },
+    "installLocation": "/home/pipeline/.claude/plugins/marketplaces/claude-code-lsps",
+    "autoUpdate": true
+  }
+}

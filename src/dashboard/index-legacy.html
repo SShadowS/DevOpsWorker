@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipeline Dashboard</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --bg-card: #1e293b;
+    --bg-card-hover: #263548;
+    --border: #334155;
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --green: #22c55e;
+    --blue: #3b82f6;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --gray: #475569;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --mono: 'Cascadia Code', 'Fira Code', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
+  }
+
+  header h1 { font-size: 1.25rem; font-weight: 600; }
+
+  .connection {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  .connection .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    transition: background 0.3s;
+  }
+
+  .connection .dot.live { background: var(--green); }
+
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+  }
+
+  .empty-state p:first-child { font-size: 2rem; margin-bottom: 0.5rem; }
+
+  /* Session card */
+  .session-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    transition: background 0.15s;
+  }
+
+  .session-card:hover { background: var(--bg-card-hover); }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+
+  .card-header h2 { font-size: 1rem; font-weight: 600; }
+  .card-header h2 span { color: var(--text-muted); font-weight: 400; }
+  .card-header h2 a { color: var(--text); text-decoration: none; }
+  .card-header h2 a:hover { text-decoration: underline; color: var(--blue); }
+
+  .badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.2em 0.6em;
+    border-radius: 4px;
+  }
+
+  .badge-running       { background: rgba(59,130,246,0.2); color: var(--blue); }
+  .badge-completed     { background: rgba(34,197,94,0.2); color: var(--green); }
+  .badge-failed        { background: rgba(239,68,68,0.2); color: var(--red); }
+  .badge-checkpoint    { background: rgba(245,158,11,0.2); color: var(--amber); }
+
+  /* Stage progression bar */
+  .stage-bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 1rem;
+    overflow-x: auto;
+    padding: 0.25rem 0;
+  }
+
+  .stage-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 80px;
+    position: relative;
+  }
+
+  .stage-circle {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    border: 2px solid var(--gray);
+    background: var(--bg);
+    color: var(--gray);
+    position: relative;
+    z-index: 1;
+  }
+
+  .stage-circle.completed { border-color: var(--green); background: var(--green); color: #fff; }
+  .stage-circle.active    { border-color: var(--blue); background: var(--blue); color: #fff; animation: pulse 1.5s infinite; }
+  .stage-circle.waiting   { border-color: var(--amber); background: var(--amber); color: #fff; animation: pulse 1.5s infinite; }
+  .stage-circle.error     { border-color: var(--red); background: var(--red); color: #fff; }
+  .stage-circle.pending   { border-color: var(--gray); background: transparent; color: var(--gray); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  .stage-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .stage-connector {
+    flex: 1;
+    height: 2px;
+    min-width: 20px;
+    background: var(--gray);
+    margin: 0 -4px;
+    margin-bottom: 1.1rem;
+    position: relative;
+    z-index: 0;
+  }
+
+  .stage-connector.completed { background: var(--green); }
+
+  .stage-iterations {
+    font-size: 0.55rem;
+    color: var(--text-muted);
+    position: absolute;
+    top: -14px;
+  }
+
+  /* Summary row */
+  .summary-row {
+    display: flex;
+    gap: 1.5rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .summary-row strong { color: var(--text); font-weight: 500; }
+
+  /* Detail section */
+  .detail-toggle {
+    font-size: 0.75rem;
+    color: var(--blue);
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0.25rem 0;
+  }
+
+  .detail-toggle:hover { text-decoration: underline; }
+
+  .detail-section {
+    display: none;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+
+  .detail-section.open { display: block; }
+
+  .detail-section h3 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .detail-section h3:first-child { margin-top: 0; }
+
+  .error-block {
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--red);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .checkpoint-block {
+    background: rgba(245,158,11,0.1);
+    border: 1px solid rgba(245,158,11,0.3);
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+  }
+
+  .revision-block {
+    background: rgba(59,130,246,0.1);
+    border: 1px solid rgba(59,130,246,0.3);
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+  }
+
+  table.telemetry {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+    font-family: var(--mono);
+  }
+
+  table.telemetry th {
+    text-align: left;
+    font-weight: 600;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+
+  table.telemetry td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .kv { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; }
+  .kv .label { color: var(--text-muted); min-width: 100px; }
+
+  /* ---- Tab bar ---- */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.75rem;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .tab-btn {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.4rem 0.75rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ---- Severity & verdict badges ---- */
+  .sev-critical { background: rgba(239,68,68,0.2); color: var(--red); }
+  .sev-major    { background: rgba(245,158,11,0.2); color: var(--amber); }
+  .sev-minor    { background: rgba(59,130,246,0.2); color: var(--blue); }
+  .sev-suggestion { background: rgba(71,85,105,0.3); color: var(--text-muted); }
+
+  .verdict-approve, .verdict-proceed { background: rgba(34,197,94,0.2); color: var(--green); }
+  .verdict-revise  { background: rgba(245,158,11,0.2); color: var(--amber); }
+  .verdict-reject  { background: rgba(239,68,68,0.2); color: var(--red); }
+
+  .ci-passed   { background: rgba(34,197,94,0.2); color: var(--green); }
+  .ci-failed   { background: rgba(239,68,68,0.2); color: var(--red); }
+  .ci-not-run  { background: rgba(71,85,105,0.3); color: var(--text-muted); }
+
+  .action-create { background: rgba(34,197,94,0.2); color: var(--green); }
+  .action-modify { background: rgba(59,130,246,0.2); color: var(--blue); }
+
+  .complexity-trivial,
+  .complexity-simple   { background: rgba(34,197,94,0.2); color: var(--green); }
+  .complexity-moderate { background: rgba(245,158,11,0.2); color: var(--amber); }
+  .complexity-complex,
+  .complexity-very-complex { background: rgba(239,68,68,0.2); color: var(--red); }
+
+  .risk-low    { background: rgba(34,197,94,0.2); color: var(--green); }
+  .risk-medium { background: rgba(245,158,11,0.2); color: var(--amber); }
+  .risk-high   { background: rgba(239,68,68,0.2); color: var(--red); }
+
+  .draft-badge { background: rgba(59,130,246,0.2); color: var(--blue); }
+
+  /* ---- Agent output blocks ---- */
+  .agent-block {
+    background: rgba(30,41,59,0.5);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .agent-block p {
+    margin-bottom: 0.5rem;
+    line-height: 1.5;
+  }
+
+  .agent-block pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    background: rgba(15,23,42,0.5);
+    padding: 0.5rem;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+  }
+
+  .agent-block ul {
+    margin: 0.25rem 0 0.5rem 1.25rem;
+    line-height: 1.6;
+  }
+
+  .agent-block table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .agent-block th {
+    text-align: left;
+    font-weight: 600;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+
+  .agent-block td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .agent-section {
+    margin-top: 0.75rem;
+  }
+
+  .agent-section-title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.4rem;
+  }
+
+  /* ---- Collapsible ---- */
+  .collapsible-header {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .collapsible-header::before {
+    content: '\25B6';
+    font-size: 0.55rem;
+    transition: transform 0.15s;
+  }
+
+  .collapsible-header.open::before {
+    transform: rotate(90deg);
+  }
+
+  .collapsible-body {
+    display: none;
+    padding-top: 0.4rem;
+  }
+
+  .collapsible-body.open { display: block; }
+
+  /* ---- Review iteration sub-tabs ---- */
+  .review-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .review-tab-btn {
+    font-size: 0.65rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .review-tab-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+
+  .review-panel { display: none; }
+  .review-panel.active { display: block; }
+
+  /* ---- Inline file tag ---- */
+  .file-tag {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    background: rgba(15,23,42,0.5);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+  }
+
+  /* ---- Category tag ---- */
+  .cat-tag {
+    font-size: 0.6rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    background: rgba(71,85,105,0.3);
+    color: var(--text-muted);
+  }
+
+  /* ---- Action buttons ---- */
+  .action-bar {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .action-btn {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.4rem 0.75rem;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s, filter 0.15s;
+  }
+
+  .action-btn:hover { filter: brightness(1.15); }
+  .action-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
+
+  .action-btn-approve { background: var(--green); color: #fff; }
+  .action-btn-rerun   { background: var(--amber); color: #000; }
+  .action-btn-retry   { background: var(--blue); color: #fff; }
+
+  .action-feedback {
+    display: none;
+    flex-basis: 100%;
+    margin-top: 0.25rem;
+  }
+
+  .action-feedback.open { display: flex; gap: 0.5rem; align-items: flex-start; }
+
+  .action-feedback textarea {
+    flex: 1;
+    font-family: var(--font);
+    font-size: 0.75rem;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.4rem;
+    min-height: 3rem;
+    resize: vertical;
+  }
+
+  .action-feedback .action-btn { flex-shrink: 0; align-self: flex-end; }
+
+  .action-status {
+    font-size: 0.7rem;
+    padding: 0.2rem 0;
+  }
+
+  .action-status.success { color: var(--green); }
+  .action-status.error { color: var(--red); }
+
+  /* ---- Utility bar (non-pipeline actions) ---- */
+  .utility-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .utility-btn {
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.35rem 0.7rem;
+    border-radius: 4px;
+    border: 1px solid var(--blue);
+    background: transparent;
+    color: var(--blue);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .utility-btn:hover { background: rgba(59,130,246,0.15); }
+  .utility-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .utility-btn.loading { animation: pulse 1.5s infinite; }
+
+  .utility-status {
+    font-size: 0.7rem;
+    padding: 0.2rem 0;
+  }
+
+  .utility-status.error { color: var(--red); }
+  .utility-status.loading { color: var(--blue); }
+
+  /* ---- Learned rules rendering ---- */
+  .rule-card {
+    margin-bottom: 0.75rem;
+  }
+
+  .rule-example-bad pre {
+    border-left: 3px solid var(--red);
+    padding-left: 0.75rem;
+  }
+
+  .rule-example-good pre {
+    border-left: 3px solid var(--green);
+    padding-left: 0.75rem;
+  }
+
+  .confidence-high { background: rgba(34,197,94,0.2); color: var(--green); }
+  .confidence-medium { background: rgba(245,158,11,0.2); color: var(--amber); }
+  .confidence-low { background: rgba(71,85,105,0.3); color: var(--text-muted); }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Pipeline Dashboard</h1>
+    <div class="connection">
+      <div class="dot" id="conn-dot"></div>
+      <span id="conn-text">Connecting...</span>
+    </div>
+  </header>
+  <main id="app"></main>
+
+<script>
+const app = document.getElementById('app');
+const connDot = document.getElementById('conn-dot');
+const connText = document.getElementById('conn-text');
+const sessions = new Map();
+
+// Track open detail sections and active tabs so re-renders preserve state
+const openDetails = new Set();
+const activeTabs = new Map();   // key: workItemId, value: active tab name
+const activeReviewTabs = new Map(); // key: "workItemId-tabName", value: index
+
+// Learn-rules UI state
+const learnRulesLoading = new Set();
+const learnRulesErrors = new Map();
+
+// ---- Fetch initial data ----
+fetch('/api/sessions')
+  .then(r => r.json())
+  .then(list => {
+    for (const s of list) sessions.set(s.workItemId, s);
+    render();
+  })
+  .catch(() => render());
+
+// ---- SSE ----
+let es;
+function connectSSE() {
+  es = new EventSource('/api/events');
+
+  es.onopen = () => {
+    connDot.classList.add('live');
+    connText.textContent = 'Live';
+  };
+
+  es.addEventListener('session-update', (e) => {
+    const session = JSON.parse(e.data);
+    // Clear learn-rules loading state when results arrive
+    if (session.learnedRules && learnRulesLoading.has(session.workItemId)) {
+      learnRulesLoading.delete(session.workItemId);
+      learnRulesErrors.delete(session.workItemId);
+    }
+    sessions.set(session.workItemId, session);
+    render();
+  });
+
+  es.onerror = () => {
+    connDot.classList.remove('live');
+    connText.textContent = 'Reconnecting...';
+  };
+}
+connectSSE();
+
+// ---- Rendering ----
+function render() {
+  if (sessions.size === 0) {
+    app.innerHTML = '<div class="empty-state"><p>No active sessions</p><p>Pipeline state files will appear here when a run starts.</p></div>';
+    return;
+  }
+
+  const sorted = [...sessions.values()].sort((a, b) => {
+    return (b.startedAt || '').localeCompare(a.startedAt || '');
+  });
+
+  app.innerHTML = sorted.map(renderCard).join('');
+}
+
+function renderCard(s) {
+  const badgeClass = s.status === 'checkpoint-waiting' ? 'badge-checkpoint'
+    : s.status === 'completed' ? 'badge-completed'
+    : s.status === 'failed' ? 'badge-failed'
+    : 'badge-running';
+
+  const cost = s.telemetry.totalCostUsd.toFixed(4);
+  const dur = formatDuration(s.telemetry.totalDurationMs);
+  const stageCount = s.telemetry.stages.length;
+
+  const isOpen = openDetails.has(s.workItemId);
+
+  return `
+    <div class="session-card" data-id="${s.workItemId}">
+      <div class="card-header">
+        <h2>${wiLink(s)} <span>-- ${s.currentStage}</span></h2>
+        <span class="badge ${badgeClass}">${formatStatus(s.status)}</span>
+      </div>
+      ${renderStageBar(s.stages)}
+      ${renderActionBar(s)}
+      ${renderUtilityBar(s)}
+      <div class="summary-row">
+        <span>Cost: <strong>$${cost}</strong></span>
+        <span>Duration: <strong>${dur}</strong></span>
+        <span>Stages run: <strong>${stageCount}</strong></span>
+        <span>Started: <strong>${formatTime(s.startedAt)}</strong></span>
+        ${s.completedAt ? `<span>Completed: <strong>${formatTime(s.completedAt)}</strong></span>` : ''}
+      </div>
+      <button class="detail-toggle" onclick="toggleDetail(${s.workItemId})">${isOpen ? 'Hide details' : 'Show details'}</button>
+      <div class="detail-section${isOpen ? ' open' : ''}" id="detail-${s.workItemId}">
+        ${renderAgentTabs(s)}
+      </div>
+    </div>`;
+}
+
+function renderStageBar(stages) {
+  let html = '<div class="stage-bar">';
+  stages.forEach((st, i) => {
+    if (i > 0) {
+      const connClass = st.status === 'completed' || stages[i-1].status === 'completed' ? 'completed' : '';
+      html += `<div class="stage-connector ${connClass}"></div>`;
+    }
+    const iter = st.iterations ? `<span class="stage-iterations">x${st.iterations}</span>` : '';
+    const icon = st.status === 'completed' ? '&#10003;'
+      : st.isCheckpoint ? '&#9646;'
+      : st.isLoop ? '&#8634;'
+      : (i + 1);
+    html += `<div class="stage-node">
+      ${iter}
+      <div class="stage-circle ${st.status}">${icon}</div>
+      <span class="stage-label">${st.label}</span>
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+// ===========================================================================
+// Tabbed detail view
+// ===========================================================================
+
+function renderAgentTabs(s) {
+  // Build list of available tabs
+  const tabs = [];
+  if (s.readiness)                        tabs.push({ key: 'readiness', label: 'Readiness' });
+  if (s.devPlan)                          tabs.push({ key: 'devplan', label: 'Plan' });
+  if (s.planReviews && s.planReviews.length) tabs.push({ key: 'planreviews', label: 'Plan Reviews' });
+  if (s.changeset)                        tabs.push({ key: 'changeset', label: 'Code' });
+  if (s.codeReviews && s.codeReviews.length) tabs.push({ key: 'codereviews', label: 'Code Reviews' });
+  if (s.draftPR)                          tabs.push({ key: 'draftpr', label: 'Draft PR' });
+  if (s.workItemUpdate)                   tabs.push({ key: 'workitemupdate', label: 'Docs' });
+  if (s.learnedRules)                     tabs.push({ key: 'learnedrules', label: 'Learned Rules' });
+  // Infrastructure tabs
+  if (s.error)                            tabs.push({ key: 'error', label: 'Error' });
+  if (s.checkpoint)                       tabs.push({ key: 'checkpoint', label: 'Checkpoint' });
+  if (s.revisionFeedback)                 tabs.push({ key: 'revision', label: 'Revision' });
+  if (s.telemetry && s.telemetry.stages.length) tabs.push({ key: 'telemetry', label: 'Telemetry' });
+  if (s.config)                           tabs.push({ key: 'config', label: 'Config' });
+
+  if (tabs.length === 0) return '<span style="color:var(--text-muted)">No details available</span>';
+
+  // Determine active tab
+  const currentActive = activeTabs.get(s.workItemId);
+  const activeKey = (currentActive && tabs.some(t => t.key === currentActive)) ? currentActive : tabs[0].key;
+  activeTabs.set(s.workItemId, activeKey);
+
+  let html = '<div class="tab-bar">';
+  for (const tab of tabs) {
+    html += `<button class="tab-btn${tab.key === activeKey ? ' active' : ''}" onclick="switchTab(${s.workItemId},'${tab.key}')">${tab.label}</button>`;
+  }
+  html += '</div>';
+
+  // Render all panels
+  for (const tab of tabs) {
+    html += `<div class="tab-panel${tab.key === activeKey ? ' active' : ''}" data-tab="${tab.key}" data-wid="${s.workItemId}">`;
+    html += renderTabContent(tab.key, s);
+    html += '</div>';
+  }
+
+  return html;
+}
+
+function renderTabContent(key, s) {
+  switch (key) {
+    case 'readiness':     return renderReadiness(s.readiness);
+    case 'devplan':       return renderDevPlan(s.devPlan);
+    case 'planreviews':   return renderPlanReviews(s.planReviews, s.workItemId, 'planreviews');
+    case 'changeset':     return renderChangeset(s.changeset);
+    case 'codereviews':   return renderCodeReviews(s.codeReviews, s.workItemId, 'codereviews');
+    case 'draftpr':       return renderDraftPR(s.draftPR);
+    case 'workitemupdate':return renderWorkItemUpdate(s.workItemUpdate);
+    case 'error':         return renderError(s);
+    case 'checkpoint':    return renderCheckpoint(s);
+    case 'revision':      return renderRevision(s);
+    case 'telemetry':     return renderTelemetry(s);
+    case 'config':        return renderConfig(s);
+    case 'learnedrules':  return renderLearnedRules(s.learnedRules);
+    default:              return '';
+  }
+}
+
+// ---- Infrastructure tab renderers (moved from old renderDetails) ----
+
+function renderError(s) {
+  if (!s.error) return '';
+  return `<h3>Error</h3><div class="error-block">[${escapeHtml(s.error.type)}] Stage: ${escapeHtml(s.error.stage)}\n${escapeHtml(s.error.message)}</div>`;
+}
+
+function renderCheckpoint(s) {
+  if (!s.checkpoint) return '';
+  return `<h3>Checkpoint</h3><div class="checkpoint-block">
+    <div class="kv"><span class="label">Name:</span> ${escapeHtml(s.checkpoint.name)}</div>
+    <div class="kv"><span class="label">Entered:</span> ${formatTime(s.checkpoint.enteredAt)}</div>
+    ${s.checkpoint.lastPolledAt ? `<div class="kv"><span class="label">Last polled:</span> ${formatTime(s.checkpoint.lastPolledAt)}</div>` : ''}
+  </div>`;
+}
+
+function renderRevision(s) {
+  if (!s.revisionFeedback) return '';
+  return `<h3>Revision Feedback</h3><div class="revision-block">
+    <div class="kv"><span class="label">Source:</span> ${escapeHtml(s.revisionFeedback.source)}</div>
+    <div class="kv"><span class="label">Target:</span> ${escapeHtml(s.revisionFeedback.targetStage)}</div>
+    <div style="margin-top:0.3rem;white-space:pre-wrap">${escapeHtml(s.revisionFeedback.feedback)}</div>
+  </div>`;
+}
+
+function renderTelemetry(s) {
+  if (!s.telemetry || !s.telemetry.stages.length) return '';
+  let html = '<h3>Telemetry</h3>';
+  html += `<table class="telemetry">
+    <thead><tr><th>Stage</th><th>Started</th><th>Completed</th><th>Duration</th><th>Cost</th><th>Turns</th><th>Model</th><th>Tools</th></tr></thead>
+    <tbody>`;
+  for (const t of s.telemetry.stages) {
+    const started = t.startedAt
+      ? formatTime(t.startedAt)
+      : (t.timestamp && t.durationMs ? formatTime(new Date(new Date(t.timestamp).getTime() - t.durationMs).toISOString()) : '-');
+    const tools = t.toolCalls
+      ? Object.entries(t.toolCalls).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${escapeHtml(n)}: ${c}`).join(', ')
+      : '-';
+    html += `<tr>
+      <td>${escapeHtml(t.name)}</td>
+      <td>${started}</td>
+      <td>${formatTime(t.timestamp)}</td>
+      <td>${formatDuration(t.durationMs)}</td>
+      <td>$${t.costUsd.toFixed(4)}</td>
+      <td>${t.turns}</td>
+      <td>${escapeHtml(t.model)}</td>
+      <td>${tools}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+function renderConfig(s) {
+  if (!s.config) return '';
+  let html = '<h3>Config</h3>';
+  html += `<div class="kv"><span class="label">Organization:</span> ${escapeHtml(s.config.organization)}</div>`;
+  html += `<div class="kv"><span class="label">Project:</span> ${escapeHtml(s.config.project)}</div>`;
+  html += `<div class="kv"><span class="label">Session root:</span> <code>${escapeHtml(s.config.sessionRoot)}</code></div>`;
+  return html;
+}
+
+// ===========================================================================
+// Agent output renderers
+// ===========================================================================
+
+// ---- Readiness (Analyzer) ----
+function renderReadiness(data) {
+  if (!data) return '';
+  const verdictCls = data.verdict === 'proceed' ? 'verdict-proceed' : 'verdict-reject';
+  let html = `<div class="agent-block">`;
+  html += `<p><span class="badge ${verdictCls}">${data.verdict}</span></p>`;
+  html += `<p>${escapeHtml(data.summary)}</p>`;
+
+  // Enriched context
+  if (data.enrichedContext) {
+    const ec = data.enrichedContext;
+    html += `<div class="agent-section"><div class="agent-section-title">Enriched Context</div>`;
+    html += `<div class="kv"><span class="label">Title:</span> ${escapeHtml(ec.title)}</div>`;
+    html += `<div class="kv"><span class="label">Type:</span> ${escapeHtml(ec.type)}</div>`;
+    html += `<div class="kv"><span class="label">Target area:</span> ${escapeHtml(ec.targetArea)}</div>`;
+    html += `<pre>${escapeHtml(ec.description)}</pre>`;
+    if (ec.acceptanceCriteria) {
+      html += `<div class="agent-section-title">Acceptance Criteria</div><pre>${escapeHtml(ec.acceptanceCriteria)}</pre>`;
+    }
+
+    // Related work items
+    if (ec.relatedWorkItems && ec.relatedWorkItems.length) {
+      html += `<div class="agent-section-title">Related Work Items</div><ul>`;
+      for (const r of ec.relatedWorkItems) {
+        html += `<li><strong>#${r.id}</strong> ${escapeHtml(r.title)} <span class="cat-tag">${escapeHtml(r.relationship)}</span></li>`;
+      }
+      html += '</ul>';
+    }
+
+    // Codebase insights
+    if (ec.codebaseInsights && ec.codebaseInsights.length) {
+      html += `<div class="agent-section-title">Codebase Insights</div><ul>`;
+      for (const insight of ec.codebaseInsights) {
+        html += `<li>${escapeHtml(insight)}</li>`;
+      }
+      html += '</ul>';
+    }
+    html += '</div>';
+  }
+
+  // Gaps
+  if (data.gaps && data.gaps.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Gaps</div>`;
+    html += `<table><thead><tr><th>Field</th><th>Severity</th><th>Question</th><th>Resolution</th></tr></thead><tbody>`;
+    for (const g of data.gaps) {
+      const sevCls = g.severity === 'blocking' ? 'sev-critical' : g.severity === 'needs-clarification' ? 'sev-major' : 'sev-suggestion';
+      const res = g.resolvedByAgent ? escapeHtml(g.resolution || 'Resolved') : '<em>Unresolved</em>';
+      html += `<tr><td>${escapeHtml(g.field)}</td><td><span class="badge ${sevCls}">${escapeHtml(g.severity)}</span></td><td>${escapeHtml(g.question)}</td><td>${res}</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ---- Dev Plan (Planner) ----
+function renderDevPlan(data) {
+  if (!data) return '';
+  const complexCls = 'complexity-' + (data.estimatedComplexity || 'moderate').replace(' ', '-');
+  let html = `<div class="agent-block">`;
+  html += `<p><span class="badge ${complexCls}">${escapeHtml(data.estimatedComplexity || '-')}</span></p>`;
+  html += `<p>${escapeHtml(data.summary)}</p>`;
+
+  // Objects table
+  if (data.objects && data.objects.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Objects</div>`;
+    html += `<table><thead><tr><th>Action</th><th>Type</th><th>Name</th><th>File</th><th>Description</th></tr></thead><tbody>`;
+    for (const o of data.objects) {
+      const actCls = o.action === 'create' ? 'action-create' : 'action-modify';
+      html += `<tr>
+        <td><span class="badge ${actCls}">${escapeHtml(o.action)}</span></td>
+        <td>${escapeHtml(o.objectType)}</td>
+        <td><strong>${escapeHtml(o.objectName)}</strong></td>
+        <td><span class="file-tag">${escapeHtml(o.filePath)}</span></td>
+        <td>${escapeHtml(o.description)}</td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // Test scenarios (collapsible)
+  if (data.testScenarios && data.testScenarios.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Test Scenarios</div>`;
+    for (let i = 0; i < data.testScenarios.length; i++) {
+      const t = data.testScenarios[i];
+      const uid = 'ts-' + Math.random().toString(36).slice(2, 8);
+      html += `<div style="margin-bottom:0.4rem">
+        <div class="collapsible-header" onclick="toggleCollapsible('${uid}', this)"><strong>${escapeHtml(t.name)}</strong></div>
+        <div class="collapsible-body" id="${uid}">
+          <p>${escapeHtml(t.description)}</p>
+          <div class="kv"><span class="label">Expected:</span> ${escapeHtml(t.expectedOutcome)}</div>
+          <div class="kv"><span class="label">Derived from:</span> ${escapeHtml(t.derivedFrom)}</div>
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Risk assessment
+  if (data.riskAssessment) {
+    const r = data.riskAssessment;
+    const riskCls = 'risk-' + (r.level || 'medium');
+    html += `<div class="agent-section"><div class="agent-section-title">Risk Assessment</div>`;
+    html += `<p><span class="badge ${riskCls}">${escapeHtml(r.level)}</span></p>`;
+    if (r.factors && r.factors.length) {
+      html += `<div style="margin-top:0.3rem"><strong>Factors:</strong></div><ul>`;
+      for (const f of r.factors) html += `<li>${escapeHtml(f)}</li>`;
+      html += '</ul>';
+    }
+    if (r.mitigations && r.mitigations.length) {
+      html += `<div style="margin-top:0.3rem"><strong>Mitigations:</strong></div><ul>`;
+      for (const m of r.mitigations) html += `<li>${escapeHtml(m)}</li>`;
+      html += '</ul>';
+    }
+    html += '</div>';
+  }
+
+  // Dependencies
+  if (data.dependencies && data.dependencies.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Dependencies</div><ul>`;
+    for (const d of data.dependencies) html += `<li>${escapeHtml(d)}</li>`;
+    html += '</ul></div>';
+  }
+
+  // Notes
+  if (data.notes) {
+    html += `<div class="agent-section"><div class="agent-section-title">Notes</div><pre>${escapeHtml(data.notes)}</pre></div>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ---- Plan Reviews (Plan-Reviewer) ----
+function renderPlanReviews(reviews, workItemId, tabKey) {
+  if (!reviews || !reviews.length) return '';
+  return renderReviewIterations(reviews, workItemId, tabKey, renderSinglePlanReview);
+}
+
+function renderSinglePlanReview(review) {
+  const verdictCls = review.verdict === 'approve' ? 'verdict-approve' : 'verdict-revise';
+  let html = `<div class="agent-block">`;
+  html += `<p><span class="badge ${verdictCls}">${escapeHtml(review.verdict)}</span></p>`;
+  html += `<p>${escapeHtml(review.feedback)}</p>`;
+
+  // Issues
+  if (review.issues && review.issues.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Issues (${review.issues.length})</div>`;
+    html += `<table><thead><tr><th>Severity</th><th>Category</th><th>Description</th><th>Suggestion</th><th>Object</th></tr></thead><tbody>`;
+    for (const iss of review.issues) {
+      const sevCls = 'sev-' + iss.severity;
+      html += `<tr>
+        <td><span class="badge ${sevCls}">${escapeHtml(iss.severity)}</span></td>
+        <td><span class="cat-tag">${escapeHtml(iss.category)}</span></td>
+        <td>${escapeHtml(iss.description)}</td>
+        <td>${escapeHtml(iss.suggestion)}</td>
+        <td>${iss.relatedObject ? escapeHtml(iss.relatedObject) : '-'}</td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // Strengths
+  if (review.strengths && review.strengths.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Strengths</div><ul>`;
+    for (const s of review.strengths) html += `<li>${escapeHtml(s)}</li>`;
+    html += '</ul></div>';
+  }
+
+  // Revision instructions
+  if (review.revisionInstructions) {
+    html += `<div class="agent-section"><div class="agent-section-title">Revision Instructions</div><pre>${escapeHtml(review.revisionInstructions)}</pre></div>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ---- Changeset (Coder) ----
+function renderChangeset(data) {
+  if (!data) return '';
+  let html = `<div class="agent-block">`;
+  html += `<p>${escapeHtml(data.summary)}</p>`;
+
+  // Branch & commit
+  html += `<div class="kv"><span class="label">Branch:</span> <strong>${escapeHtml(data.branchName)}</strong>`;
+  if (data.branchUrl) html += ` <a href="${escapeHtml(data.branchUrl)}" target="_blank" style="color:var(--blue)">(link)</a>`;
+  html += '</div>';
+  if (data.commitHash) html += `<div class="kv"><span class="label">Commit:</span> <code>${escapeHtml(data.commitHash)}</code></div>`;
+  html += `<div class="kv"><span class="label">Message:</span> ${escapeHtml(data.commitMessage)}</div>`;
+
+  // CI result
+  if (data.ciResult) {
+    const ciCls = 'ci-' + data.ciResult.replace(' ', '-');
+    html += `<div class="kv"><span class="label">CI Result:</span> <span class="badge ${ciCls}">${escapeHtml(data.ciResult)}</span></div>`;
+  }
+
+  // Files
+  if (data.filesCreated && data.filesCreated.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Files Created</div><ul>`;
+    for (const f of data.filesCreated) html += `<li><span class="file-tag">${escapeHtml(f)}</span></li>`;
+    html += '</ul></div>';
+  }
+  if (data.filesModified && data.filesModified.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Files Modified</div><ul>`;
+    for (const f of data.filesModified) html += `<li><span class="file-tag">${escapeHtml(f)}</span></li>`;
+    html += '</ul></div>';
+  }
+
+  // Compilation errors
+  if (data.compilationErrors && data.compilationErrors.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Compilation Errors</div>`;
+    html += `<div class="error-block">${data.compilationErrors.map(e => escapeHtml(e)).join('\n')}</div></div>`;
+  }
+
+  // Failed tests
+  if (data.failedTests && data.failedTests.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Failed Tests</div>`;
+    html += `<table><thead><tr><th>Test</th><th>Codeunit</th><th>Error</th></tr></thead><tbody>`;
+    for (const t of data.failedTests) {
+      html += `<tr><td>${escapeHtml(t.testName)}</td><td>${escapeHtml(t.codeunitName)}</td><td>${escapeHtml(t.errorMessage)}</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ---- Code Reviews (Code-Reviewer) ----
+function renderCodeReviews(reviews, workItemId, tabKey) {
+  if (!reviews || !reviews.length) return '';
+  return renderReviewIterations(reviews, workItemId, tabKey, renderSingleCodeReview);
+}
+
+function renderSingleCodeReview(review) {
+  const verdictCls = review.verdict === 'approve' ? 'verdict-approve' : 'verdict-revise';
+  let html = `<div class="agent-block">`;
+  html += `<p><span class="badge ${verdictCls}">${escapeHtml(review.verdict)}</span></p>`;
+  html += `<p>${escapeHtml(review.feedback)}</p>`;
+
+  if (typeof review.implementsPlannedChanges === 'boolean') {
+    const matchBadge = review.implementsPlannedChanges ? 'verdict-approve' : 'verdict-revise';
+    const matchText = review.implementsPlannedChanges ? 'Yes' : 'No';
+    html += `<div class="kv"><span class="label">Matches plan:</span> <span class="badge ${matchBadge}">${matchText}</span></div>`;
+  }
+
+  // Inline comments
+  if (review.issues && review.issues.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Inline Comments (${review.issues.length})</div>`;
+    html += `<table><thead><tr><th>File</th><th>Line</th><th>Severity</th><th>Category</th><th>Comment</th><th>Suggestion</th></tr></thead><tbody>`;
+    for (const c of review.issues) {
+      const sevCls = 'sev-' + c.severity;
+      html += `<tr>
+        <td><span class="file-tag">${escapeHtml(c.filePath)}</span></td>
+        <td>${c.line != null ? c.line : '-'}</td>
+        <td><span class="badge ${sevCls}">${escapeHtml(c.severity)}</span></td>
+        <td><span class="cat-tag">${escapeHtml(c.category)}</span></td>
+        <td>${escapeHtml(c.comment)}</td>
+        <td>${c.suggestion ? escapeHtml(c.suggestion) : '-'}</td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // Strengths
+  if (review.strengths && review.strengths.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Strengths</div><ul>`;
+    for (const s of review.strengths) html += `<li>${escapeHtml(s)}</li>`;
+    html += '</ul></div>';
+  }
+
+  // Revision instructions
+  if (review.revisionInstructions) {
+    html += `<div class="agent-section"><div class="agent-section-title">Revision Instructions</div><pre>${escapeHtml(review.revisionInstructions)}</pre></div>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ---- Draft PR ----
+function renderDraftPR(data) {
+  if (!data) return '';
+  let html = `<div class="agent-block">`;
+  html += `<p><strong>${escapeHtml(data.title)}</strong></p>`;
+  if (data.url) html += `<p><a href="${escapeHtml(data.url)}" target="_blank" style="color:var(--blue)">${escapeHtml(data.url)}</a></p>`;
+  html += `<div class="kv"><span class="label">Source:</span> ${escapeHtml(data.sourceBranch)}</div>`;
+  html += `<div class="kv"><span class="label">Target:</span> ${escapeHtml(data.targetBranch)}</div>`;
+  if (data.isDraft != null) html += `<div class="kv"><span class="label">Status:</span> <span class="badge draft-badge">${data.isDraft ? 'Draft' : 'Active'}</span></div>`;
+  html += `<div class="kv"><span class="label">Work item:</span> #${data.linkedWorkItemId}</div>`;
+  if (data.description) {
+    html += `<div class="agent-section"><div class="agent-section-title">Description</div><pre>${escapeHtml(data.description)}</pre></div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+// ---- Work Item Update (Documenter) ----
+function renderWorkItemUpdate(data) {
+  if (!data) return '';
+  let html = `<div class="agent-block">`;
+
+  if (data.releaseNotes) {
+    html += `<div class="agent-section"><div class="agent-section-title">Release Notes</div><pre>${escapeHtml(data.releaseNotes)}</pre></div>`;
+  }
+
+  if (data.changesSummary) {
+    html += `<div class="agent-section"><div class="agent-section-title">Changes Summary</div><pre>${escapeHtml(data.changesSummary)}</pre></div>`;
+  }
+
+  if (data.decisionsAndTradeoffs && data.decisionsAndTradeoffs.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Decisions & Tradeoffs</div><ul>`;
+    for (const d of data.decisionsAndTradeoffs) html += `<li>${escapeHtml(d)}</li>`;
+    html += '</ul></div>';
+  }
+
+  if (data.summaryComment) {
+    html += `<div class="agent-section"><div class="agent-section-title">Summary Comment</div><pre>${escapeHtml(data.summaryComment)}</pre></div>`;
+  }
+
+  if (data.fieldUpdates && data.fieldUpdates.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Field Updates</div>`;
+    html += `<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>`;
+    for (const f of data.fieldUpdates) {
+      html += `<tr><td><code>${escapeHtml(f.fieldPath)}</code></td><td>${escapeHtml(f.value)}</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+  }
+
+  if (data.description) {
+    html += `<div class="agent-section"><div class="agent-section-title">Description (HTML)</div><pre>${escapeHtml(data.description)}</pre></div>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function renderLearnedRules(data) {
+  if (!data) return '';
+
+  // Handle error case
+  if (data.error) {
+    return `<div class="error-block">${escapeHtml(data.error)}${data.stderr ? '\n' + escapeHtml(data.stderr) : ''}</div>`;
+  }
+
+  let html = '<div class="agent-block">';
+
+  if (data.summary) {
+    html += `<p>${escapeHtml(data.summary)}</p>`;
+  }
+
+  // Proposed rules
+  if (data.proposedRules && data.proposedRules.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Proposed Rules (${data.proposedRules.length})</div>`;
+    for (const rule of data.proposedRules) {
+      const uid = 'rule-' + Math.random().toString(36).slice(2, 8);
+      const confCls = 'confidence-' + (rule.confidence || 'medium');
+      html += `<div class="rule-card">
+        <div class="collapsible-header" onclick="toggleCollapsible('${uid}', this)">
+          <strong>${escapeHtml(rule.title)}</strong>
+          <span class="badge ${confCls}">${escapeHtml(rule.confidence || 'medium')}</span>
+          ${(rule.categories || []).map(c => `<span class="cat-tag">${escapeHtml(c)}</span>`).join(' ')}
+        </div>
+        <div class="collapsible-body" id="${uid}">
+          <p><strong>Rationale:</strong> ${escapeHtml(rule.rationale)}</p>
+          <div class="rule-example-bad"><div class="agent-section-title">BAD</div><pre>${escapeHtml(rule.badExample)}</pre></div>
+          <div class="rule-example-good"><div class="agent-section-title">GOOD</div><pre>${escapeHtml(rule.goodExample)}</pre></div>
+          ${rule.sourceComment ? `<p style="color:var(--text-muted);font-size:0.7rem"><strong>Source:</strong> ${escapeHtml(rule.sourceComment.substring(0, 300))}</p>` : ''}
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+  } else {
+    html += `<p style="color:var(--text-muted)">No new rules proposed.</p>`;
+  }
+
+  // Contradictions
+  if (data.contradictions && data.contradictions.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Contradictions (${data.contradictions.length})</div>`;
+    html += `<table><thead><tr><th>Existing Rule</th><th>Explanation</th><th>Comment</th></tr></thead><tbody>`;
+    for (const c of data.contradictions) {
+      html += `<tr><td><strong>${escapeHtml(c.existingRule)}</strong></td><td>${escapeHtml(c.explanation)}</td><td>${escapeHtml((c.comment || '').substring(0, 200))}</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // Already covered
+  if (data.alreadyCovered && data.alreadyCovered.length) {
+    html += `<div class="agent-section"><div class="agent-section-title">Already Covered (${data.alreadyCovered.length})</div><ul>`;
+    for (const c of data.alreadyCovered) {
+      html += `<li>${escapeHtml(c)}</li>`;
+    }
+    html += '</ul></div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ===========================================================================
+// Shared: review iteration sub-tabs
+// ===========================================================================
+
+function renderReviewIterations(reviews, workItemId, tabKey, renderFn) {
+  if (reviews.length === 1) return renderFn(reviews[0]);
+
+  const storeKey = workItemId + '-' + tabKey;
+  const activeIdx = activeReviewTabs.get(storeKey) ?? reviews.length - 1; // default to latest
+
+  let html = '<div class="review-tabs">';
+  for (let i = 0; i < reviews.length; i++) {
+    const verdict = reviews[i].verdict;
+    const cls = i === activeIdx ? ' active' : '';
+    html += `<button class="review-tab-btn${cls}" onclick="switchReviewTab(${workItemId},'${tabKey}',${i})">Review ${i + 1} (${verdict})</button>`;
+  }
+  html += '</div>';
+
+  for (let i = 0; i < reviews.length; i++) {
+    html += `<div class="review-panel${i === activeIdx ? ' active' : ''}" data-review-tab="${tabKey}-${i}" data-wid="${workItemId}">${renderFn(reviews[i])}</div>`;
+  }
+
+  return html;
+}
+
+// ===========================================================================
+// Interaction handlers
+// ===========================================================================
+
+function toggleDetail(id) {
+  const el = document.getElementById('detail-' + id);
+  if (!el) return;
+  const isOpen = el.classList.toggle('open');
+  if (isOpen) openDetails.add(id); else openDetails.delete(id);
+  const btn = el.previousElementSibling;
+  if (btn) btn.textContent = isOpen ? 'Hide details' : 'Show details';
+}
+
+function switchTab(workItemId, tabName) {
+  activeTabs.set(workItemId, tabName);
+  // Update tab buttons
+  const card = document.querySelector(`.session-card[data-id="${workItemId}"]`);
+  if (!card) return;
+  card.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.toLowerCase().replace(/\s/g,'') === tabName.toLowerCase().replace(/\s/g,'') || btn.onclick.toString().includes("'" + tabName + "'"));
+  });
+  card.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.dataset.tab === tabName);
+  });
+  // Re-activate tab buttons properly using onclick match
+  card.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  card.querySelectorAll(`.tab-btn`).forEach(btn => {
+    // Match by extracting the tab key from the onclick
+    const match = btn.getAttribute('onclick')?.match(/switchTab\(\d+,'([^']+)'\)/);
+    if (match && match[1] === tabName) btn.classList.add('active');
+  });
+}
+
+function switchReviewTab(workItemId, tabKey, idx) {
+  const storeKey = workItemId + '-' + tabKey;
+  activeReviewTabs.set(storeKey, idx);
+  // Toggle review panels within the parent tab panel
+  const card = document.querySelector(`.session-card[data-id="${workItemId}"]`);
+  if (!card) return;
+  const parentPanel = card.querySelector(`.tab-panel[data-tab="${tabKey}"]`);
+  if (!parentPanel) return;
+  parentPanel.querySelectorAll('.review-tab-btn').forEach((btn, i) => btn.classList.toggle('active', i === idx));
+  parentPanel.querySelectorAll('.review-panel').forEach((panel, i) => panel.classList.toggle('active', i === idx));
+}
+
+function toggleCollapsible(id, header) {
+  const body = document.getElementById(id);
+  if (!body) return;
+  body.classList.toggle('open');
+  header.classList.toggle('open');
+}
+
+// ===========================================================================
+// Action bar
+// ===========================================================================
+
+function renderActionBar(s) {
+  if (!s.availableActions || s.availableActions.length === 0) return '';
+
+  const btnMap = {
+    'approve-plan': '<button class="action-btn action-btn-approve" onclick="submitAction(' + s.workItemId + ',\'approve-plan\')">Approve Plan</button>',
+    'rerun-plan': '<button class="action-btn action-btn-rerun" onclick="toggleFeedback(' + s.workItemId + ',\'rerun-plan\')">Rerun Plan</button>',
+    'fix': '<button class="action-btn action-btn-rerun" onclick="toggleFeedback(' + s.workItemId + ',\'fix\')">Fix Code</button>',
+    'continue': '<button class="action-btn action-btn-retry" onclick="submitAction(' + s.workItemId + ',\'continue\')">Retry</button>',
+  };
+
+  let html = '<div class="action-bar">';
+  for (const a of s.availableActions) {
+    if (btnMap[a]) html += btnMap[a];
+  }
+  // Feedback textarea (hidden by default, shown for rerun actions)
+  html += `<div class="action-feedback" id="feedback-${s.workItemId}">
+    <textarea id="feedback-text-${s.workItemId}" placeholder="Optional: describe what to change..."></textarea>
+    <button class="action-btn action-btn-rerun" id="feedback-submit-${s.workItemId}" onclick="submitFeedbackAction(${s.workItemId})">Send</button>
+  </div>`;
+  html += `<div class="action-status" id="action-status-${s.workItemId}"></div>`;
+  html += '</div>';
+  return html;
+}
+
+// Track which rerun action is active for feedback
+const pendingRerunAction = new Map(); // workItemId → actionType
+
+function toggleFeedback(workItemId, actionType) {
+  const el = document.getElementById('feedback-' + workItemId);
+  if (!el) return;
+  const isOpen = el.classList.toggle('open');
+  if (isOpen) {
+    pendingRerunAction.set(workItemId, actionType);
+    document.getElementById('feedback-text-' + workItemId)?.focus();
+  } else {
+    pendingRerunAction.delete(workItemId);
+  }
+}
+
+function submitFeedbackAction(workItemId) {
+  const actionType = pendingRerunAction.get(workItemId);
+  if (!actionType) return;
+  const textarea = document.getElementById('feedback-text-' + workItemId);
+  const feedback = textarea ? textarea.value : '';
+  submitAction(workItemId, actionType, feedback);
+}
+
+async function submitAction(workItemId, type, feedback) {
+  const statusEl = document.getElementById('action-status-' + workItemId);
+
+  // Disable all action buttons in this card
+  const card = document.querySelector('.session-card[data-id="' + workItemId + '"]');
+  if (card) card.querySelectorAll('.action-btn').forEach(b => b.disabled = true);
+
+  if (statusEl) {
+    statusEl.textContent = 'Submitting...';
+    statusEl.className = 'action-status';
+  }
+
+  try {
+    const body = { workItemId, type };
+    if (feedback) body.feedback = feedback;
+
+    const res = await fetch('/api/actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      if (statusEl) {
+        statusEl.textContent = 'Action queued — pipeline will process shortly';
+        statusEl.className = 'action-status success';
+      }
+      pendingRerunAction.delete(workItemId);
+    } else {
+      const data = await res.json();
+      if (statusEl) {
+        statusEl.textContent = data.error || 'Failed to submit action';
+        statusEl.className = 'action-status error';
+      }
+      // Re-enable buttons on error
+      if (card) card.querySelectorAll('.action-btn').forEach(b => b.disabled = false);
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent = 'Network error';
+      statusEl.className = 'action-status error';
+    }
+    if (card) card.querySelectorAll('.action-btn').forEach(b => b.disabled = false);
+  }
+}
+
+// ===========================================================================
+// Utility bar (non-pipeline actions like learn-rules)
+// ===========================================================================
+
+function renderUtilityBar(s) {
+  if (!s.draftPR) return '';
+
+  const prId = s.draftPR.id;
+  const isLoading = learnRulesLoading.has(s.workItemId);
+  const error = learnRulesErrors.get(s.workItemId);
+
+  let html = '<div class="utility-bar">';
+
+  if (isLoading) {
+    html += `<button class="utility-btn loading" disabled>Analyzing PR comments...</button>`;
+    html += `<span class="utility-status loading">Running rule-learner agent</span>`;
+  } else {
+    html += `<button class="utility-btn" onclick="triggerLearnRules(${s.workItemId})">Learn Rules from PR #${prId}</button>`;
+  }
+
+  if (error) {
+    html += `<span class="utility-status error">${escapeHtml(error)}</span>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+async function triggerLearnRules(workItemId) {
+  learnRulesLoading.add(workItemId);
+  learnRulesErrors.delete(workItemId);
+  render();
+
+  try {
+    const res = await fetch('/api/learn-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workItemId }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      learnRulesErrors.set(workItemId, data.error || 'Failed to start learn-rules');
+      learnRulesLoading.delete(workItemId);
+      render();
+    }
+    // On 202: keep loading state — SSE will deliver the result
+  } catch (err) {
+    learnRulesErrors.set(workItemId, 'Network error');
+    learnRulesLoading.delete(workItemId);
+    render();
+  }
+}
+
+// ---- Helpers ----
+function wiLink(s) {
+  if (s.config) {
+    const url = `https://dev.azure.com/${encodeURIComponent(s.config.organization)}/${encodeURIComponent(s.config.project)}/_workitems/edit/${s.workItemId}`;
+    return `<a href="${url}" target="_blank" title="Open in Azure DevOps">#${s.workItemId}</a>`;
+  }
+  return `#${s.workItemId}`;
+}
+
+function formatStatus(s) {
+  return s === 'checkpoint-waiting' ? 'waiting' : s;
+}
+
+function formatTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDuration(ms) {
+  if (!ms || ms <= 0) return '-';
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return sec + 's';
+  const min = Math.floor(sec / 60);
+  const rem = sec % 60;
+  if (min < 60) return min + 'm ' + rem + 's';
+  const hr = Math.floor(min / 60);
+  return hr + 'h ' + (min % 60) + 'm';
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  const div = document.createElement('div');
+  div.textContent = String(str);
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>
