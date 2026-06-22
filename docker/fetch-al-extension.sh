@@ -117,10 +117,11 @@ chmod +x "${AL_BINARY}"
 ALC_LINUX="${EXTENSION_DIR}/bin/linux/alc"
 if is_real_alc "${ALC_LINUX}"; then
   chmod +x "${ALC_LINUX}"
+  # --- Write version marker ---
+  echo "${LATEST_VERSION}" > "${VERSION_FILE}"
+  echo "AL extension v${LATEST_VERSION} installed to ${EXTENSION_DIR}"
 else
-  echo "WARNING: extracted alc is not a valid ELF binary at ${ALC_LINUX} — compiles will fail"
+  echo "WARNING: extracted alc is not a valid ELF binary at ${ALC_LINUX} — refusing to cache this version"
+  rm -f "${ALC_LINUX}" "${VERSION_FILE}"
+  exit 1
 fi
-
-# --- Write version marker ---
-echo "${LATEST_VERSION}" > "${VERSION_FILE}"
-echo "AL extension v${LATEST_VERSION} installed to ${EXTENSION_DIR}"
