@@ -96,15 +96,32 @@ export async function stageAgentWorkspace(
   // --- Stage CLAUDE.md file ---
   const claudeMdSource = join(agentSourceDir, 'CLAUDE.md');
   const claudeMdTarget = join(targetCwd, 'CLAUDE.md');
+  const overlayClaudeMd = overlayDir ? join(overlayDir, 'CLAUDE.md') : undefined;
+  const hasOverlayClaudeMd = !!overlayClaudeMd && existsSync(overlayClaudeMd);
 
-  if (existsSync(claudeMdSource)) {
+  // Replace and append are mutually exclusive modes: an overlay CLAUDE.md OWNS
+  // the file, so an overlay CLAUDE.append.md alongside it is ignored (+ warned).
+  // CLAUDE.append.md only augments the PUBLIC base.
+  if (hasOverlayClaudeMd && hasOverlayAppend) {
+    console.warn(
+      `[overlay] agent dir ${overlayDir}: both CLAUDE.md (replace) and ` +
+      `CLAUDE.append.md present — append ignored; fold it into CLAUDE.md.`,
+    );
+  }
+  const applyAppend = hasOverlayAppend && !hasOverlayClaudeMd;
+
+  if (existsSync(claudeMdSource) || hasOverlayClaudeMd) {
     await backupTarget(claudeMdTarget, join(targetCwd, 'CLAUDE.md.bak'));
 
-    if (hasOverlayAppend) {
-      // Real concatenated file: base CLAUDE.md + overlay append.
+    if (applyAppend) {
+      // Real concatenated file: public base CLAUDE.md + overlay append.
       const base = await readFile(claudeMdSource, 'utf8');
       const extra = await readFile(overlayAppend!, 'utf8');
       await writeFile(claudeMdTarget, `${base}\n\n${extra}`);
+    } else if (hasOverlayClaudeMd) {
+      // Overlay fully replaces — copy verbatim (real file, never a symlink into
+      // the tracked source tree, consistent with the .claude/ copy-merge rule).
+      await copyFile(overlayClaudeMd!, claudeMdTarget);
     } else {
       try {
         await symlink(claudeMdSource, claudeMdTarget, fileSymlinkType);
