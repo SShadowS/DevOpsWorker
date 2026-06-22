@@ -89,7 +89,9 @@ export interface OverlayManifest {
   /** Per-agent typed knobs, keyed by AgentConfig.name. Prompt ASSETS
    *  (CLAUDE.md / .claude/) come from private/agents/<name>/, NOT this map. */
   agents?: Record<string, AgentConfigOverride>;
-  /** @deprecated use agents[name].model — kept as a fallback for back-compat. */
+  /** @deprecated DEAD field — currently consumed nowhere; NOT wired by this
+   *  feature. Use agents[name].model. Left in the interface only so existing
+   *  manifests still type-check; the resolver ignores it. */
   models?: Record<string, string>;
 }
 ```
@@ -97,6 +99,12 @@ export interface OverlayManifest {
 `AgentConfigOverride` is added to the versioned type block in
 `src/overlay/public-api.ts` and asserted by
 `tests/overlay/public-api-contract.test.ts`.
+
+**On `models` (review adjudication):** it is declared but consumed nowhere today.
+Wiring it into the precedence chain would silently change behaviour for any
+deployment that set it expecting a no-op. So this feature does **not** resurrect
+it — `resolveAgentKnobs` ignores `models` entirely. It stays `@deprecated` in the
+type for compile back-compat only. (Removing it outright is a separate cleanup.)
 
 ### 2. Prompt staging precedence (`src/sdk/agent-workspace.ts`)
 
@@ -111,18 +119,35 @@ const baseMdSource = hasOverlayClaudeMd ? overlayClaudeMd! : claudeMdSource;
 - Gate widened: enter the CLAUDE.md staging block when
   `existsSync(claudeMdSource) || hasOverlayClaudeMd` (supports an overlay-only
   agent with no public base file).
-- If `hasOverlayAppend`: write `read(baseMdSource) + "\n\n" + read(append)`.
-- Else if `hasOverlayClaudeMd`: copy `baseMdSource` (real file; no symlink into
-  the tracked source tree, consistent with the existing copy-on-merge rule).
-- Else: symlink/copy the public base as today.
+- **Replace and append are mutually exclusive modes** (review adjudication):
+  `CLAUDE.append.md` means "add to the PUBLIC base"; `CLAUDE.md` means "the
+  overlay owns the file". When the overlay supplies a `CLAUDE.md`, the overlay's
+  `CLAUDE.append.md` is ignored (and a warning is logged — both present is a
+  misconfiguration; the overlay should fold its addition into its own
+  `CLAUDE.md`). `CLAUDE.append.md` therefore only applies when falling back to
+  the public base.
 
-Precedence (high → low): **overlay `CLAUDE.md` (replace) → public `CLAUDE.md`**,
-then `CLAUDE.append.md` concatenated after whichever base won. `.claude/`
-copy-merge is unchanged (overlay wins per-file). Backup/cleanup logic is
-unchanged (it already backs up `CLAUDE.md` / `.claude/`).
+Staging branches:
+- `hasOverlayClaudeMd` → copy `overlayClaudeMd` verbatim (real file; never a
+  symlink into the tracked source tree — consistent with the copy-on-merge rule).
+- else `hasOverlayAppend` → write `read(claudeMdSource) + "\n\n" + read(append)`.
+- else → symlink/copy the public base as today.
 
-Resulting overlay agent dir may hold any subset of: `CLAUDE.md` (replace),
-`CLAUDE.append.md` (add), `.claude/` (merge).
+Precedence (high → low): **overlay `CLAUDE.md` (replace) → public `CLAUDE.md`
+[+ overlay `CLAUDE.append.md` only in the base case]**. `.claude/` copy-merge is
+unchanged (overlay wins per-file). Backup/cleanup logic is unchanged (it already
+backs up `CLAUDE.md` / `.claude/`).
+
+Resulting overlay agent dir holds **either** `CLAUDE.md` (replace) **or**
+`CLAUDE.append.md` (add) — plus optionally `.claude/` (merge).
+
+**Concurrency assumption:** `stageAgentWorkspace` stages into the shared session
+cwd with backup/restore on cleanup; it is **not** concurrency-safe. This is
+sound because agents run **sequentially** within a container (the orchestrator
+iterates stages one at a time; pr-reviewer is a single `runAgent` call;
+containers are one-per-work-item). Parallelism inside an agent is via SDK
+sub-agents, which do not re-stage the workspace. No change needed; documented so
+a future concurrent-agents change knows to revisit staging isolation.
 
 ### 3. Resolver + fold points
 
@@ -145,8 +170,8 @@ export function resolveAgentKnobs(
 
 Resolution rules:
 
-- `model = agents[name].model ?? models[name] (legacy) ?? base.model
-  ?? pipelineModels.perAgent?.[name] ?? pipelineModels.default`
+- `model = agents[name].model ?? base.model ?? pipelineModels.perAgent?.[name]
+  ?? pipelineModels.default` (legacy `models` map deliberately excluded — see §1)
 - `allowedTools = agents[name].allowedTools ?? base.allowedTools`
 - `maxTurns = agents[name].maxTurns ?? base.maxTurns`
 - `sharedPromptFragments = agents[name].sharedPromptFragments
@@ -154,19 +179,27 @@ Resolution rules:
 
 Empty manifest → returns base values unchanged (identity).
 
-**Fold points:**
+**Single fold point (review adjudication — kills an existing divergence).**
+Today `stage.ts` re-derives the telemetry model label via `resolveAgentModel`
+(~lines 55/71) **independently** of the model `runAgent` actually resolves
+(~line 153) — they can already drift. Rather than add a second resolution site,
+resolve **once** in `runAgent` and make the result authoritative everywhere:
 
-- **Authoritative:** `src/sdk/run-agent.ts` `runAgent()` — the single chokepoint
-  every agent passes through. Load the cached manifest (`loadManifest()`) and
-  apply `resolveAgentKnobs` before the existing reads of `model` (~line 153),
-  `allowedTools`, `maxTurns`, and `sharedPromptFragments` (~line 174). This
-  governs the actual run.
-- **Label consistency:** `src/pipeline/stage.ts` builds the pre-run telemetry
-  model label via `resolveAgentModel(...)` (~lines 55/71). Call the same
-  resolver there so the telemetry label matches what `runAgent` actually uses.
-  (Only the `model` field matters for the label.)
+1. `src/sdk/run-agent.ts` `runAgent()` is the one chokepoint every agent passes
+   through (including pr-reviewer, which calls `runAgent` directly and **bypasses
+   `stage.ts`** — so `stage.ts` is *not* a valid universal fold point). Load the
+   memoised manifest and apply `resolveAgentKnobs` before the existing reads of
+   `model`/`allowedTools`/`maxTurns`/`sharedPromptFragments`.
+2. Add the resolved `model` to `AgentResult` (and to `AgentExecutionError`
+   details for the error path).
+3. `src/pipeline/stage.ts` consumes `result.model` (success) / `err.details.model`
+   (error) for its telemetry label and **stops calling `resolveAgentModel`**.
 
-One pure function, two call sites — no divergence between label and run.
+Net: one resolution, no label/run divergence — strictly better than the status
+quo.
+
+`resolveAgentModel`'s existing perAgent/default fallback logic is preserved by
+folding it into `resolveAgentKnobs` (it becomes the `?? pipelineModels...` tail).
 
 ### 4. Runtime — no new plumbing
 
@@ -183,8 +216,20 @@ both local and container runs with zero dispatch changes.
 - `allowedTools` / `sharedPromptFragments` are **replace**, documented loudly.
   Broadening tools is acceptable because the overlay is the trusted deployment
   owner; replace (not merge) makes the effective set explicit and auditable.
-- `OverlayManifest.models` is revived from dead as a deprecated alias folded by
-  the resolver; existing (empty) usage is unaffected.
+- `OverlayManifest.models` stays dead (not consumed) — see §1.
+
+**Fail-fast validation (review adjudication).** `resolveAgentKnobs` validates the
+overridden knobs and throws a clear error at resolution time rather than letting
+a typo surface as a cryptic mid-run SDK failure:
+
+- `allowedTools` present but empty → error (almost always a mistake; an agent
+  with zero tools cannot act).
+- `sharedPromptFragments` entries must resolve to existing files under
+  `src/prompts/` → error listing the missing fragment.
+- `model` is passed through (model-id validity is the SDK's domain).
+- Core tool names (the non-`mcp__` entries) are checked against the known core
+  tool set and an **unknown name warns** (not errors — MCP tool names are
+  dynamic and cannot be fully statically validated, so we don't hard-fail).
 
 ### 6. Testing
 
@@ -212,7 +257,35 @@ both local and container runs with zero dispatch changes.
 - Update the "Agent Convention" section of `CLAUDE.md` and the overlay design
   doc to describe the two channels and the precedence rules.
 
+### 8. Runtime cost & local DX (review adjudication)
+
+- **No per-call cost.** `loadManifest()` is a memoised singleton (`cached` in
+  `src/overlay/loader.ts`); the first call parses `private/manifest.ts`, every
+  subsequent call returns the in-memory object. Calling it inside `runAgent` is
+  a reference read, not a filesystem hit.
+- **Local DX mismatch (documented).** Prompt **assets** are re-read from disk on
+  every run (each `runAgent` re-stages the workspace), so editing
+  `private/agents/<name>/CLAUDE.md` takes effect on the next run with no restart.
+  Manifest **knobs** are cached at first load, so editing `agents[name]` knobs
+  locally requires a process restart (or `resetManifestCache()` in tests). This
+  asymmetry is intentional (the manifest is a TS module imported once) and is
+  called out in the docs so it does not surprise local iterators.
+
 ## Open Questions
 
 None blocking. (`ado` defaults remain a separate dead-field cleanup, out of
 scope here.)
+
+## Review
+
+Reviewed by Gemini 3.1 Pro (via OpenRouter), 2026-06-22. Adjudication:
+
+- **Accepted:** single fold point at `runAgent` with the resolved model surfaced
+  on `AgentResult` (§3) — also removes a pre-existing label/run divergence;
+  replace/append mutual exclusivity (§2); keep `models` dead, do not resurrect
+  (§1); fail-fast knob validation (§5); manifest-cache + local-DX notes (§8).
+- **Confirmed as-is:** REPLACE (not merge) for `allowedTools` /
+  `sharedPromptFragments` — endorsed as the deterministic, auditable choice.
+- **Noted, no change:** staging-concurrency concern is moot under the
+  sequential-agents / one-container-per-work-item model (§2), documented as an
+  assumption for future revisits.
