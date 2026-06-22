@@ -7,7 +7,7 @@ import type { AgentConfig, AgentResult, McpServerConfig } from '../types/agent.t
 import type { PipelineState, PipelineContext } from '../types/pipeline.types.ts';
 import { buildSystemPrompt, buildSharedFragmentContent } from './prompt-loader.ts';
 import { stageAgentWorkspace, type StagedWorkspace } from './agent-workspace.ts';
-import { resolveAgentOverlayDir } from '../overlay/index.ts';
+import { resolveAgentOverlayDir, loadManifest, resolveAgentKnobs } from '../overlay/index.ts';
 import { AgentExecutionError, AgentValidationError, BudgetExceededError, RateLimitError, TransientAgentError } from './errors.ts';
 
 // ---------------------------------------------------------------------------
@@ -150,9 +150,8 @@ export async function runAgent<T extends z.ZodType>(
   context: PipelineContext,
 ): Promise<AgentResult<z.infer<T>>> {
   const prompt = config.buildPrompt(state, context);
-  const model = config.model
-    ?? context.config.models.perAgent?.[config.name]
-    ?? context.config.models.default;
+  const knobs = resolveAgentKnobs(config, await loadManifest(), context.config.models);
+  const model = knobs.model;
   const cwd = config.cwd ?? process.cwd();
   const logger = context.logger;
   const agentName = config.name;
@@ -161,7 +160,7 @@ export async function runAgent<T extends z.ZodType>(
   let staged: StagedWorkspace | undefined;
   let systemPrompt: string | { type: 'preset'; preset: 'claude_code'; append?: string };
   let settingSources: SettingSource[] | undefined;
-  let effectiveTools = [...config.allowedTools];
+  let effectiveTools = [...knobs.allowedTools];
 
   if (config.useClaudeCodePreset && config.agentSourceDir) {
     // NEW PATH: native Claude Code features. Merge any private overlay assets
@@ -171,7 +170,7 @@ export async function runAgent<T extends z.ZodType>(
     settingSources = config.settingSources ?? ['project'];
 
     // Shared fragments go into append
-    const sharedContent = buildSharedFragmentContent(config.sharedPromptFragments);
+    const sharedContent = buildSharedFragmentContent(knobs.sharedPromptFragments);
     systemPrompt = {
       type: 'preset' as const,
       preset: 'claude_code' as const,
@@ -196,7 +195,7 @@ export async function runAgent<T extends z.ZodType>(
   logger?.logJson('AGENT CONFIG', {
     name: agentName,
     model,
-    maxTurns: config.maxTurns ?? 50,
+    maxTurns: knobs.maxTurns,
     allowedTools: effectiveTools,
     mcpServers: Object.keys(resolvedMcpServers),
     cwd,
@@ -240,7 +239,7 @@ export async function runAgent<T extends z.ZodType>(
             mcpServers: resolvedMcpServers,
             model,
             cwd,
-            maxTurns: config.maxTurns ?? 50,
+            maxTurns: knobs.maxTurns,
             maxBudgetUsd: config.maxBudgetUsd,
             permissionMode: 'bypassPermissions',
             allowDangerouslySkipPermissions: true,
@@ -441,6 +440,7 @@ export async function runAgent<T extends z.ZodType>(
                     toolCalls,
                     tokens,
                     subtype: resultSubtype,
+                    model,
                   };
                 }
                 logger?.log(`Zod parse FAILED: ${JSON.stringify(parsed.error.issues.slice(0, 5))}`);
@@ -470,6 +470,7 @@ export async function runAgent<T extends z.ZodType>(
               costUsd,
               durationMs,
               turns,
+              model,
             });
             logger?.stageError(err);
             throw err;
