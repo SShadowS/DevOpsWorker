@@ -119,6 +119,7 @@ if [ -n "${COMPANIONS}" ]; then
     COMP_URL=$(echo "${comp}" | jq -r '.url')
     COMP_BRANCH=$(echo "${comp}" | jq -r '.branch')
     COMP_READONLY=$(echo "${comp}" | jq -r '.readOnly')
+    COMP_SYMLINK_ONLY=$(echo "${comp}" | jq -r '.symlinkOnly')
     CACHE_DIR="/state/repos/${COMP_NAME}"
     SESSION_DIR="${SESSION_ROOT}/${COMP_NAME}"
 
@@ -149,12 +150,19 @@ if [ -n "${COMPANIONS}" ]; then
       cd /app
     fi
 
-    # Link into session workspace
-    if [ "${COMP_READONLY}" = "false" ]; then
-      echo "Local clone for writable companion ${COMP_NAME}..."
-      git clone --local "${CACHE_DIR}" "${SESSION_DIR}"
-    else
+    # Stage into the session workspace.
+    # symlinkOnly companions (huge + LSP-covered as a dependency, e.g. the BC code-
+    # history mirror) are SYMLINKED from cache — zero copy, and agents never file-
+    # search them. Everything else gets a real local clone so the agents' Grep/Glob
+    # can actually search the source — those tools SKIP symlinked directories, so a
+    # symlinked companion is invisible to them (this is why non-dependency companions
+    # like DocumentCapture were unsearchable).
+    if [ "${COMP_SYMLINK_ONLY}" = "true" ]; then
+      echo "Symlink (symlinkOnly) companion ${COMP_NAME}..."
       ln -sf "${CACHE_DIR}" "${SESSION_DIR}"
+    else
+      echo "Local clone for companion ${COMP_NAME} (real, searchable dir)..."
+      git clone --local "${CACHE_DIR}" "${SESSION_DIR}"
     fi
   done
 fi

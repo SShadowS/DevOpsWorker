@@ -3,8 +3,14 @@ export interface CompanionDef {
   url: string;
   /** Default branch */
   defaultBranch: string;
-  /** If true, never branched or modified — symlinked from cache */
+  /** If true, never branched or modified by the agent. */
   readOnly?: boolean;
+  /** If true, staged into the session as a SYMLINK to the cache (zero-copy) rather
+   *  than a real local clone. Use ONLY for huge companions that agents never need to
+   *  file-search (Grep/Glob skip symlinked dirs) and that are reachable via LSP as a
+   *  dependency instead — e.g. the BC code-history mirror. Default (false) gives a
+   *  real, searchable directory. */
+  symlinkOnly?: boolean;
 }
 
 /**
@@ -18,6 +24,8 @@ export const companionRegistry: Record<string, CompanionDef> = {
     url: 'https://github.com/StefanMaron/MSDyn365BC.Code.History.git',
     defaultBranch: 'w1',
     readOnly: true,
+    // Huge code-history mirror + reachable via LSP as a dependency — symlink, don't copy.
+    symlinkOnly: true,
   },
 };
 
@@ -58,7 +66,7 @@ export function getCompanions(
   repoKey: string,
   companions: Record<string, { branch?: string; readOnly?: boolean }>,
   options: ResolveCompanionsOptions = {},
-): Array<{ name: string; url: string; branch: string; readOnly: boolean }> {
+): Array<{ name: string; url: string; branch: string; readOnly: boolean; symlinkOnly: boolean }> {
   return Object.entries(companions)
     .filter(([name]) => name !== repoKey)
     .map(([name, override]) => {
@@ -77,6 +85,7 @@ export function getCompanions(
         url: def.url,
         branch,
         readOnly: override.readOnly ?? def.readOnly ?? true,
+        symlinkOnly: def.symlinkOnly ?? false,
       };
     });
 }
