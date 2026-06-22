@@ -185,7 +185,7 @@ export async function runAgent<T extends z.ZodType>(
     }
   } else {
     // LEGACY PATH: unchanged behavior
-    systemPrompt = buildSystemPrompt(config.name, config.sharedPromptFragments);
+    systemPrompt = buildSystemPrompt(config.name, knobs.sharedPromptFragments);
   }
 
   // Resolve mcpServers (can be static or function-of-state)
