@@ -19,9 +19,9 @@ import { join, resolve } from 'node:path';
 // Adding future comment hooks = one line in this map, no callback changes.
 // ---------------------------------------------------------------------------
 
-const commentFormatters: Record<string, (wid: number, state: PipelineState) => string | null> = {
-  analyzer: (wid, s) => s.readiness ? formatReadinessComment(wid, s.readiness) : null,
-  planning: (wid, s) => s.devPlan ? formatPlanComment(wid, s.devPlan) : null,
+const commentFormatters: Record<string, { fn: (wid: number, state: PipelineState) => string | null; format: 'html' | 'markdown' }> = {
+  analyzer: { fn: (wid, s) => s.readiness ? formatReadinessComment(wid, s.readiness) : null, format: 'html' },
+  planning: { fn: (wid, s) => s.devPlan ? formatPlanComment(wid, s.devPlan) : null, format: 'markdown' },
 };
 
 // ---------------------------------------------------------------------------
@@ -113,11 +113,11 @@ export async function run(args: string[]): Promise<void> {
     onStageComplete: async (stage, state) => {
       console.log(`  ✅ ${stage.name} completed`);
 
-      const format = commentFormatters[stage.name];
-      const comment = format?.(workItemId, state);
-      if (comment) {
+      const fmt = commentFormatters[stage.name];
+      const comment = fmt?.fn(workItemId, state);
+      if (comment && fmt) {
         try {
-          await postWorkItemComment(workItemId, comment, config);
+          await postWorkItemComment(workItemId, comment, config, fmt.format);
           console.log(`  📝 Posted comment to work item`);
         } catch (err) {
           console.warn(`  ⚠️  Failed to post comment: ${err}`);

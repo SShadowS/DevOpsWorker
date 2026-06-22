@@ -184,39 +184,31 @@ describe('formatReadinessComment', () => {
 // ---------------------------------------------------------------------------
 
 describe('formatPlanComment', () => {
-  test('includes heading with work item id', () => {
-    const html = formatPlanComment(66858, makeDevPlan());
-    expect(html).toContain('<h2>🤖 Dev Plan — Work Item #66858</h2>');
+  test('includes markdown heading with work item id', () => {
+    const md = formatPlanComment(66858, makeDevPlan());
+    expect(md).toContain('## 🤖 Dev Plan — Work Item #66858');
   });
 
   test('includes plan summary', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('Add caching codeunit for merge fields.');
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('Add caching codeunit for merge fields.');
   });
 
-  test('objects table has four columns (no Description)', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('<th>Action</th><th>Type</th><th>ID</th><th>Name</th>');
-    // The table header should NOT include Description
-    expect(html).not.toMatch(/<th>Description<\/th>/);
+  test('objects markdown table has four columns (no Description)', () => {
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('| Action | Type | ID | Name |');
+    expect(md).not.toContain('Description |');
   });
 
   test('table shows create/modify with correct emojis', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('<td>🆕 create</td>');
-    expect(html).toContain('<td>✏️ modify</td>');
-  });
-
-  test('table shows object type, id, and name', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('<td>codeunit</td>');
-    expect(html).toContain('<td>6175370</td>');
-    expect(html).toContain('<td>CDO Merge Field Cache</td>');
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('| 🆕 create | codeunit | 6175370 | CDO Merge Field Cache |');
+    expect(md).toContain('| ✏️ modify |');
   });
 
   test('heading says "create/modify" when objects include creates', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('Objects to create/modify');
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('Objects to create/modify');
   });
 
   test('heading says "modify" when only modifications', () => {
@@ -225,29 +217,30 @@ describe('formatPlanComment', () => {
         { objectType: 'table', objectId: 18, objectName: 'Customer', action: 'modify', description: 'Add field', filePath: 'x.al' },
       ],
     });
-    const html = formatPlanComment(1, plan);
-    expect(html).toContain('Objects to modify');
-    expect(html).not.toContain('create/modify');
+    const md = formatPlanComment(1, plan);
+    expect(md).toContain('Objects to modify');
+    expect(md).not.toContain('create/modify');
   });
 
-  test('per-object detail sections appear after the table', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    const tableEnd = html.indexOf('</table>');
-    const detailSection = html.indexOf('<h4>🆕 CDO Merge Field Cache (codeunit 6175370)</h4>');
+  test('per-object detail collapsibles appear after the table', () => {
+    const md = formatPlanComment(1, makeDevPlan());
+    const tableEnd = md.indexOf('### Object details');
+    const detailSection = md.indexOf('<summary><b>CDO Merge Field Cache</b> — 🆕 codeunit 6175370</summary>');
     expect(tableEnd).toBeGreaterThan(-1);
     expect(detailSection).toBeGreaterThan(tableEnd);
   });
 
-  test('detail sections include description text', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('<p>New SingleInstance caching codeunit.</p>');
-    expect(html).toContain('<p>Modify GetValue() to use cache.</p>');
+  test('detail collapsibles include description text', () => {
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('New SingleInstance caching codeunit.');
+    expect(md).toContain('Modify GetValue() to use cache.');
+    expect(md).toContain('<details>');
   });
 
-  test('detail sections use correct emoji per action', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('<h4>🆕 CDO Merge Field Cache');
-    expect(html).toContain('<h4>✏️ CDO E-Mail Template MergeField');
+  test('detail summaries use correct emoji per action', () => {
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('<b>CDO Merge Field Cache</b> — 🆕 codeunit');
+    expect(md).toContain('<b>CDO E-Mail Template MergeField</b> — ✏️');
   });
 
   test('shows (new) for objects without an id', () => {
@@ -256,36 +249,36 @@ describe('formatPlanComment', () => {
         { objectType: 'codeunit', objectName: 'New CU', action: 'create', description: 'Desc', filePath: 'x.al' },
       ],
     });
-    const html = formatPlanComment(1, plan);
-    expect(html).toContain('<td>(new)</td>');
-    expect(html).toContain('(codeunit (new))');
+    const md = formatPlanComment(1, plan);
+    expect(md).toContain('| 🆕 create | codeunit | (new) | New CU |');
+    expect(md).toContain('<b>New CU</b> — 🆕 codeunit (new)');
   });
 
   test('includes risk assessment', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('<h3>Risk Assessment: medium</h3>');
-    expect(html).toContain('<li>Shared table change</li>');
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('### Risk: medium');
+    expect(md).toContain('- Shared table change');
   });
 
-  test('includes test scenarios as ordered list', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('<h3>Test Scenarios</h3>');
-    expect(html).toContain('<ol>');
-    expect(html).toContain('<b>Cache hit returns same value</b>');
+  test('includes test scenarios as a numbered list', () => {
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('Test Scenarios');
+    expect(md).toContain('1. **Cache hit returns same value**');
   });
 
   test('includes complexity', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('<b>Complexity:</b> moderate');
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('**Complexity:** moderate');
   });
 
-  test('includes approval instructions', () => {
-    const html = formatPlanComment(1, makeDevPlan());
-    expect(html).toContain('<code>plan-approved</code>');
-    expect(html).toContain('<code>/rerun-plan</code>');
+  test('includes approval instructions + pipeline signature', () => {
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(md).toContain('`plan-approved`');
+    expect(md).toContain('`/rerun-plan`');
+    expect(md).toContain('Generated by DevOps Pipeline');
   });
 
-  test('converts numbered lists in object descriptions to ordered lists', () => {
+  test('object descriptions pass through verbatim (markdown renders lists natively)', () => {
     const plan = makeDevPlan({
       objects: [
         {
@@ -295,23 +288,20 @@ describe('formatPlanComment', () => {
         },
       ],
     });
-    const html = formatPlanComment(1, plan);
-    expect(html).toContain('<ol>');
-    expect(html).toContain('<li>First test</li>');
-    expect(html).toContain('<li>Second test</li>');
-    expect(html).toContain('<li>Third test</li>');
-    expect(html).toContain('</ol>');
+    const md = formatPlanComment(1, plan);
+    expect(md).toContain('1. First test');
+    expect(md).toContain('2. Second test');
+    expect(md).toContain('3. Third test');
   });
 
-  test('HTML-escapes object names and descriptions', () => {
+  test('HTML-escapes object names in the <summary> (HTML inside markdown)', () => {
     const plan = makeDevPlan({
       objects: [
-        { objectType: 'codeunit', objectId: 1, objectName: 'CU <Test>', action: 'create', description: 'Handles "quotes" & <tags>', filePath: 'x.al' },
+        { objectType: 'codeunit', objectId: 1, objectName: 'CU <Test>', action: 'create', description: 'Handles tags', filePath: 'x.al' },
       ],
     });
-    const html = formatPlanComment(1, plan);
-    expect(html).toContain('CU &lt;Test&gt;');
-    expect(html).toContain('Handles &quot;quotes&quot; &amp; &lt;tags&gt;');
+    const md = formatPlanComment(1, plan);
+    expect(md).toContain('<b>CU &lt;Test&gt;</b>');
   });
 });
 

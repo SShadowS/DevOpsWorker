@@ -437,10 +437,15 @@ export async function postWorkItemComment(
   workItemId: number,
   text: string,
   config: PipelineConfig,
+  format: 'html' | 'markdown' = 'html',
 ): Promise<void> {
+  // `format` is a QUERY-STRING parameter (CommentFormat enum: markdown|html), NOT a
+  // body field — see the Add Work Item Comment REST API. Markdown comments render
+  // real heading hierarchy + <details> collapsibles; once posted as markdown a
+  // comment can't be converted back to html (one-way — fine, we post each once).
   await adoFetch<unknown>(
     config.azureDevOps,
-    `wit/workItems/${workItemId}/comments?api-version=7.0-preview.3`,
+    `wit/workItems/${workItemId}/comments?format=${format}&api-version=7.1-preview.4`,
     {
       method: 'POST',
       body: JSON.stringify({ text }),
