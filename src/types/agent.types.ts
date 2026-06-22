@@ -99,4 +99,6 @@ export interface AgentResult<T> {
   tokens: StageTokenUsage;
   /** SDK result subtype (e.g. 'success', 'error_max_turns'). */
   subtype: string;
+  /** The model the run actually used (resolved knobs — authoritative for telemetry). */
+  model: string;
 }
