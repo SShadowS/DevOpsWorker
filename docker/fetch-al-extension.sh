@@ -15,6 +15,18 @@ EXTENSION="al"
 
 mkdir -p "${EXTENSION_DIR}"
 
+# Validate that bin/linux/alc is the REAL native compiler (a self-contained ELF),
+# not a corrupted stub. A stale/garbage alc on the shared state volume (e.g. a
+# 252-byte self-exec shell wrapper) otherwise survives the version-marker cache
+# skip and makes every compile hang in an infinite exec loop. ELF magic = 7f454c46.
+is_real_alc() {
+  local f="$1"
+  [ -f "${f}" ] || return 1
+  local magic
+  magic=$(head -c 4 "${f}" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')
+  [ "${magic}" = "7f454c46" ]
+}
+
 # --- Query marketplace for latest version ---
 echo "Checking AL extension version..."
 API_URL="https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery"
@@ -51,13 +63,19 @@ fi
 echo "Latest AL extension version: ${LATEST_VERSION}"
 
 # --- Check if already cached ---
+# Re-extract when the version differs OR when the cached alc is corrupt — a
+# matching version marker is NOT sufficient if the binary itself is garbage.
 if [ -f "${VERSION_FILE}" ]; then
   CACHED_VERSION=$(cat "${VERSION_FILE}")
   if [ "${CACHED_VERSION}" = "${LATEST_VERSION}" ]; then
-    echo "AL extension ${LATEST_VERSION} already cached"
-    exit 0
+    if is_real_alc "${EXTENSION_DIR}/bin/linux/alc"; then
+      echo "AL extension ${LATEST_VERSION} already cached"
+      exit 0
+    fi
+    echo "WARNING: cached AL extension ${LATEST_VERSION} has a corrupt alc (not an ELF binary) — re-extracting"
+  else
+    echo "Upgrading AL extension from ${CACHED_VERSION} to ${LATEST_VERSION}"
   fi
-  echo "Upgrading AL extension from ${CACHED_VERSION} to ${LATEST_VERSION}"
 fi
 
 # --- Download VSIX ---
@@ -92,6 +110,16 @@ if [ ! -f "${AL_BINARY}" ]; then
   exit 0
 fi
 chmod +x "${AL_BINARY}"
+
+# --- Verify + make the alc compiler executable (the VSIX ships it -x'd) ---
+# Without this the CLI fails with EACCES posix_spawn; with a corrupt alc it would
+# otherwise hang. Validate it is a real ELF and bail loud if the VSIX changed shape.
+ALC_LINUX="${EXTENSION_DIR}/bin/linux/alc"
+if is_real_alc "${ALC_LINUX}"; then
+  chmod +x "${ALC_LINUX}"
+else
+  echo "WARNING: extracted alc is not a valid ELF binary at ${ALC_LINUX} — compiles will fail"
+fi
 
 # --- Write version marker ---
 echo "${LATEST_VERSION}" > "${VERSION_FILE}"
