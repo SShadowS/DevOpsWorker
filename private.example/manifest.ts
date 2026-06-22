@@ -10,6 +10,14 @@ const manifest: OverlayManifest = {
   // ADD: merged into the core's empty repo registry.
   repos: exampleRepos,
 
+  // OVERRIDE: per-agent typed knobs (model, maxTurns, allowedTools, sharedPromptFragments).
+  agents: {
+    'pr-reviewer': {
+      model: 'claude-opus-4-8',
+      maxTurns: 120,
+    },
+  },
+
   // ADD: proprietary companion repos (core ships only the public `BC`).
   // companions: {
   //   'YourDep': { url: 'https://dev.azure.com/your-org/.../_git/Your%20Dep', defaultBranch: 'main', readOnly: true },
