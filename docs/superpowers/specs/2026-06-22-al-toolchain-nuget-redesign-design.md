@@ -9,7 +9,7 @@
 The AL compiler (`alc`) is currently obtained and managed by **DevOpsWorker**, not
 the Continia CLI, and discovered by the CLI through a fragile 3-tier guess. This
 split ownership produced a production failure: a corrupted `alc` (a 252-byte
-self-execing shell wrapper) sat cached on the shared `do-pipeline-state` volume,
+self-executing shell wrapper) sat cached on the shared `do-pipeline-state` volume,
 survived the version-marker cache skip, and made **every compile hang in an
 infinite exec loop** — costing one work item ~2.6 h / $16 / 200 turns before the
 coder gave up. The real `alc` compiles the same project in **~1 second**.
