@@ -51,6 +51,10 @@ COPY src/ src/
 COPY scripts/ scripts/
 COPY tsconfig.json ./
 
+# Build the dashboard SPA bundle (src/dashboard/dist/). dist/ is gitignored, so the
+# image must build it — the dashboard compose service serves these static assets.
+RUN bun run dashboard:build
+
 # Run as root with IS_SANDBOX=1 — Claude Code allows --dangerously-skip-permissions
 # in sandboxed environments. Running as root eliminates all permission issues with
 # vendored binaries (bun install strips +x), volume mounts, and cli.js patching.
