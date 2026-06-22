@@ -386,6 +386,7 @@ export async function runAgent<T extends z.ZodType>(
                   status: apiError.status,
                   errorType: apiError.errorType,
                   message: apiError.message,
+                  model,
                 });
                 logger?.stageError(err);
                 throw err;
