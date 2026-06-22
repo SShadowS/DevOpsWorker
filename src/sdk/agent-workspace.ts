@@ -38,8 +38,13 @@ export interface StagedWorkspace {
  *   base `.claude/` with the overlay's contents copied over it (overlay wins on
  *   name clash). A copy (not a junction) is used so cleanup can safely `rm -rf`
  *   it without risk of following a junction into the tracked source tree.
+ * - `overlayDir/CLAUDE.md` → fully REPLACES the base CLAUDE.md (staged as a real
+ *   copied file, never a symlink into the tracked source tree).
  * - `overlayDir/CLAUDE.append.md` → appended to the base CLAUDE.md (staged as a
  *   real concatenated file instead of a symlink).
+ *   Replace and append are mutually exclusive: an overlay `CLAUDE.md` wins and
+ *   any `CLAUDE.append.md` alongside it is ignored (with a warning). Append only
+ *   augments the PUBLIC base CLAUDE.md.
  * With no overlay the fast junction/symlink path is used, unchanged.
  */
 export async function stageAgentWorkspace(
@@ -110,6 +115,9 @@ export async function stageAgentWorkspace(
   }
   const applyAppend = hasOverlayAppend && !hasOverlayClaudeMd;
 
+  // Append requires a public base CLAUDE.md to augment — if there's neither a
+  // base nor an overlay CLAUDE.md, this block is skipped and a lone overlay
+  // CLAUDE.append.md is silently ignored (preserves prior behavior).
   if (existsSync(claudeMdSource) || hasOverlayClaudeMd) {
     await backupTarget(claudeMdTarget, join(targetCwd, 'CLAUDE.md.bak'));
 
