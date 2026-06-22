@@ -256,82 +256,58 @@ describe('stageAgentWorkspace — private overlay', () => {
 });
 
 describe('stageAgentWorkspace — overlay CLAUDE.md replace', () => {
-  const dirs: string[] = [];
-  async function tmp(prefix: string): Promise<string> {
-    const { mkdtemp } = await import('fs/promises');
-    const d = await mkdtemp(join(tmpdir(), prefix));
-    dirs.push(d);
-    return d;
-  }
-  afterEach(async () => {
-    const { rm } = await import('fs/promises');
-    for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
+  let overlayDir: string;
+
+  beforeEach(() => {
+    overlayDir = join(tempDir, 'overlay-agent');
+    mkdirSync(overlayDir, { recursive: true });
   });
 
   test('overlay CLAUDE.md replaces the base', async () => {
-    const { writeFile, readFile } = await import('fs/promises');
-    const src = await tmp('agent-src-');
-    const overlay = await tmp('agent-ovl-');
-    const cwd = await tmp('agent-cwd-');
-    await writeFile(join(src, 'CLAUDE.md'), 'BASE');
-    await writeFile(join(overlay, 'CLAUDE.md'), 'OVERLAY');
+    writeFileSync(join(agentDir, 'CLAUDE.md'), 'BASE');
+    writeFileSync(join(overlayDir, 'CLAUDE.md'), 'OVERLAY');
 
-    const staged = await stageAgentWorkspace(src, cwd, overlay);
-    expect(await readFile(join(cwd, 'CLAUDE.md'), 'utf8')).toBe('OVERLAY');
+    const staged = await stageAgentWorkspace(agentDir, targetDir, overlayDir);
+    expect(readFileSync(join(targetDir, 'CLAUDE.md'), 'utf8')).toBe('OVERLAY');
     await staged.cleanup();
   });
 
   test('overlay CLAUDE.md present → CLAUDE.append.md is ignored', async () => {
-    const { writeFile, readFile } = await import('fs/promises');
-    const src = await tmp('agent-src-');
-    const overlay = await tmp('agent-ovl-');
-    const cwd = await tmp('agent-cwd-');
-    await writeFile(join(src, 'CLAUDE.md'), 'BASE');
-    await writeFile(join(overlay, 'CLAUDE.md'), 'OVERLAY');
-    await writeFile(join(overlay, 'CLAUDE.append.md'), 'APPEND');
+    writeFileSync(join(agentDir, 'CLAUDE.md'), 'BASE');
+    writeFileSync(join(overlayDir, 'CLAUDE.md'), 'OVERLAY');
+    writeFileSync(join(overlayDir, 'CLAUDE.append.md'), 'APPEND');
 
-    const staged = await stageAgentWorkspace(src, cwd, overlay);
-    expect(await readFile(join(cwd, 'CLAUDE.md'), 'utf8')).toBe('OVERLAY');
+    const staged = await stageAgentWorkspace(agentDir, targetDir, overlayDir);
+    expect(readFileSync(join(targetDir, 'CLAUDE.md'), 'utf8')).toBe('OVERLAY');
     await staged.cleanup();
   });
 
   test('append-only (no overlay CLAUDE.md) concatenates onto base', async () => {
-    const { writeFile, readFile } = await import('fs/promises');
-    const src = await tmp('agent-src-');
-    const overlay = await tmp('agent-ovl-');
-    const cwd = await tmp('agent-cwd-');
-    await writeFile(join(src, 'CLAUDE.md'), 'BASE');
-    await writeFile(join(overlay, 'CLAUDE.append.md'), 'APPEND');
+    writeFileSync(join(agentDir, 'CLAUDE.md'), 'BASE');
+    writeFileSync(join(overlayDir, 'CLAUDE.append.md'), 'APPEND');
 
-    const staged = await stageAgentWorkspace(src, cwd, overlay);
-    expect(await readFile(join(cwd, 'CLAUDE.md'), 'utf8')).toBe('BASE\n\nAPPEND');
+    const staged = await stageAgentWorkspace(agentDir, targetDir, overlayDir);
+    expect(readFileSync(join(targetDir, 'CLAUDE.md'), 'utf8')).toBe('BASE\n\nAPPEND');
     await staged.cleanup();
   });
 
   test('overlay-only CLAUDE.md with no public base stages correctly', async () => {
-    const { writeFile, readFile } = await import('fs/promises');
-    const src = await tmp('agent-src-');       // no CLAUDE.md in src
-    const overlay = await tmp('agent-ovl-');
-    const cwd = await tmp('agent-cwd-');
-    await writeFile(join(overlay, 'CLAUDE.md'), 'OVERLAY');
+    // no CLAUDE.md in agentDir (the public base)
+    writeFileSync(join(overlayDir, 'CLAUDE.md'), 'OVERLAY');
 
-    const staged = await stageAgentWorkspace(src, cwd, overlay);
-    expect(await readFile(join(cwd, 'CLAUDE.md'), 'utf8')).toBe('OVERLAY');
+    const staged = await stageAgentWorkspace(agentDir, targetDir, overlayDir);
+    expect(readFileSync(join(targetDir, 'CLAUDE.md'), 'utf8')).toBe('OVERLAY');
     await staged.cleanup();
   });
 
   test('cleanup restores a pre-existing CLAUDE.md in cwd', async () => {
-    const { writeFile, readFile } = await import('fs/promises');
-    const src = await tmp('agent-src-');
-    const overlay = await tmp('agent-ovl-');
-    const cwd = await tmp('agent-cwd-');
-    await writeFile(join(src, 'CLAUDE.md'), 'BASE');
-    await writeFile(join(overlay, 'CLAUDE.md'), 'OVERLAY');
-    await writeFile(join(cwd, 'CLAUDE.md'), 'PREEXISTING');
+    writeFileSync(join(agentDir, 'CLAUDE.md'), 'BASE');
+    writeFileSync(join(overlayDir, 'CLAUDE.md'), 'OVERLAY');
+    writeFileSync(join(targetDir, 'CLAUDE.md'), 'PREEXISTING');
 
-    const staged = await stageAgentWorkspace(src, cwd, overlay);
-    expect(await readFile(join(cwd, 'CLAUDE.md'), 'utf8')).toBe('OVERLAY');
+    const staged = await stageAgentWorkspace(agentDir, targetDir, overlayDir);
+    expect(readFileSync(join(targetDir, 'CLAUDE.md'), 'utf8')).toBe('OVERLAY');
     await staged.cleanup();
-    expect(await readFile(join(cwd, 'CLAUDE.md'), 'utf8')).toBe('PREEXISTING');
+    expect(readFileSync(join(targetDir, 'CLAUDE.md'), 'utf8')).toBe('PREEXISTING');
   });
 });
