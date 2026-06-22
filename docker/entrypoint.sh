@@ -201,26 +201,18 @@ mkdir -p "${AL_TOOLS_DIR}"
 # (it has its own graceful exits, but guard here too against any unhandled failure).
 /fetch-al-extension.sh "${AL_TOOLS_DIR}" || echo "WARNING: AL extension fetch failed (non-fatal) — using cached extension if present"
 AL_EXT_DIR="${AL_TOOLS_DIR}/al-extension"
+# Keep AL_EXTENSION_PATH for the AL LSP server (the language host still comes from
+# the VSIX). The AL COMPILER (alc) is no longer taken from the VSIX — the Continia
+# CLI provisions it from NuGet (self-contained .Tools.Linux) and caches it under
+# CONTINIA_ALC_CACHE. So we do NOT build the `al`→`alc` shim or put the VSIX bin on
+# PATH anymore (that path's alc was the source of an infinite-exec-loop hang).
 if [ -d "${AL_EXT_DIR}/bin/linux" ]; then
   export AL_EXTENSION_PATH="${AL_EXT_DIR}"
-  # Some environment/build CLIs invoke `al compile <args>`, but the AL extension
-  # ships only `alc`, whose CLI has no `compile` subcommand — it treats `compile`
-  # as a source-file argument and fails AL1001. Provide an `al` wrapper that strips
-  # a leading `compile` subcommand before forwarding to `alc`.
-  AL_BIN_LINUX="${AL_EXT_DIR}/bin/linux"
-  if [ -x "${AL_BIN_LINUX}/alc" ]; then
-    cat > "${AL_BIN_LINUX}/al" <<'SHIM'
-#!/bin/sh
-# Shim: forwards `al compile <args>` to `alc <args>` (alc takes args directly).
-if [ "$1" = "compile" ]; then
-  shift
 fi
-exec "$(dirname "$0")/alc" "$@"
-SHIM
-    chmod +x "${AL_BIN_LINUX}/al"
-  fi
-  export PATH="${AL_BIN_LINUX}:${PATH}"
-fi
+
+# Where the Continia CLI caches the NuGet-provisioned alc (persisted on the state
+# volume so only the first compile pays the ~60MB download).
+export CONTINIA_ALC_CACHE="${AL_TOOLS_DIR}/alc"
 
 # --- Fetch AL LSP plugin (cached on state volume) ---
 # The SDK resolveAlLspPlugin() reads AL_LSP_DIR to find the plugin binary.
