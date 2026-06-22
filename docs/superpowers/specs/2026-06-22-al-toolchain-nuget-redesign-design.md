@@ -48,7 +48,8 @@ instead of scraping the VSIX. DevOpsWorker stops managing alc.
   compiles the 552-file Cloud app **with no `dotnet` installed**. So **no .NET
   runtime is needed in the image** — just download + unzip the nupkg.
   - Caveat: `…Tools.Linux` 18.x is currently **`-beta` only** (stable tops at
-    17.0.34); BC 28/29 ⇒ use the **preview channel** (`--prerelease`).
+    17.0.34). Because BC 28/29 needs 18.x, the CLI **defaults to the prerelease
+    channel** (see Version resolution); `--stable` opts out.
 
 Why this is the right architecture, not symptom-patching: it deletes the entire
 fragile subsystem — marketplace scrape, `.version` cache, self-exec shim, missing
@@ -62,12 +63,15 @@ A toolchain manager that does: **resolve version → ensure installed → discov
 validate → invoke**.
 
 - **Version resolution** (precedence):
-  1. explicit `--alc-version <x.y.z.w>` flag / config;
-  2. `--preview` (a.k.a. `--prerelease`) → newest pre-release on nuget.org;
-  3. derived from the project's BC platform (`app.json` `application`/`platform`)
-     — pick the matching `Microsoft.Dynamics.BusinessCentral.Development.Tools`
-     major;
-  4. default: newest stable.
+  1. explicit `--alc-version <x.y.z.w>` flag / config (exact pin, wins over all);
+  2. `--stable` / `--no-prerelease` opt-out → newest **stable** only;
+  3. **DEFAULT: newest prerelease** (include `-beta`). Rationale: the current BC
+     28/29 line ships alc as `18.x-beta` only (stable tops at 17.0.34), so
+     defaulting to stable would hand BC 29 projects a too-old compiler. Prerelease
+     is the working default; `--stable`/explicit pin are the escape hatches.
+  - Optional refinement: clamp the chosen version's major to the project's BC
+    platform (`app.json` `application`/`platform`) so "newest prerelease" can't
+    jump a major ahead of the target.
 - **Ensure installed:** download the **self-contained `…Tools.Linux` nupkg** for
   the resolved version from nuget.org (`v3-flatcontainer/<id>/<ver>/<id>.<ver>.nupkg`,
   public, no auth), unzip to a CLI-managed cache, `chmod +x lib/net10.0/alc`. No
