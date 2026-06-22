@@ -28,6 +28,7 @@ import type {
   WorkItem,
   AgentConfig,
   McpServerConfig,
+  AgentConfigOverride,
   RepoConfig,
   RepoRegistry,
   CompanionDef,

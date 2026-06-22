@@ -17,6 +17,7 @@ export type {
   OverlayManifest,
   PipelineBuildContext,
   AdoDefaults,
+  AgentConfigOverride,
 } from './types.ts';
 export type { PipelineEdit } from './stage-edit.ts';
 
