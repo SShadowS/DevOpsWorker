@@ -1,0 +1,40 @@
+name: SDK Canary
+
+# The Claude Agent SDK (+ CLI) ships frequently. This job bumps them to LATEST
+# and runs typecheck + the unit suite WITHOUT committing — pure early-warning.
+# Green  → the latest SDK is safe to adopt (run scripts/update-deps.ts --sdk-only).
+# Red    → a new SDK release broke something; investigate before bumping prod.
+# Runs daily + on demand. Does not touch the committed lockfile.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'      # daily 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install pinned deps (baseline)
+        run: bun install --frozen-lockfile
+
+      - name: Bump Claude Agent SDK to latest (no commit)
+        run: bun update --latest @anthropic-ai/claude-agent-sdk
+
+      - name: Show resolved SDK version
+        run: bun pm ls | grep claude-agent-sdk || true
+
+      # Typecheck + tests run WITHOUT the private/ overlay (public-clone-green),
+      # exactly as CI does — so this also catches public-clone regressions on the
+      # new SDK.
+      - name: Typecheck against latest SDK
+        run: bun run typecheck
+
+      - name: Unit tests against latest SDK
+        run: bun run test

@@ -17,6 +17,22 @@ bun run pipeline -- watch [--interval <minutes>]
 
 Required env vars: `AZURE_DEVOPS_PAT`, `DATABASE_URL` (PostgreSQL connection string), plus one of: `CLAUDE_CODE_OAUTH_TOKEN` (recommended — Claude MAX subscription, run `claude setup-token` to generate) or `ANTHROPIC_API_KEY` (pay-per-token fallback; takes precedence over OAuth if both set). Bun auto-loads `.env` from the project root — no dotenv library needed.
 
+## Updating Dependencies (the Claude Agent SDK ships often)
+
+The SDK + CLI update almost daily. Two mechanisms keep this safe and routine:
+
+- **`SDK Canary`** CI workflow (`.github/workflows/sdk-canary.yml`) runs daily: bumps the SDK to
+  latest (no commit) and runs typecheck + the unit suite. A red canary = a new SDK release broke
+  something — investigate before adopting. Trigger manually via the Actions tab.
+- **`bun scripts/update-deps.ts`** adopts + verifies an update locally:
+  ```bash
+  bun scripts/update-deps.ts --sdk-only   # bump just the SDK, typecheck + test
+  bun scripts/update-deps.ts               # bump ALL deps to latest, typecheck + test
+  ```
+  On green: commit `package.json` + `bun.lock`, push, **rebuild the prod image**
+  (`pwsh private/deploy/docker-build.ps1` — bakes the new deps into `devopsworker:latest`), and
+  re-pin the overlay + internal-tooling `CORE_REF`/submodule to the new core tag so their CI follows.
+
 ## What This Is
 
 Multi-agent DevOps pipeline that takes Azure DevOps work items through a chain of 7 AI agents (analysis → planning → coding → PR → documentation) using the Claude Agent SDK. Human-in-the-loop checkpoints gate plan approval and PR publishing. Revision loops auto-iterate on planning and coding when reviewers request changes.
