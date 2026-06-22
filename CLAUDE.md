@@ -100,6 +100,16 @@ Each agent lives in `src/agents/<name>/` as a mini Claude Code project:
 - `CLAUDE.md` — Agent instructions (role, goals, approach, rules)
 - `.claude/skills/` — Optional agent-specific skills
 
+**Overlay overrides (private deployments):** the public `CLAUDE.md` / `.claude/`
+files are defaults. A private overlay at `private/agents/<name>/` may:
+- ship a full `CLAUDE.md` to **replace** the public prompt, **or** a
+  `CLAUDE.append.md` to **add** to it (mutually exclusive — replace wins);
+- ship `.claude/` (rules/skills) which is copy-merged over the base;
+- set typed knobs (`model`, `allowedTools`, `maxTurns`, `sharedPromptFragments`)
+  via `OverlayManifest.agents['<name>']`.
+Overrides are folded by `resolveAgentKnobs` at the `runAgent` chokepoint and
+apply in both local and container runs.
+
 Agents use the Claude Code `claude_code` system prompt preset with `settingSources: ['project']`, which loads the agent's `CLAUDE.md` automatically. Shared prompt fragments in `src/prompts/` are appended via the preset's `append` parameter. The `agent-workspace.ts` utility stages the agent's `CLAUDE.md` and `.claude/` into the agent's cwd via symlinks before each run and cleans up afterward.
 
 To iterate on agent behavior: edit the agent's `CLAUDE.md` — no TypeScript changes needed.
