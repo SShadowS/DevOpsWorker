@@ -12,6 +12,7 @@ export interface ResolvedAgentKnobs {
 /** Core (non-MCP) tool names known to the SDK. Used only to WARN on an
  *  overridden allowedTools list that names something unexpected — MCP tools
  *  (mcp__*) are dynamic and intentionally not validated. */
+// Last audited against the Claude Agent SDK tool set, 2026-06-22.
 const CORE_TOOLS = new Set([
   'Agent', 'Task', 'Bash', 'Read', 'Edit', 'MultiEdit', 'Write', 'Grep',
   'Glob', 'Skill', 'LSP', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite',
@@ -49,7 +50,8 @@ export function resolveAgentKnobs(
 
   const sharedPromptFragments = ov?.sharedPromptFragments ?? base.sharedPromptFragments;
   if (ov?.sharedPromptFragments) {
-    const missing = ov.sharedPromptFragments.filter((name) => {
+    const missing = sharedPromptFragments.filter((name) => {
+      // probe-only: readPromptFile throws if the fragment file is absent
       try { readPromptFile(`prompts/${name}`); return false; } catch { return true; }
     });
     if (missing.length > 0) {

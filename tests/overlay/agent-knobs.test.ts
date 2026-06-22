@@ -67,4 +67,30 @@ describe('resolveAgentKnobs', () => {
     const m: OverlayManifest = { agents: { 'pr-reviewer': { sharedPromptFragments: ['tdd.md'] } } };
     expect(() => resolveAgentKnobs(baseConfig(), m, MODELS)).not.toThrow();
   });
+
+  test('warns (does not throw) on an unknown core tool in an allowedTools override', () => {
+    const original = console.warn;
+    const calls: string[] = [];
+    console.warn = (msg: string) => { calls.push(msg); };
+    try {
+      const m: OverlayManifest = { agents: { 'pr-reviewer': { allowedTools: ['Read', 'NotARealTool'] } } };
+      expect(() => resolveAgentKnobs(baseConfig(), m, MODELS)).not.toThrow();
+      expect(calls.some(c => c.includes('NotARealTool'))).toBe(true);
+    } finally {
+      console.warn = original;
+    }
+  });
+
+  test('does not warn on an mcp__-prefixed tool in an allowedTools override', () => {
+    const original = console.warn;
+    const calls: string[] = [];
+    console.warn = (msg: string) => { calls.push(msg); };
+    try {
+      const m: OverlayManifest = { agents: { 'pr-reviewer': { allowedTools: ['Read', 'mcp__azureDevOps__get_work_item'] } } };
+      expect(() => resolveAgentKnobs(baseConfig(), m, MODELS)).not.toThrow();
+      expect(calls.length).toBe(0);
+    } finally {
+      console.warn = original;
+    }
+  });
 });
