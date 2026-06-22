@@ -28,6 +28,23 @@ export interface AdoDefaults {
 }
 
 /**
+ * Bounded, typed per-agent knobs an overlay may override. Prompt ASSETS
+ * (CLAUDE.md / .claude/) come from private/agents/<name>/, NOT this map.
+ * REPLACE semantics for arrays (allowedTools, sharedPromptFragments) — never
+ * merged, so the effective set is explicit and auditable.
+ */
+export interface AgentConfigOverride {
+  /** Model id (e.g. 'claude-opus-4-8'). Wins over the perAgent/default chain. */
+  model?: string;
+  /** REPLACE allowedTools wholesale. Omit to keep the public set. */
+  allowedTools?: string[];
+  /** Override max agent turns. Omit to keep the public value. */
+  maxTurns?: number;
+  /** REPLACE shared prompt fragments (filenames resolved from src/prompts/). */
+  sharedPromptFragments?: string[];
+}
+
+/**
  * The contract a private overlay implements. A consumer's `private/manifest.ts`
  * default-exports an object of this shape. The public core loads it when present
  * and falls back to `{}` (an empty overlay) otherwise — so the public pipeline
@@ -46,7 +63,11 @@ export interface OverlayManifest {
   /** Extra MCP servers merged into the core server map. Typed loosely to avoid
    *  coupling the contract to the SDK's config shape. */
   mcpServers?: Record<string, unknown>;
-  /** Per-agent model overrides, keyed by agent name. */
+  /** Per-agent typed knobs, keyed by AgentConfig.name. Prompt assets come from
+   *  private/agents/<name>/, NOT this map. */
+  agents?: Record<string, AgentConfigOverride>;
+  /** @deprecated DEAD field — consumed nowhere; NOT wired by agent overrides.
+   *  Use agents[name].model. Kept only so existing manifests type-check. */
   models?: Record<string, string>;
   /** Azure DevOps org/project/area defaults. */
   ado?: AdoDefaults;
