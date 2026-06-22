@@ -98,6 +98,9 @@ export interface DashboardPRReview {
   toolCalls: Record<string, number> | null;
   error: string | null;
   createdAt: string;
+  /** Full Azure DevOps PR web URL, resolved server-side from the repo registry.
+   *  null when the repo key isn't registered (registry not loaded / unknown key). */
+  webUrl: string | null;
   /** Set for queued/in-progress reviews that haven't completed yet */
   pendingStatus?: 'queued' | 'reviewing';
 }

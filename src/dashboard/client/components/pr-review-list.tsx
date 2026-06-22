@@ -2,17 +2,6 @@ import { prReviews } from '../store.ts';
 import { formatDuration, formatCost, formatRelativeTime } from '../format.ts';
 import type { DashboardPRReview } from '../../types.ts';
 
-// Maps a repo key (as stored on the review record) to its Azure DevOps
-// repository name (URL-encoded). Populate with your own repos.
-const REPO_NAMES: Record<string, string> = {
-  'example-repo': 'Example%20Repo%20-%20Extensions',
-};
-
-function buildPRUrl(repoKey: string, prId: number): string {
-  const repoName = REPO_NAMES[repoKey] ?? repoKey;
-  return `https://dev.azure.com/your-org/your-project/_git/${repoName}/pullrequest/${prId}`;
-}
-
 function RecommendationBadge({ rec, hasError, pendingStatus }: { rec: string | null; hasError: boolean; pendingStatus?: string }) {
   if (pendingStatus === 'queued') return <span class="pr-review__badge pr-review__badge--pending">queued</span>;
   if (pendingStatus === 'reviewing') return <span class="pr-review__badge pr-review__badge--pending">reviewing</span>;
@@ -54,16 +43,20 @@ export function PRReviewList() {
       {reviews.map((r) => (
         <div key={r.id} class={`pr-review-row ${r.error ? 'pr-review-row--error' : ''} ${r.pendingStatus ? 'pr-review-row--pending' : ''}`}>
           <div class="pr-review-row__main">
-            <a
-              class="pr-review-row__pr"
-              href={buildPRUrl(r.repoKey, r.prId)}
-              target="_blank"
-              rel="noopener"
-              onClick={(e) => e.stopPropagation()}
-              title={`Open PR #${r.prId} in Azure DevOps`}
-            >
-              PR #{r.prId}
-            </a>
+            {r.webUrl ? (
+              <a
+                class="pr-review-row__pr"
+                href={r.webUrl}
+                target="_blank"
+                rel="noopener"
+                onClick={(e) => e.stopPropagation()}
+                title={`Open PR #${r.prId} in Azure DevOps`}
+              >
+                PR #{r.prId}
+              </a>
+            ) : (
+              <span class="pr-review-row__pr" title={`PR #${r.prId} (repo "${r.repoKey}" not registered)`}>PR #{r.prId}</span>
+            )}
             <span class="pr-review-row__repo">{r.repoKey}</span>
             <span class="pr-review-row__branch" title={r.sourceBranch}>{r.sourceBranch}</span>
             <RecommendationBadge rec={r.recommendation} hasError={!!r.error} pendingStatus={r.pendingStatus} />

@@ -3,6 +3,15 @@ import type { DashboardSession } from '../../types.ts';
 
 const activeTab = signal('readiness');
 
+type AdoCfg = DashboardSession['config'];
+
+/** Base Azure DevOps URL for a session's org/project, or null if config is absent.
+ *  Org/project come from the persisted pipeline config — never hardcode them. */
+function adoBase(cfg: AdoCfg): string | null {
+  if (!cfg?.organization || !cfg?.project) return null;
+  return `https://dev.azure.com/${encodeURIComponent(cfg.organization)}/${encodeURIComponent(cfg.project)}`;
+}
+
 interface TabDef {
   key: string;
   label: string;
@@ -14,11 +23,11 @@ const TABS: TabDef[] = [
   { key: 'readiness', label: 'Readiness', hasData: (s) => !!s.readiness, render: (s) => <ReadinessView data={s.readiness} /> },
   { key: 'devPlan', label: 'Plan', hasData: (s) => !!s.devPlan, render: (s) => <DevPlanView data={s.devPlan} /> },
   { key: 'planReviews', label: 'Plan Reviews', hasData: (s) => (s.planReviews?.length ?? 0) > 0, render: (s) => <ReviewList reviews={s.planReviews} /> },
-  { key: 'changeset', label: 'Code', hasData: (s) => !!s.changeset, render: (s) => <ChangesetView data={s.changeset} /> },
+  { key: 'changeset', label: 'Code', hasData: (s) => !!s.changeset, render: (s) => <ChangesetView data={s.changeset} cfg={s.config} /> },
   { key: 'codeReviews', label: 'Code Reviews', hasData: (s) => (s.codeReviews?.length ?? 0) > 0, render: (s) => <ReviewList reviews={s.codeReviews} /> },
-  { key: 'testCases', label: 'Tests', hasData: (s) => !!s.testCases, render: (s) => <TestCasesView data={s.testCases} /> },
+  { key: 'testCases', label: 'Tests', hasData: (s) => !!s.testCases, render: (s) => <TestCasesView data={s.testCases} cfg={s.config} /> },
   { key: 'testCaseReviews', label: 'Test Reviews', hasData: (s) => (s.testCaseReviews?.length ?? 0) > 0, render: (s) => <ReviewList reviews={s.testCaseReviews} /> },
-  { key: 'draftPR', label: 'Draft PR', hasData: (s) => !!s.draftPR, render: (s) => <DraftPRView data={s.draftPR} /> },
+  { key: 'draftPR', label: 'Draft PR', hasData: (s) => !!s.draftPR, render: (s) => <DraftPRView data={s.draftPR} cfg={s.config} /> },
   { key: 'workItemUpdate', label: 'Docs', hasData: (s) => !!s.workItemUpdate, render: (s) => <JsonBlock data={s.workItemUpdate} /> },
   { key: 'docsWriterDrafts', label: 'Docs Drafts', hasData: (s) => !!s.docsWriterDrafts, render: (s) => <JsonBlock data={s.docsWriterDrafts} /> },
   { key: 'humanFeedback', label: 'Human Feedback', hasData: (s) => !!s.humanFeedback, render: (s) => <HumanFeedbackView data={s.humanFeedback} /> },
@@ -160,7 +169,8 @@ function DevPlanView({ data }: { data: any }) {
   );
 }
 
-function ChangesetView({ data }: { data: any }) {
+function ChangesetView({ data, cfg }: { data: any; cfg?: AdoCfg }) {
+  const base = adoBase(cfg);
   if (!data) return null;
   return (
     <div class="output-structured">
@@ -184,9 +194,9 @@ function ChangesetView({ data }: { data: any }) {
         {data.ciRunId && (
           <div class="context-field">
             <label>CI Pipeline</label>
-            <a href={`https://dev.azure.com/your-org/your-project/_build/results?buildId=${data.ciRunId}`} target="_blank" rel="noopener" style={{ color: 'var(--color-accent)', textDecoration: 'none', fontSize: '0.8rem' }}>
-              Run #{data.ciRunId}
-            </a>
+            {base
+              ? <a href={`${base}/_build/results?buildId=${data.ciRunId}`} target="_blank" rel="noopener" style={{ color: 'var(--color-accent)', textDecoration: 'none', fontSize: '0.8rem' }}>Run #{data.ciRunId}</a>
+              : <code style={{ fontSize: '0.8rem' }}>Run #{data.ciRunId}</code>}
           </div>
         )}
       </div>
@@ -214,8 +224,9 @@ function ChangesetView({ data }: { data: any }) {
   );
 }
 
-function TestCasesView({ data }: { data: any }) {
+function TestCasesView({ data, cfg }: { data: any; cfg?: AdoCfg }) {
   if (!data) return null;
+  const base = adoBase(cfg);
   const cases = data.testCases ?? [];
   return (
     <div class="output-structured">
@@ -234,7 +245,9 @@ function TestCasesView({ data }: { data: any }) {
                 <tr key={i}>
                   <td>
                     {tc.id
-                      ? <a href={`https://dev.azure.com/your-org/your-project/_workitems/edit/${tc.id}`} target="_blank" rel="noopener" style={{ color: 'var(--color-accent)', textDecoration: 'none' }}>#{tc.id}</a>
+                      ? (base
+                          ? <a href={`${base}/_workitems/edit/${tc.id}`} target="_blank" rel="noopener" style={{ color: 'var(--color-accent)', textDecoration: 'none' }}>#{tc.id}</a>
+                          : <span>#{tc.id}</span>)
                       : '—'}
                   </td>
                   <td>{tc.title}</td>
@@ -250,8 +263,9 @@ function TestCasesView({ data }: { data: any }) {
   );
 }
 
-function DraftPRView({ data }: { data: any }) {
+function DraftPRView({ data, cfg }: { data: any; cfg?: AdoCfg }) {
   if (!data) return null;
+  const base = adoBase(cfg);
   return (
     <div class="output-structured">
       <div class="output-header">
@@ -266,9 +280,9 @@ function DraftPRView({ data }: { data: any }) {
         {data.linkedWorkItemId && (
           <div class="context-field">
             <label>Work Item</label>
-            <a href={`https://dev.azure.com/your-org/your-project/_workitems/edit/${data.linkedWorkItemId}`} target="_blank" rel="noopener" style={{ color: 'var(--color-accent)', textDecoration: 'none' }}>
-              #{data.linkedWorkItemId}
-            </a>
+            {base
+              ? <a href={`${base}/_workitems/edit/${data.linkedWorkItemId}`} target="_blank" rel="noopener" style={{ color: 'var(--color-accent)', textDecoration: 'none' }}>#{data.linkedWorkItemId}</a>
+              : <span>#{data.linkedWorkItemId}</span>}
           </div>
         )}
       </div>

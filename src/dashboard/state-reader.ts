@@ -4,6 +4,26 @@ import type { IActionStore } from '../pipeline/action-store.interface.ts';
 import type { PipelineState, PipelineStatus, PipelineConfig, ActiveAgentMarker } from '../types/pipeline.types.ts';
 import type { DashboardSession, DashboardPRReview, StageProgress } from './types.ts';
 import { getAvailableActions } from './actions.ts';
+import { getRepoConfig } from '../config/repos.ts';
+
+/**
+ * Build the Azure DevOps PR web URL for a repo key, resolved from the live repo
+ * registry (overlay-populated at startup). The public core ships no registrations,
+ * so this returns null when the key is unknown — the client then renders a plain
+ * label instead of a broken placeholder link.
+ */
+function buildPrWebUrl(repoKey: string, prId: number): string | null {
+  let ado: ReturnType<typeof getRepoConfig>['azureDevOps'];
+  try {
+    ado = getRepoConfig(repoKey).azureDevOps;
+  } catch {
+    return null;
+  }
+  const base = ado.orgUrl ?? (ado.organization ? `https://dev.azure.com/${ado.organization}` : null);
+  if (!base) return null;
+  const seg = (s: string) => encodeURIComponent(s);
+  return `${base.replace(/\/$/, '')}/${seg(ado.project)}/_git/${seg(ado.repositoryName)}/pullrequest/${prId}`;
+}
 
 // ---------------------------------------------------------------------------
 // Stage mapping — mirrors pipeline-definition.ts
@@ -297,6 +317,7 @@ export async function readPRReviews(store: IPRReviewStore, actionStore?: IAction
     toolCalls: r.toolCalls,
     error: r.error,
     createdAt: r.createdAt,
+    webUrl: buildPrWebUrl(r.repoKey, r.prId),
     pendingStatus: undefined as 'queued' | 'reviewing' | undefined,
   }));
 
@@ -322,6 +343,7 @@ export async function readPRReviews(store: IPRReviewStore, actionStore?: IAction
         toolCalls: null,
         error: null,
         createdAt: p.createdAt,
+        webUrl: buildPrWebUrl(p.repoKey, p.prId),
         pendingStatus: p.status,
       });
     }
