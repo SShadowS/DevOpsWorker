@@ -52,7 +52,8 @@ export function agentStage<T extends z.ZodType>(
             costUsd: typeof d.costUsd === 'number' ? d.costUsd : 0,
             durationMs: typeof d.durationMs === 'number' ? d.durationMs : 0,
             turns: typeof d.turns === 'number' ? d.turns : 0,
-            model: resolveAgentModel(config.agent.model, config.agent.name, context.config.models),
+            model: (typeof d.model === 'string' ? d.model : undefined)
+              ?? resolveAgentModel(config.agent.model, config.agent.name, context.config.models),
             startedAt,
             timestamp: new Date().toISOString(),
             toolCalls: {},
@@ -68,7 +69,7 @@ export function agentStage<T extends z.ZodType>(
         costUsd: result.costUsd,
         durationMs: result.durationMs,
         turns: result.turns,
-        model: resolveAgentModel(config.agent.model, config.agent.name, context.config.models),
+        model: result.model,
         startedAt,
         timestamp: new Date().toISOString(),
         toolCalls: result.toolCalls,
