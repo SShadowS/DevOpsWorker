@@ -38,7 +38,7 @@ const fullManifest: OverlayManifest = {
   },
   mcpServers: { example: {} },
   agents: { coder: { model: 'claude-sonnet-4-6', maxTurns: 10 } },
-  models: { coder: 'claude-sonnet-4-6' },
+  models: { coder: 'claude-sonnet-4-6' }, // @deprecated — kept to verify backwards-compat type-check
   ado: {
     organization: 'your-org',
     orgUrl: 'https://dev.azure.com/your-org',
