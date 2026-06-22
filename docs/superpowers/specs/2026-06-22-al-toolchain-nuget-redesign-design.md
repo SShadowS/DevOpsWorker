@@ -42,7 +42,13 @@ instead of scraping the VSIX. DevOpsWorker stops managing alc.
 - `al compile /project:<p> /packagecachepath:<p>` is a thin alc wrapper (**same args** as alc), runs **headless on Linux in 0–1 s**, returns real `AL1022`/`AL1018` errors — **no hang**.
 - **Analyzers bundled** (`Microsoft.Dynamics.Nav.CodeCop.dll`, `…AppSourceCop.dll`).
 - nuget.org carries `16.x`/`17.x`/`18.x` + `18.x-beta` → version is pinnable; `--prerelease` is the preview channel.
-- Platform-specific packages exist: `…Tools.Linux` / `.Win` / `.Osx` (self-containment **not yet evaluated** — see Open Questions).
+- Platform-specific package `…Tools.Linux` is **self-contained** (RESOLVED): its
+  nupkg ships alc at `lib/net10.0/alc` (the same 78 KB ELF) bundling its own
+  runtime (`libcoreclr.so`, `libhostfxr.so`, 414 files). Verified: alc runs and
+  compiles the 552-file Cloud app **with no `dotnet` installed**. So **no .NET
+  runtime is needed in the image** — just download + unzip the nupkg.
+  - Caveat: `…Tools.Linux` 18.x is currently **`-beta` only** (stable tops at
+    17.0.34); BC 28/29 ⇒ use the **preview channel** (`--prerelease`).
 
 Why this is the right architecture, not symptom-patching: it deletes the entire
 fragile subsystem — marketplace scrape, `.version` cache, self-exec shim, missing
@@ -62,10 +68,13 @@ validate → invoke**.
      — pick the matching `Microsoft.Dynamics.BusinessCentral.Development.Tools`
      major;
   4. default: newest stable.
-- **Ensure installed:** install the resolved version into a CLI-managed cache
-  (`dotnet tool install --tool-path <cache> --version <v> [--prerelease]`, or
-  restore the platform nupkg). Idempotent; keyed by version so multiple BC
-  versions can coexist.
+- **Ensure installed:** download the **self-contained `…Tools.Linux` nupkg** for
+  the resolved version from nuget.org (`v3-flatcontainer/<id>/<ver>/<id>.<ver>.nupkg`,
+  public, no auth), unzip to a CLI-managed cache, `chmod +x lib/net10.0/alc`. No
+  `dotnet tool install`, **no .NET runtime** — the package bundles its own.
+  Idempotent; keyed by version so multiple BC versions coexist. (A `dotnet tool`
+  install is the cross-platform alternative but needs the runtime; the
+  self-contained platform nupkg avoids it on Linux.)
 - **Discover:** deterministic path under the CLI cache — no `~/.vscode` /
   `AL_EXTENSION_PATH` guessing.
 - **Validate:** reuse `validateAlcBinary` (already added) — a non-executable /
@@ -80,8 +89,8 @@ validate → invoke**.
 ### 2. DevOpsWorker — stop managing alc
 - Drop `fetch-al-extension.sh`'s alc responsibility and the entrypoint `al`→`alc`
   shim. The container just calls `continia compile`.
-- Provide the .NET runtime the tool needs (see Open Questions — may be avoidable
-  with the self-contained `…Tools.Linux` package).
+- **No .NET runtime needed** — the `…Tools.Linux` nupkg is self-contained
+  (verified). The CLI does the download+unzip itself.
 - **Keep** the VSIX fetch **only** for the AL **LSP** server
   (`Microsoft.Dynamics.Nav.EditorServices.Host`), which the LSP plugin still
   needs — unless that is also sourced from NuGet. Trim the fetch to just the LSP
@@ -94,10 +103,11 @@ validate → invoke**.
   .NET is present), then slim the container (remove shim + VSIX-alc).
 
 ## Open Questions (resolve before/within implementation)
-1. **`…Tools.Linux` self-containment** — if it bundles its runtime (like the VSIX
-   alc does), we can **skip adding the .NET runtime** to the image entirely. One
-   quick spike settles whether the image grows by ~150 MB or not. *(Highest-value
-   open item.)*
+1. **`…Tools.Linux` self-containment** — RESOLVED: self-contained, **no .NET
+   runtime needed** (verified — alc compiled with no dotnet present). Remaining:
+   confirm the **analyzers** (CodeCop/AppSourceCop) ship inside `…Tools.Linux`'s
+   `lib/net10.0/` (very likely — 414 files — but verify), else source them
+   separately.
 2. **BC-version → alc-version mapping** — confirm the policy (match major to the
    app's `application` version vs. always-newest). The app targets BC 28/29;
    nuget has matching 18.x. Tie into the existing 3-version-axes knowledge
