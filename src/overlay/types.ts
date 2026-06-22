@@ -34,7 +34,7 @@ export interface AdoDefaults {
  * merged, so the effective set is explicit and auditable.
  */
 export interface AgentConfigOverride {
-  /** Model id (e.g. 'claude-opus-4-8'). Wins over the perAgent/default chain. */
+  /** Model id (e.g. 'claude-sonnet-4-6'). Wins over the perAgent/default chain. */
   model?: string;
   /** REPLACE allowedTools wholesale. Omit to keep the public set. */
   allowedTools?: string[];
@@ -52,7 +52,8 @@ export interface AgentConfigOverride {
  *
  * Merge semantics per field are fixed (see the design doc):
  *   - `repos`, `companions`, `mcpServers` → ADD (merged into the core map)
- *   - `models`, `ado`                     → OVERRIDE (named)
+ *   - `agents`, `ado`                     → OVERRIDE (named per-agent knobs)
+ *   - `models`                            → DEPRECATED (use `agents[name].model`)
  *   - `pipeline`                          → declarative stage edits
  */
 export interface OverlayManifest {
