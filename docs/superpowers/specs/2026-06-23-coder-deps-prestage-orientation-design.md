@@ -48,7 +48,7 @@ never received that orientation — the two diverged.
 
 ## Design
 
-### Component 1 — Pre-stage symbols (`private/pipeline/env-provision.ts`)
+### Component 1 — COMPLETE, FATAL pre-stage (`private/pipeline/env-provision.ts`)
 
 In the existing loop that runs `deps.installDeps(...)` over the Cloud + Test
 `appPaths` (the block guarded by `!credentials`, which already explains it makes
@@ -61,12 +61,26 @@ Result: when the coder runs its **local** `continia compile`/`deploy`, the
 transitive symbol closure is already in `.alpackages` — no "missing symbols", no
 self-run `deps download`, no recompile of companions.
 
-- **Error handling:** `downloadDeps` failures should be **non-fatal warnings**
-  (logged), not aborts — a missing pre-stage degrades to the coder's existing
-  reactive `deps download` recovery, it does not block env-provision. (Match the
-  surrounding stage's failure posture; do not let a download hiccup orphan the env.)
+- **FATAL on failure (not a silent warning).** A partial/failed pre-stage hands
+  the coder a broken env → it hits missing symbols mid-run and re-enters the
+  ~145-call death spiral. So a `downloadDeps` failure **throws** and fails the
+  env-provision stage (which is retryable via the `resume` path), matching the
+  project's fail-loud posture (cf. the alc `validateAlcBinary` guard). This is a
+  feature: it **surfaces deps/version bugs at provision time** — loud, cheap,
+  before the agent ever runs — instead of letting the agent discover them at
+  $/token. If the toolchain genuinely can't resolve a dependency, that is a
+  toolchain bug to fix, not the agent's job.
+- **Complete closure — Cloud AND Test.** The pre-stage must cover **both** apps,
+  including the Test app's test-framework + Microsoft baseline symbols (the
+  forensic run died fighting exactly those). Because the pre-stage is fatal, if
+  `deps download` for the Test app cannot pull a test-framework symbol (the
+  too-strict deps version-validation in §"Version-validation", below), env-provision
+  fails loud → forcing that CLI bug to be fixed rather than deferred.
 - **Idempotent on resume:** stays inside the same `!credentials` guard as
   `installDeps`, so a resumed (already-provisioned) env skips it.
+- **Staleness caveat:** the pre-stage is correct at coder start. If the coder
+  later edits the **target app's** own dependency requirements, it must re-stage —
+  see the recovery path in Component 3 (a working, scoped `deps download`).
 
 ### Component 2 — Overlay coder orientation (`private/agents/coder/CLAUDE.append.md`)
 
@@ -92,43 +106,103 @@ duplicate). Add these Continia-specific sections (sourced from
    shipped AL source belonging to the surrounding extension. Do not flag changes
    to `.dependencies/` as suspicious or architecturally wrong.
 
-3. **Build-scoping rule.** In the deploy/compile workflow, pin
-   **`--workspace-root <target>/Cloud`** (and the Test app dir) so sibling
-   companion source is not resolved as `workspace-local`. Clarify that this scopes
-   only the *build*; reading companion source for understanding is unaffected.
+3. **Build-scoping rule** (prose is *support*, not the mechanism — see Component
+   2b). Read companion source freely; build only your target app; the build is
+   scoped to it via `--workspace-root`.
 
 The append already owns the authoritative env workflow (deploy with
 `--allow-downgrade`, Definition-of-Done gates) — these sections slot in alongside
 it; the existing "you don't need deps download" claim becomes true once Component
 1 ships.
 
+### Component 2b — ENFORCE `--workspace-root` (not prose)
+
+The forensic run proved the agent **ignores prose guidance under pressure** (it
+had a rich workflow and still brute-forced `--workspace-root` permutations + hand-
+copied files). So `--workspace-root` must reach the build as the **command the
+agent is given / runs**, not a request:
+
+- **Inject it into the command** the agent is handed. The overlay append's
+  deploy/compile snippets must show `continia deploy <env> <target>/Cloud
+  --workspace-root <target>/Cloud --json` (and Test) — the literal, correct command.
+- **Hard guard (preferred): a PreToolUse hook** (overlay-side, like the existing
+  ci-waiter hook) that intercepts `continia compile`/`deploy` Bash calls and
+  **forces** `--workspace-root` to the target app dir if absent. This removes the
+  choice from the LLM entirely. Decide hook-vs-injected-command in the plan;
+  hook is the stronger guarantee, injected-command is the cheaper floor — do at
+  least the injected command, add the hook if low-cost.
+- *Mechanism note:* `--workspace-root` scopes the **continia CLI's `discoverApps`**
+  (which walks the workspace root) — NOT `alc` (which only reads
+  `--packagecachepath`/`.alpackages`). Pinning it stops the CLI from discovering
+  sibling companion source as a buildable app. **Verify this empirically in the
+  plan** (a scoped deploy with siblings present must NOT rebuild them).
+
+### Component 3 — Deterministic deploy recipe + baseline alignment
+
+The installed-baseline version conflict + AppSourceCop baseline (AS0003) were the
+**majority** of the wasted turns (>170). They are NOT deferrable — without them the
+run survives the sibling fight then dies on publish. Two parts:
+
+- **`continia-deploy` skill (CLI repo, synced to overlay):** encode the
+  deterministic recipe the agent currently rediscovers by trial-and-error — the
+  installed-baseline → `--allow-downgrade` (or version-bump) decision, in
+  dependency order, and the AppSourceCop-baseline handling. A single known recipe
+  instead of N permutations.
+- **env-provision baseline alignment (`env-provision.ts`):** since env-provision
+  already deploys the product-app baseline from `master`, also ensure the
+  **AppSourceCop baseline cache** is present/consistent so the agent never hits
+  AS0003. (Confirm the exact mechanism in the plan.)
+
+### Version-validation (CLI repo) — now in scope
+
+The deps **version-validation** that rejected downloadable test-framework symbols
+("rejects 28.x when 25.x requested") becomes load-bearing: the fatal Component-1
+pre-stage of the **Test** app will fail loud if it can't download those symbols.
+Fix the validation so the legitimate symbol versions download (ties to
+`project_deps_wrong_major_28v29`). Also provides the coder's **staleness recovery**
+path (a working, `--workspace-root`-scoped `deps download`) for when it edits the
+target's deps mid-run.
+
 ### What stays in the public core
 
 Nothing changes in `src/agents/coder/`. The core keeps its generic, CLI-agnostic
-coder prompt + the deploy `buildPrompt` (which is a generic env-CLI fallback; the
-overlay append is the authoritative continia workflow). `--workspace-root`,
-`deps download`, named companions are all continia-specific → overlay only.
+coder prompt + the deploy `buildPrompt` (a generic env-CLI fallback). All
+`continia`-specifics — `--workspace-root`, `deps download`, the PreToolUse deploy
+guard, named companions, the deploy recipe — live in the overlay + the Continia
+CLI repo. Public DevOpsWorker core untouched.
 
 ## Testing
 
-- **`private/tests/pipeline/env-provision*.test.ts`:** extend to assert
-  `downloadDeps` is called once per app path after `installDeps`, and that a
-  `downloadDeps` rejection is swallowed (warning, env-provision still succeeds).
-- **Append render:** a check that the overlay `CLAUDE.append.md` contains the new
-  section anchors (Repository Structure, `.dependencies`, `--workspace-root`), and
-  that `bun run typecheck` + the overlay suite stay green.
-- **Manual smoke (optional):** a multi-companion WI run that reaches local compile
-  in far fewer turns, with no companion recompile in the transcript.
+- **`private/tests/pipeline/env-provision*.test.ts`:** assert `downloadDeps` is
+  called once per app path (Cloud + Test) after `installDeps`, and that a
+  `downloadDeps` rejection **fails the stage** (throws, surfaced as a stage error —
+  NOT swallowed).
+- **PreToolUse deploy guard (if built):** unit-test that a `continia compile`/
+  `deploy` command without `--workspace-root` gets it injected (to the target app
+  dir), and one that already has it is left unchanged.
+- **Version-validation (CLI repo):** test that the previously-rejected
+  test-framework symbol version now resolves/downloads.
+- **Append render:** the overlay `CLAUDE.append.md` contains the new section
+  anchors (Repository Structure, `.dependencies`, `--workspace-root`), and the
+  injected deploy command shows `--workspace-root`. `bun run typecheck` + overlay
+  suite green.
+- **Empirical scoping check (plan):** a scoped `continia deploy --workspace-root
+  <target>/Cloud` with sibling companion source present must NOT rebuild siblings.
+- **Manual smoke:** a multi-companion WI run reaches local compile → publish →
+  test in far fewer turns, with no companion recompile and no AS0003 fight.
 
 ## Non-goals (deferred)
 
-- **CLI dependency-resolver fix** — making `continia deps`/`deploy` not treat
-  sibling companion source as `workspace-local`, and the deps **version-validation**
-  that rejected downloadable test-framework symbols. The pre-stage + `--workspace-root`
-  sidestep these; they remain a separate tracked task (ties to
-  `project_deps_wrong_major_28v29`).
+- **CLI dependency-resolver behavior change** — making `continia deps`/`deploy`
+  intrinsically ignore sibling companion source even WITHOUT `--workspace-root`.
+  `--workspace-root` scoping handles our case; the deeper resolver change is a
+  separate task. (Verify `--workspace-root` is sufficient in the plan first.)
 - **Single-source sync** of `DO.Support/CLAUDE.md` ↔ overlay (chosen: copy now).
-- **`maxTurns` bump** — a symptom-level safety net; out of scope for this fix.
+- **`maxTurns` bump** — a symptom-level safety net; only if needed after this fix.
+
+(Previously deferred but now IN scope per the Gemini review: the fatal pre-stage,
+the installed-baseline/AppSourceCop deploy recipe, and the deps version-validation
+fix — see Components 1, 3, and "Version-validation".)
 
 ## Open question (resolve in plan)
 
@@ -138,6 +212,37 @@ framed **generically** ("your target is named in your prompt; the siblings are
 dependency source") rather than hardcoding DO-only paths — the extension-map prose
 can stay (it's useful Continia context) but the target/dependency distinction is
 driven by the per-WI prompt.
+
+## Scope / decomposition note
+
+Post-review this spans three surfaces, in two repos — the implementation plan
+should sequence them so each is independently verifiable:
+1. **Overlay** (`private/`): fatal `downloadDeps` pre-stage in `env-provision.ts`
+   (+ AppSourceCop baseline alignment); the coder `CLAUDE.append.md` orientation;
+   the PreToolUse `--workspace-root` deploy guard (overlay coder hook).
+2. **Continia CLI** (`U:\Git\CLI`): the `continia-deploy` skill recipe (synced to
+   overlay); the deps **version-validation** fix.
+3. **Verification gate**: the empirical `--workspace-root` scoping check decides
+   whether the deeper resolver change (a deferred non-goal) is needed.
+
+If this is too large for one plan, split: Plan A (overlay pre-stage + orientation
++ guard) is the floor and independently testable; Plan B (CLI version-validation +
+deploy recipe) closes the publish-side fights. Plan A alone gets the run *to*
+publish; Plan B gets it *through*.
+
+## Review
+
+Reviewed by Gemini 3.1 Pro (via OpenRouter), 2026-06-23 — **blocked v1**, valid.
+Adjudication folded in:
+- **Accepted:** make `downloadDeps` FATAL (was a silent warning — that recreates
+  the grind); enforce `--workspace-root` via the injected command + a PreToolUse
+  guard, not prose (the agent ignores prose under pressure); do NOT defer the
+  installed-baseline/AppSourceCop deploy recipe or the deps version-validation
+  (they were the majority of wasted turns — deferring = death on publish); ensure
+  a working staleness-recovery `deps download`.
+- **Nuance (Gemini overstated):** the sibling-rebuild is the continia CLI's
+  `discoverApps`, not `alc` (which only reads `.alpackages`); `--workspace-root`
+  scopes the CLI — to be **verified empirically** in the plan, not assumed.
 
 ## Related
 - `2026-06-23-coder-deps-turn-budget-analysis.md` (the forensic root-cause)
