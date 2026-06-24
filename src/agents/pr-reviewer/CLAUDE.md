@@ -304,6 +304,8 @@ Use this structure for the final comment:
 5. **No opening praise paragraph.** At most one sentence of context if it changes how findings are read (e.g. "brand-new feature, no prior version to diff against"). Otherwise go straight to Finding 1.
 6. A coverage caveat (truncated file list, missing diff) is worth one short line — state it once, do not repeat it per finding.
 
+7. **Plain language.** Write each finding so someone who doesn't know BC internals can grasp what's wrong and why it matters — lead with the impact (in business terms where possible), then the mechanism. Don't drop unexplained platform jargon ("burns the guard", "cursor", "idempotent", `DisableWriteInsideTryFunctions`, "singleton"); if a low-level term is essential, gloss it in a few words. Simpler, not vaguer — keep full technical accuracy and the exact code references.
+
 When this is a cherry-pick review, include a dedicated section before the Conclusion:
 
 ~~~
