@@ -5,11 +5,11 @@
     "": {
       "name": "devopsworker",
       "dependencies": {
-        "@anthropic-ai/claude-agent-sdk": "^0.3.185",
+        "@anthropic-ai/claude-agent-sdk": "0.3.185",
         "@preact/signals": "^2.9.2",
         "@sshadows/tree-sitter-al": "^3.0.1",
         "postgres": "^3.4.9",
-        "preact": "^10.29.2",
+        "preact": "^10.29.3",
         "web-tree-sitter": "^0.26.9",
         "zod": "^4.4.3",
       },
@@ -199,7 +199,7 @@
 
     "postgres": ["postgres@3.4.9", "", {}, "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="],
 
-    "preact": ["preact@10.29.2", "", {}, "sha512-7tNmwg/7mzzAoB/8kSg6Hl37JraAZw3Z3A0JSY7VXlZwo82Xn0G7wKbNNs2qoF4ZEEsQGTwDAroNdqKs1ofJxQ=="],
+    "preact": ["preact@10.29.3", "", {}, "sha512-D9NL1GAnJZhc3RndVs4gDdxEeU9TcHgywMrhhOsnpdlvFjdbx0gAsLUnH6JEhlJH5giL7Tx5biWPUSEXE/HPzw=="],
 
     "proxy-addr": ["proxy-addr@2.0.7", "", { "dependencies": { "forwarded": "0.2.0", "ipaddr.js": "1.9.1" } }, "sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg=="],
 
