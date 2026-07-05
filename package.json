@@ -24,7 +24,7 @@
     "@preact/signals": "^2.9.2",
     "@sshadows/tree-sitter-al": "^3.0.1",
     "postgres": "^3.4.9",
-    "preact": "^10.29.2",
+    "preact": "^10.29.4",
     "web-tree-sitter": "^0.26.9",
     "zod": "^4.4.3"
   },
