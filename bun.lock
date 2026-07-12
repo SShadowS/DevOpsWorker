@@ -5,12 +5,12 @@
     "": {
       "name": "devopsworker",
       "dependencies": {
-        "@anthropic-ai/claude-agent-sdk": "^0.3.185",
+        "@anthropic-ai/claude-agent-sdk": "0.3.185",
         "@preact/signals": "^2.9.2",
         "@sshadows/tree-sitter-al": "^3.0.1",
         "postgres": "^3.4.9",
         "preact": "^10.29.2",
-        "web-tree-sitter": "^0.26.9",
+        "web-tree-sitter": "^0.26.11",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -251,7 +251,7 @@
 
     "vary": ["vary@1.1.2", "", {}, "sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg=="],
 
-    "web-tree-sitter": ["web-tree-sitter@0.26.9", "", {}, "sha512-YJwSHANl6XFgeEjB8nitgj0qZYt5gkIesJ4w2srS2wcLB4GUa4xcOkM0YaMsU6WNR53YVIkDSY7Ej4pf3IXtCA=="],
+    "web-tree-sitter": ["web-tree-sitter@0.26.11", "", {}, "sha512-Q5Dm3YTIXSXuH6FxX6RuzX2Qwpc4DPGiYMU87Wg5Z8OIStiQFiUex4zMDc0vBTw78EphaYJacncJghCHzbZptg=="],
 
     "which": ["which@2.0.2", "", { "dependencies": { "isexe": "^2.0.0" }, "bin": { "node-which": "./bin/node-which" } }, "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA=="],
 
