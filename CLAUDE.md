@@ -37,6 +37,26 @@ The SDK + CLI update almost daily. Two mechanisms keep this safe and routine:
 
 Multi-agent DevOps pipeline that takes Azure DevOps work items through a chain of 7 AI agents (analysis → planning → coding → PR → documentation) using the Claude Agent SDK. Human-in-the-loop checkpoints gate plan approval and PR publishing. Revision loops auto-iterate on planning and coding when reviewers request changes.
 
+## Repository Layout — Know Which Repo You Are In
+
+**This repo is the public core. Anything site-specific belongs elsewhere.** A deployment
+composes the core with a private overlay:
+
+| What | Where | Commit here? |
+|---|---|---|
+| Core pipeline: `src/`, `Dockerfile`, core tests | this repo (public) | yes — generic code only |
+| Private overlay: site agents, deploy scripts, repo registry, internal docs | `private/` — **a separate git repo**, gitignored here | no — commit inside `private/` |
+
+The core gitignores `./private` and default-probes it at runtime, so a workspace is just
+this repo with the overlay cloned into `private/`. Before you commit, check which repo the
+file you touched lives in — `git -C private status` is a different repo from `git status`.
+
+**Never put in this repo:** customer/tenant names, internal tool invocations, internal repo
+URLs, environment IDs, or design docs. See "Where Docs Go" below.
+
+If `private/` exists, read `private/CLAUDE.md` — it describes that deployment's repos and
+conventions.
+
 ## Architecture
 
 ### Stage Abstraction
