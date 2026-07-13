@@ -54,8 +54,8 @@ file you touched lives in — `git -C private status` is a different repo from `
 **Never put in this repo:** customer/tenant names, internal tool invocations, internal repo
 URLs, environment IDs, or design docs. See "Where Docs Go" below.
 
-If `private/` exists, read `private/CLAUDE.md` — it describes that deployment's repos and
-conventions.
+A deployment keeps its own instructions in `CLAUDE.local.md` at the workspace root
+(gitignored — it names internal repos, tools, and environments). If that file exists, read it.
 
 ## Architecture
 

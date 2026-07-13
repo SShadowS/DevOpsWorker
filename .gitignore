@@ -54,3 +54,7 @@ scripts/ab-results/
 # private/internal-docs/. They reference site-specific internals and must never be
 # committed to this public repo — ignored here so they cannot be added by accident.
 /docs/superpowers/
+
+# deployment-local Claude Code guidance (site-specific: internal repos, tools,
+# environments). Loads automatically at the workspace root. Never commit it here.
+/CLAUDE.local.md
