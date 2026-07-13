@@ -19,6 +19,7 @@ export function createDocumenterConfig(config: PipelineConfig): AgentConfig<type
     agentSourceDir: AGENT_DIR,
     sharedPromptFragments: [
       'project-context.md',
+      'ado-reference-syntax.md',
       'work-item-fields.md',
       'dependencies-folder.md',
     ],

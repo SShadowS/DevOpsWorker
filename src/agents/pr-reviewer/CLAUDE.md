@@ -96,7 +96,7 @@ For each changed file in the cherry-pick, fetch the current version from the **t
 
 ~~~
 ## Cherry-Pick Context
-This PR is a cherry-pick of PR #<originalId> (<original title>).
+This PR is a cherry-pick of PR !<originalId> (<original title>).
 Original target: <original target branch> | This target: <this target branch>
 Files in original but not in cherry-pick: [list or "none"]
 Files in cherry-pick but not in original: [list or "none"]
@@ -313,7 +313,7 @@ When this is a cherry-pick review, include a dedicated section before the Conclu
 
 | Check | Result |
 |-------|--------|
-| Original PR | #<id> — <title> (or "Could not resolve") |
+| Original PR | !<id> — <title> (or "Could not resolve") |
 | File coverage | <N>/<M> files from original included |
 | Target branch symbols | <summary of symbol verification results> |
 | Divergence | <summary of how target branch has changed in affected files> |

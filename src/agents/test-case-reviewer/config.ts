@@ -16,6 +16,7 @@ export function createTestCaseReviewerConfig(config: PipelineConfig): AgentConfi
     agentSourceDir: AGENT_DIR,
     sharedPromptFragments: [
       'project-context.md',
+      'ado-reference-syntax.md',
       'lsp-reinforcement.md',
       'dependencies-folder.md',
       'sdd.md',

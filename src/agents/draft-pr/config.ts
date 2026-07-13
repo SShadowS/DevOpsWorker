@@ -20,6 +20,7 @@ export function createDraftPRConfig(config: PipelineConfig): AgentConfig<typeof 
     agentSourceDir: AGENT_DIR,
     sharedPromptFragments: [
       'project-context.md',
+      'ado-reference-syntax.md',
       'branch-naming.md',
       'dependencies-folder.md',
     ],

@@ -20,6 +20,7 @@ export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeo
     agentSourceDir: AGENT_DIR,
     sharedPromptFragments: [
       'project-context.md',
+      'ado-reference-syntax.md',
       'lsp-reinforcement.md',
       'dependencies-folder.md',
       'sdd.md',

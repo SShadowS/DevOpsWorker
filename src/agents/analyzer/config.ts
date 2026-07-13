@@ -21,6 +21,7 @@ export function createAnalyzerConfig(config: PipelineConfig): AgentConfig<typeof
     agentSourceDir: AGENT_DIR,
     sharedPromptFragments: [
       'project-context.md',
+      'ado-reference-syntax.md',
       'repo-structure.md',
       'code-search.md',
       'al-investigation.md',
