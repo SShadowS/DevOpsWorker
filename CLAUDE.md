@@ -143,9 +143,19 @@ Tests live in `tests/` mirroring `src/` structure. Uses `bun:test` (`import { de
 - Mock fetch pattern: `globalThis.fetch = mock(() => Promise.resolve(new Response(...))) as unknown as typeof fetch` (double-cast needed for Bun's fetch type).
 - Agent `buildPrompt` uses `state.field!` (non-null assertion) because `canRun()` guards ensure the field exists before `execute()` is called.
 
+## Where Docs Go
+
+This repo is public. Internal design docs — specs, plans, status, anything naming a
+specific customer, environment, or internal tool — belong in the private overlay at
+`private/internal-docs/`, never in `docs/` and never in the repo root. `docs/superpowers/`
+is gitignored to enforce this.
+
+Public docs that ship here: `README.md`, `docs/extending.md`, and this file.
+
 ## Project Status
 
-Update `ProjectStatus.md` after structural changes (new files, resolved TODOs, new capabilities).
+Update `private/internal-docs/ProjectStatus.md` after structural changes (new files,
+resolved TODOs, new capabilities). It is an overlay file — it does not exist in this repo.
 
 ## Coder Agent Working Directory
 

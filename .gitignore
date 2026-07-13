@@ -49,3 +49,8 @@ scripts/ab-results/
 # private overlay — proprietary/site-specific content lives in a separate overlay
 # repo cloned to ./private (see README "Private Overlay"). Never committed here.
 /private/
+
+# internal design docs (specs, plans, status) live in the private overlay at
+# private/internal-docs/. They reference site-specific internals and must never be
+# committed to this public repo — ignored here so they cannot be added by accident.
+/docs/superpowers/
