@@ -20,17 +20,17 @@
     "dashboard:dev": "bun --watch src/dashboard/build.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.185",
-    "@preact/signals": "^2.9.2",
+    "@anthropic-ai/claude-agent-sdk": "0.3.207",
+    "@preact/signals": "^2.9.3",
     "@sshadows/tree-sitter-al": "^3.0.1",
     "postgres": "^3.4.9",
-    "preact": "^10.29.2",
-    "web-tree-sitter": "^0.26.9",
+    "preact": "^10.29.7",
+    "web-tree-sitter": "^0.26.11",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/bun": "^1.3.14",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }
