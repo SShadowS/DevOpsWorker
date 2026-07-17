@@ -10,6 +10,8 @@ import type { PipelineConfig, PipelineState } from '../../src/types/pipeline.typ
 
 class FakeStateStore implements IStateStore {
   listAllCalls = 0;
+  /** When true, `load()` throws — simulates a stateStore.load() failure mid-scan. */
+  throwOnLoad = false;
   private readonly states = new Map<number, PipelineState>();
   private watermark: StateWatermark = { count: 0, maxUpdatedAt: null };
 
@@ -26,6 +28,7 @@ class FakeStateStore implements IStateStore {
   }
 
   async load(workItemId: number): Promise<PipelineState | null> {
+    if (this.throwOnLoad) throw new Error('simulated load failure');
     return this.states.get(workItemId) ?? null;
   }
 
@@ -138,5 +141,42 @@ describe('SessionPoller', () => {
     await poller.poll();
 
     expect(store.listAllCalls).toBe(3);
+  });
+
+  test('retries the scan on the next poll after readAllSessions throws (does not latch the watermark on failure)', async () => {
+    const store = new FakeStateStore();
+    store.setState(1, freshState());
+    store.setWatermark({ count: 1, maxUpdatedAt: '2024-01-01T00:00:00.000Z' });
+    store.throwOnLoad = true; // simulate a stateStore.load()/loadConfig() failure during the scan
+
+    const broadcasts: Array<[string, unknown]> = [];
+    const poller = new SessionPoller(store, (event, data) => broadcasts.push([event, data]));
+
+    // First poll: watermark is fetched, then the scan throws mid-flight. poll()'s outer
+    // catch swallows it (non-critical), but the watermark must NOT be latched as "seen".
+    await poller.poll();
+    expect(store.listAllCalls).toBe(1);
+    expect(broadcasts.length).toBe(0);
+
+    // Second poll: watermark is UNCHANGED from the failed poll (no other write bumped it).
+    // If lastWatermark had been latched despite the failure, this would be read as
+    // "nothing changed since last poll" and the scan would be skipped -- silently
+    // stopping SSE updates until some unrelated later write moves the watermark. The
+    // scan must instead be retried.
+    await poller.poll();
+    expect(store.listAllCalls).toBe(2);
+    expect(broadcasts.length).toBe(0); // still failing
+
+    // Once the underlying failure clears, the retried scan succeeds and broadcasts.
+    store.throwOnLoad = false;
+    await poller.poll();
+    expect(store.listAllCalls).toBe(3);
+    expect(broadcasts.length).toBe(1);
+
+    // Now that a scan has actually succeeded, the watermark IS latched and the
+    // fast path correctly skips redundant scans again.
+    await poller.poll();
+    expect(store.listAllCalls).toBe(3);
+    expect(broadcasts.length).toBe(1);
   });
 });

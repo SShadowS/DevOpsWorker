@@ -35,13 +35,13 @@ export class SessionPoller {
 
   async poll(): Promise<void> {
     try {
+      let watermark: StateWatermark | null = null;
       if (this.stateStore.getWatermark) {
-        const watermark = await Promise.resolve(this.stateStore.getWatermark());
+        watermark = await Promise.resolve(this.stateStore.getWatermark());
         const unchanged =
           this.lastWatermark !== null &&
           watermark.count === this.lastWatermark.count &&
           watermark.maxUpdatedAt === this.lastWatermark.maxUpdatedAt;
-        this.lastWatermark = watermark;
         if (unchanged) return; // nothing changed since last poll — skip the full scan
       }
 
@@ -65,6 +65,13 @@ export class SessionPoller {
           if (entry.lastSeen < staleThreshold) this.knownSessions.delete(id);
         }
       }
+
+      // Only latch the watermark once the scan + broadcast above have completed
+      // without throwing. If we latched it eagerly (right after fetching it) and
+      // the scan then threw, the next poll would see an "unchanged" watermark and
+      // skip the retry entirely — silently dropping SSE updates until some
+      // unrelated write bumped the watermark again.
+      if (watermark !== null) this.lastWatermark = watermark;
     } catch {
       /* non-critical */
     }
