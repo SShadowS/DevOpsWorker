@@ -1,34 +1,10 @@
-import { prReviews } from '../store.ts';
+import { prReviews, selectedPRReviewId } from '../store.ts';
 import { formatDuration, formatCost, formatRelativeTime } from '../format.ts';
-import type { DashboardPRReview } from '../../types.ts';
+import { RecommendationBadge, FindingsPills } from './pr-review-bits.tsx';
+import { PRReviewDetail } from './pr-review-detail.tsx';
 
-function RecommendationBadge({ rec, hasError, pendingStatus }: { rec: string | null; hasError: boolean; pendingStatus?: string }) {
-  if (pendingStatus === 'queued') return <span class="pr-review__badge pr-review__badge--pending">queued</span>;
-  if (pendingStatus === 'reviewing') return <span class="pr-review__badge pr-review__badge--pending">reviewing</span>;
-  if (!rec && hasError) return <span class="pr-review__badge pr-review__badge--error">failed</span>;
-  if (!rec) return null;
-  const cls = rec === 'approve' ? 'approve' : rec.includes('discussion') ? 'discussion' : 'changes';
-  return <span class={`pr-review__badge pr-review__badge--${cls}`}>{rec}</span>;
-}
-
-function FindingsPills({ findings }: { findings: DashboardPRReview['findings'] }) {
-  if (!findings) return null;
-  const items: { label: string; count: number; cls: string }[] = [
-    { label: 'critical', count: findings.critical, cls: 'critical' },
-    { label: 'major', count: findings.major, cls: 'major' },
-    { label: 'minor', count: findings.minor, cls: 'minor' },
-    { label: 'nitpick', count: findings.nitpick, cls: 'nitpick' },
-  ].filter(i => i.count > 0);
-  if (items.length === 0) return <span class="pr-review__no-findings">No findings</span>;
-  return (
-    <span class="pr-review__findings">
-      {items.map((item, i) => (
-        <span key={i} class={`pr-review__pill pr-review__pill--${item.cls}`}>
-          {item.count} {item.label}
-        </span>
-      ))}
-    </span>
-  );
+function togglePR(id: number): void {
+  selectedPRReviewId.value = selectedPRReviewId.value === id ? null : id;
 }
 
 export function PRReviewList() {
@@ -40,40 +16,54 @@ export function PRReviewList() {
 
   return (
     <div class="pr-review-list">
-      {reviews.map((r) => (
-        <div key={r.id} class={`pr-review-row ${r.error ? 'pr-review-row--error' : ''} ${r.pendingStatus ? 'pr-review-row--pending' : ''}`}>
-          <div class="pr-review-row__main">
-            {r.webUrl ? (
-              <a
-                class="pr-review-row__pr"
-                href={r.webUrl}
-                target="_blank"
-                rel="noopener"
-                onClick={(e) => e.stopPropagation()}
-                title={`Open PR #${r.prId} in Azure DevOps`}
-              >
-                PR #{r.prId}
-              </a>
-            ) : (
-              <span class="pr-review-row__pr" title={`PR #${r.prId} (repo "${r.repoKey}" not registered)`}>PR #{r.prId}</span>
-            )}
-            <span class="pr-review-row__repo">{r.repoKey}</span>
-            <span class="pr-review-row__branch" title={r.sourceBranch}>{r.sourceBranch}</span>
-            <RecommendationBadge rec={r.recommendation} hasError={!!r.error} pendingStatus={r.pendingStatus} />
-            <FindingsPills findings={r.findings} />
+      {reviews.map((r) => {
+        const interactive = r.id >= 0;
+        const expanded = selectedPRReviewId.value === r.id;
+        return (
+          <div key={r.id}>
+            <div
+              class={`pr-review-row ${r.error ? 'pr-review-row--error' : ''} ${r.pendingStatus ? 'pr-review-row--pending' : ''} ${interactive ? 'pr-review-row--clickable' : ''}`}
+              role={interactive ? 'button' : undefined}
+              tabIndex={interactive ? 0 : undefined}
+              aria-expanded={interactive ? expanded : undefined}
+              onClick={interactive ? () => togglePR(r.id) : undefined}
+              onKeyDown={interactive ? (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePR(r.id); } } : undefined}
+            >
+              <div class="pr-review-row__main">
+                {r.webUrl ? (
+                  <a
+                    class="pr-review-row__pr"
+                    href={r.webUrl}
+                    target="_blank"
+                    rel="noopener"
+                    onClick={(e) => e.stopPropagation()}
+                    title={`Open PR #${r.prId} in Azure DevOps`}
+                  >
+                    PR #{r.prId}
+                  </a>
+                ) : (
+                  <span class="pr-review-row__pr" title={`PR #${r.prId} (repo "${r.repoKey}" not registered)`}>PR #{r.prId}</span>
+                )}
+                <span class="pr-review-row__repo">{r.repoKey}</span>
+                <span class="pr-review-row__branch" title={r.sourceBranch}>{r.sourceBranch}</span>
+                <RecommendationBadge rec={r.recommendation} hasError={!!r.error} pendingStatus={r.pendingStatus} />
+                <FindingsPills findings={r.findings} />
+              </div>
+              <div class="pr-review-row__meta">
+                {r.costUsd != null && <span class="pr-review-row__cost">{formatCost(r.costUsd)}</span>}
+                {r.durationMs != null && <span class="pr-review-row__duration">{formatDuration(r.durationMs)}</span>}
+                {r.turns != null && <span class="pr-review-row__turns" title="Conversation turns">{r.turns} turns</span>}
+                {r.toolCalls != null && <span class="pr-review-row__tools" title={Object.entries(r.toolCalls).map(([t, n]) => `${t}: ${n}`).join(', ')}>{Object.values(r.toolCalls).reduce((a, b) => a + b, 0)} tool calls</span>}
+                <span class="pr-review-row__time" title={new Date(r.createdAt).toLocaleString()}>
+                  {formatRelativeTime(r.createdAt)}
+                </span>
+              </div>
+              {r.error && <div class="pr-review-row__error" title={r.error}>Failed: {r.error.slice(0, 100)}</div>}
+            </div>
+            {interactive && expanded && <PRReviewDetail review={r} />}
           </div>
-          <div class="pr-review-row__meta">
-            {r.costUsd != null && <span class="pr-review-row__cost">{formatCost(r.costUsd)}</span>}
-            {r.durationMs != null && <span class="pr-review-row__duration">{formatDuration(r.durationMs)}</span>}
-            {r.turns != null && <span class="pr-review-row__turns" title="Conversation turns">{r.turns} turns</span>}
-            {r.toolCalls != null && <span class="pr-review-row__tools" title={Object.entries(r.toolCalls).map(([t, n]) => `${t}: ${n}`).join(', ')}>{Object.values(r.toolCalls).reduce((a, b) => a + b, 0)} tool calls</span>}
-            <span class="pr-review-row__time" title={new Date(r.createdAt).toLocaleString()}>
-              {formatRelativeTime(r.createdAt)}
-            </span>
-          </div>
-          {r.error && <div class="pr-review-row__error" title={r.error}>Failed: {r.error.slice(0, 100)}</div>}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
