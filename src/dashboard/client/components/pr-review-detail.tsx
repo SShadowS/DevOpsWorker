@@ -65,7 +65,7 @@ export function PRReviewDetail({ review }: { review: DashboardPRReview }) {
           ? <span class="empty-state">Loading…</span>
           : body
             ? <pre class="pr-review-detail__body-text">{body}</pre>
-            : <span class="empty-state">No logs recorded for this review.</span>}
+            : <span class="empty-state">No review body recorded.</span>}
       </div>
     </div>
   );
