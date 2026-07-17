@@ -249,11 +249,11 @@ export interface PipelineState {
       username: string;
       password: string;
       tenantId: string;
-      selectedBy: 'flag' | 'config-override' | 'fallback-Tll';
+      selectedBy: 'flag' | 'config-override' | 'fallback-default';
     };
 
     // Staged readiness flags.
-    coreActivated?: boolean; // env + baseline app + InternalActivation core activation done
+    coreActivated?: boolean; // env + baseline app + overlay activation done
     activated?: boolean;     // bc-activation wizard completed; bc-mcp safe to wire in
     wizardNotes?: string;    // free-form notes from bc-activation agent
   };

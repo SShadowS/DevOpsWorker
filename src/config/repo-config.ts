@@ -43,7 +43,7 @@ export interface RepoConfig {
     /** Regional profile to pick (e.g. 'GB', 'DE'). Default: 'GB'. */
     region?: string;
 
-    /** Override for cred selection. Falls back to flag-based selection, then to user 'Tll'. */
+    /** Override for cred selection. Falls back to flag-based selection, then to a configured default user. */
     bcUser?: string;
 
     /** Per-app wizard instructions; presence enables the bc-activation stage. */
