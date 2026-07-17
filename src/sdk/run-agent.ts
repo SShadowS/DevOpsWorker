@@ -8,6 +8,7 @@ import type { PipelineState, PipelineContext } from '../types/pipeline.types.ts'
 import { buildSystemPrompt, buildSharedFragmentContent } from './prompt-loader.ts';
 import { stageAgentWorkspace, type StagedWorkspace } from './agent-workspace.ts';
 import { resolveAgentOverlayDir, loadManifest, resolveAgentKnobs } from '../overlay/index.ts';
+import type { OverlayManifest } from '../overlay/index.ts';
 import { AgentExecutionError, AgentValidationError, BudgetExceededError, RateLimitError, TransientAgentError } from './errors.ts';
 
 // ---------------------------------------------------------------------------
@@ -175,6 +176,21 @@ export function mergeMcpServers(
 }
 
 /**
+ * The `runAgent` call-site composition for MCP servers: resolve the agent's own
+ * (possibly state-dependent) server map, then fold in the overlay manifest's
+ * `mcpServers`. Extracted so the wiring itself — not just `mergeMcpServers` in
+ * isolation — is directly testable (see `tests/overlay/manifest-contract.test.ts`,
+ * which fails if this stops reading `manifest.mcpServers`).
+ */
+export function resolveAgentMcpServers(
+  config: AgentConfig<z.ZodType>,
+  state: PipelineState,
+  manifest: OverlayManifest,
+): Record<string, McpServerConfig> {
+  return mergeMcpServers(resolveMcpServers(config.mcpServers, state), manifest.mcpServers);
+}
+
+/**
  * Resolve which agent a tool call belongs to. Nested sub-agent tool calls carry
  * a parent_tool_use_id matching the Task/Agent dispatch that spawned them; we map
  * that back to the sub-agent's name. Falls back to the default (orchestrator) name.
@@ -237,7 +253,7 @@ export async function runAgent<T extends z.ZodType>(
 
   // Resolve mcpServers (can be static or function-of-state), then merge in any
   // overlay-declared servers (manifest.mcpServers) — agent-specific entries win.
-  const resolvedMcpServers = mergeMcpServers(resolveMcpServers(config.mcpServers, state), manifest.mcpServers);
+  const resolvedMcpServers = resolveAgentMcpServers(config, state, manifest);
 
   // Log agent config and prompts
   logger?.logJson('AGENT CONFIG', {

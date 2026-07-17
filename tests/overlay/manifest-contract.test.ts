@@ -1,11 +1,13 @@
 import { describe, test, expect, afterEach } from 'bun:test';
+import type { z } from 'zod';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { OverlayManifest } from '../../src/overlay/types.ts';
 import { exampleRepos } from '../../private.example/config/repos.ts';
-import { mergeMcpServers } from '../../src/sdk/run-agent.ts';
-import type { McpServerConfig } from '../../src/types/agent.types.ts';
+import { resolveAgentMcpServers } from '../../src/sdk/run-agent.ts';
+import type { AgentConfig } from '../../src/types/agent.types.ts';
+import type { PipelineState } from '../../src/types/pipeline.types.ts';
 import { loadConfig } from '../../src/cli/config.ts';
 import { loadManifest, resetManifestCache } from '../../src/overlay/loader.ts';
 
@@ -83,44 +85,56 @@ describe('OverlayManifest contract (drift guard)', () => {
 // EFFECT guards (not just shape). Each test below drives a manifest field
 // through its REAL resolution path (no mocks) and asserts the resolved output
 // changed as a result. If a future change deletes the wiring for a field —
-// e.g. `mergeMcpServers` stops reading `manifest.mcpServers`, or `loadConfig`
-// stops consulting `getCachedManifest()` — the corresponding test here fails,
-// even though the field would still type-check fine in `fullManifest` above.
+// e.g. `resolveAgentMcpServers` (the runAgent call site) stops reading
+// `manifest.mcpServers`, or `loadConfig` stops consulting `getCachedManifest()`
+// — the corresponding test here fails, even though the field would still
+// type-check fine in `fullManifest` above.
 //
-// These are deliberately thin: the full behavior (precedence, validation,
-// error messages) is already covered by tests/sdk/run-agent-mcpservers.test.ts
-// (Task 2) and tests/cli/config.test.ts (Task 3). This file only proves the
-// contract-level linkage — that a populated manifest field is not inert.
+// These are deliberately thin: the full precedence/validation/error-message
+// behavior of the underlying pure helpers (`mergeMcpServers`, `resolveMcpServers`)
+// is already covered by tests/sdk/run-agent-mcpservers.test.ts (Task 2) and
+// tests/cli/config.test.ts (Task 3). This file only proves the contract-level
+// linkage — that a populated manifest field actually reaches the real
+// `runAgent` wiring, not merely that the pure helper it eventually calls works
+// in isolation.
 // ---------------------------------------------------------------------------
 
 describe('extension points: advertised fields have EFFECT (drift guard)', () => {
   test('a populated manifest.mcpServers entry actually reaches the merged MCP map', () => {
-    const manifestServers: OverlayManifest['mcpServers'] = {
-      custom: { command: 'custom-server' },
-    };
-    const agentServers: Record<string, McpServerConfig> = {
-      foo: { command: 'echo', type: 'stdio' },
+    // Drives resolveAgentMcpServers — the exact composition runAgent calls at
+    // its mcpServers call site (src/sdk/run-agent.ts) — not just the pure
+    // mergeMcpServers helper. If that call site ever stops passing
+    // manifest.mcpServers through (the regression this guard exists to catch),
+    // `custom` disappears from the result and this test fails.
+    const fakeConfig = {
+      name: 'fake-agent',
+      mcpServers: { foo: { command: 'echo', type: 'stdio' as const } },
+    } as unknown as AgentConfig<z.ZodType>;
+    const fakeState = {} as unknown as PipelineState;
+    const manifest: OverlayManifest = {
+      mcpServers: { custom: { command: 'custom-server' } },
     };
 
-    const merged = mergeMcpServers(agentServers, manifestServers);
+    const merged = resolveAgentMcpServers(fakeConfig, fakeState, manifest);
 
-    // Would fail if `mergeMcpServers` (or its call site in runAgent) stopped
-    // folding `manifest.mcpServers` into the agent's server map.
+    // The agent's own server survives (ADD semantics)...
+    expect(merged).toHaveProperty('foo');
+    // ...and the manifest-declared server was folded in by the real call site.
     expect(merged).toHaveProperty('custom');
     expect(merged.custom).toEqual({ command: 'custom-server' });
   });
 
   describe('a populated manifest.ado field reaches loadConfig() output', () => {
-    const overlayDirs: string[] = [];
+    let dir: string | undefined;
     const savedOrgEnv = process.env['AZURE_DEVOPS_ORG'];
 
     afterEach(() => {
       resetManifestCache();
       if (savedOrgEnv === undefined) delete process.env['AZURE_DEVOPS_ORG'];
       else process.env['AZURE_DEVOPS_ORG'] = savedOrgEnv;
-      while (overlayDirs.length) {
+      if (dir) {
         try {
-          rmSync(overlayDirs.pop()!, { recursive: true, force: true });
+          rmSync(dir, { recursive: true, force: true });
         } catch {
           /* best-effort cleanup */
         }
@@ -131,8 +145,7 @@ describe('extension points: advertised fields have EFFECT (drift guard)', () => 
       // No env var in the way — the manifest value must be what wins.
       delete process.env['AZURE_DEVOPS_ORG'];
 
-      const dir = mkdtempSync(join(tmpdir(), 'manifest-contract-ado-test-'));
-      overlayDirs.push(dir);
+      dir = mkdtempSync(join(tmpdir(), 'manifest-contract-ado-test-'));
       writeFileSync(
         join(dir, 'manifest.ts'),
         `export default { ado: { organization: 'contract-guard-org' } };`,
