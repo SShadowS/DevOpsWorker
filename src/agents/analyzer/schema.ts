@@ -34,3 +34,14 @@ export const ReadinessReportSchema = z.object({
 });
 
 export type ReadinessReport = z.infer<typeof ReadinessReportSchema>;
+
+// ---------------------------------------------------------------------------
+// PipelineState slice — the Analyzer OWNS `state.readiness`.
+// Module augmentation registers the field on core's PipelineStateSlices so
+// core never has to import this schema. See src/types/pipeline.types.ts.
+// ---------------------------------------------------------------------------
+declare module '../../types/pipeline.types.ts' {
+  interface PipelineStateSlices {
+    readiness?: ReadinessReport;
+  }
+}

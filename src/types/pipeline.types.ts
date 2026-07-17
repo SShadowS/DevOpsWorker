@@ -1,12 +1,5 @@
 import type { z } from 'zod';
 import type { AgentConfig } from './agent.types.ts';
-import type { ReadinessReport } from '../agents/analyzer/schema.ts';
-import type { DevPlan } from '../agents/planner/schema.ts';
-import type { Changeset } from '../agents/coder/schema.ts';
-import type { DraftPullRequest } from '../agents/draft-pr/schema.ts';
-import type { WorkItemUpdate } from '../agents/documenter/schema.ts';
-import type { TestCasesOutput } from '../agents/test-cases/schema.ts';
-import type { DocsWriterOutput } from '../agents/docs-writer/schema.ts';
 import type { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import type { PRReviewComment } from '../sdk/azure-devops-client.ts';
 import type { OverlayManifest } from '../overlay/types.ts';
@@ -156,26 +149,54 @@ export interface TestCaseFailure {
 }
 
 // ---------------------------------------------------------------------------
+// PipelineStateSlices — agent-owned extension points for PipelineState
+// ---------------------------------------------------------------------------
+
+/**
+ * Open interface each agent augments with the state field it OWNS (its output
+ * slice). Core deliberately leaves this empty so it never imports agent schemas
+ * — inverting the old god-type coupling where `PipelineState` imported all 7
+ * agent output schemas and every new agent meant editing core.
+ *
+ * Each agent registers its slice next to its schema via TS module augmentation:
+ *
+ * ```ts
+ * // src/agents/planner/schema.ts
+ * declare module '../../types/pipeline.types.ts' {
+ *   interface PipelineStateSlices {
+ *     devPlan?: DevPlan;
+ *   }
+ * }
+ * ```
+ *
+ * `PipelineState extends Partial<PipelineStateSlices>`, so the augmented fields
+ * appear on `state` with the same names + optionality they had inline. The
+ * augmenting files live under `src/agents/**`, which every tsconfig include glob
+ * pulls in (core `tsconfig.json` and the composed `tsconfig.private.json`), so
+ * the fields stay visible to core, tests, AND the private overlay.
+ */
+export interface PipelineStateSlices {}
+
+// ---------------------------------------------------------------------------
 // PipelineState — mutable bag of accumulated stage results
 // ---------------------------------------------------------------------------
 
-export interface PipelineState {
+export interface PipelineState extends Partial<PipelineStateSlices> {
   currentStage: string;
   /** Transient liveness marker (see ActiveAgentMarker). Non-durable — stripped on load. */
   activeAgent?: ActiveAgentMarker;
 
-  // Stage outputs (populated as pipeline progresses)
-  readiness?: ReadinessReport;
-  devPlan?: DevPlan;
+  // Stage outputs owned by agents are contributed via PipelineStateSlices
+  // augmentation (see above): readiness (analyzer), devPlan (planner),
+  // changeset (coder), draftPR (draft-pr), testCases (test-cases),
+  // workItemUpdate (documenter), docsWriterDrafts (docs-writer).
+  //
+  // The remaining stage outputs below are core frame fields (shared
+  // ReviewVerdict shape or plain inline types), NOT agent output schemas.
   planReviews?: ReviewVerdict[];
-  changeset?: Changeset;
   codeReviews?: ReviewVerdict[];
-  draftPR?: DraftPullRequest;
-  testCases?: TestCasesOutput;
   testCaseReviews?: ReviewVerdict[];
   testCaseActivation?: { activatedAt: string };
-  workItemUpdate?: WorkItemUpdate;
-  docsWriterDrafts?: DocsWriterOutput;
   learnedRules?: unknown;
 
   // Error state

@@ -22,3 +22,14 @@ export const DocsWriterOutputSchema = z.object({
 
 export type DocsDraft = z.infer<typeof DocsDraftSchema>;
 export type DocsWriterOutput = z.infer<typeof DocsWriterOutputSchema>;
+
+// ---------------------------------------------------------------------------
+// PipelineState slice — the Docs-Writer agent OWNS `state.docsWriterDrafts`.
+// Module augmentation registers the field on core's PipelineStateSlices so
+// core never has to import this schema. See src/types/pipeline.types.ts.
+// ---------------------------------------------------------------------------
+declare module '../../types/pipeline.types.ts' {
+  interface PipelineStateSlices {
+    docsWriterDrafts?: DocsWriterOutput;
+  }
+}

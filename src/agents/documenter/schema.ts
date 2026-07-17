@@ -19,3 +19,14 @@ export const WorkItemUpdateSchema = z.object({
 });
 
 export type WorkItemUpdate = z.infer<typeof WorkItemUpdateSchema>;
+
+// ---------------------------------------------------------------------------
+// PipelineState slice — the Documenter OWNS `state.workItemUpdate`.
+// Module augmentation registers the field on core's PipelineStateSlices so
+// core never has to import this schema. See src/types/pipeline.types.ts.
+// ---------------------------------------------------------------------------
+declare module '../../types/pipeline.types.ts' {
+  interface PipelineStateSlices {
+    workItemUpdate?: WorkItemUpdate;
+  }
+}

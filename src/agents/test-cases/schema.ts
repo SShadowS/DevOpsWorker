@@ -18,3 +18,14 @@ export const TestCasesOutputSchema = z.object({
 
 export type TestCaseEntry = z.infer<typeof TestCaseEntrySchema>;
 export type TestCasesOutput = z.infer<typeof TestCasesOutputSchema>;
+
+// ---------------------------------------------------------------------------
+// PipelineState slice — the Test-Cases agent OWNS `state.testCases`.
+// Module augmentation registers the field on core's PipelineStateSlices so
+// core never has to import this schema. See src/types/pipeline.types.ts.
+// ---------------------------------------------------------------------------
+declare module '../../types/pipeline.types.ts' {
+  interface PipelineStateSlices {
+    testCases?: TestCasesOutput;
+  }
+}
