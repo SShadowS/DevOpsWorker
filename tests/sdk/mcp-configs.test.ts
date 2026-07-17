@@ -201,7 +201,7 @@ const baseEnv: Env = {
   coreActivated: true,
   activated: true,
   credentials: {
-    username: 'Tll',
+    username: 'testuser',
     password: 'secret',
     tenantId: 'default',
     selectedBy: 'fallback-default',
