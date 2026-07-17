@@ -27,7 +27,13 @@ export function PRReviewList() {
               tabIndex={interactive ? 0 : undefined}
               aria-expanded={interactive ? expanded : undefined}
               onClick={interactive ? () => togglePR(r.id) : undefined}
-              onKeyDown={interactive ? (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePR(r.id); } } : undefined}
+              onKeyDown={interactive ? (e: KeyboardEvent) => {
+                // Only react when the row itself has focus — descendant links (e.g. the PR#
+                // anchor) own their own keystrokes. Without this guard, Enter on the anchor
+                // would toggle the row instead of activating the link.
+                if (e.target !== e.currentTarget) return;
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePR(r.id); }
+              } : undefined}
             >
               <div class="pr-review-row__main">
                 {r.webUrl ? (
