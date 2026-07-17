@@ -42,3 +42,14 @@ export const ChangesetSchema = z.object({
 });
 
 export type Changeset = z.infer<typeof ChangesetSchema>;
+
+// ---------------------------------------------------------------------------
+// PipelineState slice — the Coder OWNS `state.changeset`.
+// Module augmentation registers the field on core's PipelineStateSlices so
+// core never has to import this schema. See src/types/pipeline.types.ts.
+// ---------------------------------------------------------------------------
+declare module '../../types/pipeline.types.ts' {
+  interface PipelineStateSlices {
+    changeset?: Changeset;
+  }
+}

@@ -1,13 +1,14 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test';
-import { loadConfig, loadConfigFromState, buildConfigFromRepo } from '../../src/cli/config.ts';
+import { loadConfig, loadConfigFromState, buildConfigFromRepo, resolveAdoField } from '../../src/cli/config.ts';
 import type { RepoConfig } from '../../src/config/repo-config.ts';
 import { openDatabase } from '../../src/db/database.ts';
 import { SqliteStateStore } from '../../src/db/sqlite-state-store.ts';
 import type { Database } from 'bun:sqlite';
 import type { PipelineConfig } from '../../src/types/pipeline.types.ts';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { loadManifest, resetManifestCache } from '../../src/overlay/loader.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -48,6 +49,15 @@ function cleanupTempDir(): void {
   if (tempDir) {
     rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+/** Create a throwaway overlay dir with a manifest.ts default-exporting `manifestBody`. */
+const overlayDirs: string[] = [];
+function makeOverlayDir(manifestBody: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'config-overlay-test-'));
+  overlayDirs.push(dir);
+  writeFileSync(join(dir, 'manifest.ts'), manifestBody);
+  return dir;
 }
 
 // These tests assert loadConfig's DEFAULTS, which only hold when the AZURE_DEVOPS_*
@@ -109,6 +119,73 @@ describe('loadConfig', () => {
     expect(config.azureDevOps.organization).toBe('your-org');
     expect(config.azureDevOps.project).toBe('Your Project');
     expect(config.azureDevOps.ciPipelineId).toBe(0);
+  });
+});
+
+describe('resolveAdoField', () => {
+  test('returns the env value when set', () => {
+    expect(resolveAdoField('env-org', 'manifest-org', 'default-org')).toBe('env-org');
+  });
+
+  test('falls back to the manifest value when env is undefined', () => {
+    expect(resolveAdoField(undefined, 'manifest-org', 'default-org')).toBe('manifest-org');
+  });
+
+  test('treats an empty-string env value as set (does not fall through to manifest)', () => {
+    expect(resolveAdoField('', 'manifest-org', 'default-org')).toBe('');
+  });
+
+  test('falls back to the generic default when both env and manifest are undefined', () => {
+    expect(resolveAdoField(undefined, undefined, 'default-org')).toBe('default-org');
+  });
+
+  test('treats an empty-string manifest value as set (does not fall through to the default)', () => {
+    expect(resolveAdoField(undefined, '', 'default-org')).toBe('');
+  });
+});
+
+describe('loadConfig with overlay manifest ado defaults', () => {
+  afterEach(() => {
+    restoreEnv();
+    resetManifestCache();
+    while (overlayDirs.length) {
+      try {
+        rmSync(overlayDirs.pop()!, { recursive: true, force: true });
+      } catch {
+        /* best-effort cleanup */
+      }
+    }
+  });
+
+  test('falls back to manifest.ado when no ADO env vars are set', async () => {
+    const dir = makeOverlayDir(
+      `export default { ado: { organization: 'acme', project: 'Proj' } };`,
+    );
+    await loadManifest({ dir, force: true });
+
+    const config = loadConfig('/tmp/session');
+    expect(config.azureDevOps.organization).toBe('acme');
+    expect(config.azureDevOps.project).toBe('Proj');
+    // Fields the manifest didn't set still use the generic default.
+    expect(config.azureDevOps.areaPath).toBe('Your Area');
+  });
+
+  test('env var still wins over manifest.ado', async () => {
+    const dir = makeOverlayDir(
+      `export default { ado: { organization: 'acme' } };`,
+    );
+    await loadManifest({ dir, force: true });
+    setEnv('AZURE_DEVOPS_ORG', 'env-org');
+
+    const config = loadConfig('/tmp/session');
+    expect(config.azureDevOps.organization).toBe('env-org');
+  });
+
+  test('cold cache (no manifest loaded) falls back to the generic default without throwing', () => {
+    resetManifestCache(); // simulate a process that never called loadManifest()
+    expect(() => loadConfig('/tmp/session')).not.toThrow();
+    const config = loadConfig('/tmp/session');
+    expect(config.azureDevOps.organization).toBe('your-org');
   });
 });
 

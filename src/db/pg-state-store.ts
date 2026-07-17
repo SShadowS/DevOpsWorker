@@ -1,5 +1,5 @@
 import type postgres from 'postgres';
-import type { IStateStore } from '../pipeline/state-store.interface.ts';
+import type { IStateStore, StateWatermark } from '../pipeline/state-store.interface.ts';
 import type { PipelineState, PipelineConfig } from '../types/pipeline.types.ts';
 
 export class PgStateStore implements IStateStore {
@@ -45,5 +45,14 @@ export class PgStateStore implements IStateStore {
   async listAll(): Promise<number[]> {
     const rows = await this.sql`SELECT work_item_id FROM pipeline_state`;
     return rows.map((r: any) => r.work_item_id);
+  }
+
+  /** One cheap aggregate query — no JSONB deserialization. */
+  async getWatermark(): Promise<StateWatermark> {
+    const rows = await this.sql`
+      SELECT count(*)::int AS count, max(updated_at)::text AS max FROM pipeline_state
+    `;
+    const row = rows[0] as { count: number; max: string | null };
+    return { count: row.count, maxUpdatedAt: row.max };
   }
 }

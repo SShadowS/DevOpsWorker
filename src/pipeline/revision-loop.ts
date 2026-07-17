@@ -3,8 +3,9 @@ import type {
   PipelineState,
   PipelineContext,
   RevisionLoopConfig,
+  StageResult,
 } from '../types/pipeline.types.ts';
-import { RevisionExhaustedError } from '../sdk/errors.ts';
+import { ExternalServiceError, PipelineError, RevisionExhaustedError } from '../sdk/errors.ts';
 
 // ---------------------------------------------------------------------------
 // revisionLoop — generic review→revise loop with circuit breaker
@@ -31,7 +32,7 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
       return config.producer.canRun(state);
     },
 
-    async execute(state: PipelineState, context: PipelineContext): Promise<PipelineState> {
+    async execute(state: PipelineState, context: PipelineContext): Promise<StageResult> {
       let currentState = state;
       const logger = context.logger;
 
@@ -72,11 +73,27 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
             name: config.producer.name, loop: config.name, role: 'producer',
             iteration: attempt, startedAt: new Date().toISOString(),
           });
-          currentState = await config.producer.execute(currentState, context);
+          currentState = (await config.producer.execute(currentState, context)).state;
 
           // Run optional post-producer hook (e.g. server-side CI verification)
           if (config.postProducer) {
-            currentState = await config.postProducer(currentState, context);
+            try {
+              currentState = await config.postProducer(currentState, context);
+            } catch (err) {
+              // postProducer hooks (e.g. buildCIVerificationHook -> getBuildTimeline ->
+              // adoFetch) may throw plain Errors — AzureDevOpsError is NOT a PipelineError
+              // subclass. Left un-wrapped, the catch block below wouldn't recognize it as
+              // a PipelineError, so `partialState` (the incremented revision-budget state)
+              // would never attach and a resume would re-run an already-spent attempt.
+              // Wrap any non-PipelineError escaping the hook so it does.
+              throw err instanceof PipelineError
+                ? err
+                : new ExternalServiceError(
+                    config.name,
+                    'postProducer',
+                    err instanceof Error ? err.message : String(err),
+                  );
+            }
           }
 
           logger?.log(`Running reviewer "${config.reviewer.name}"`);
@@ -86,12 +103,15 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
             name: config.reviewer.name, loop: config.name, role: 'reviewer',
             iteration: attempt, startedAt: new Date().toISOString(),
           });
-          currentState = await config.reviewer.execute(currentState, context);
+          currentState = (await config.reviewer.execute(currentState, context)).state;
         } catch (err) {
           // Attach accumulated state to the error so the orchestrator can preserve
           // stage outputs (changeset, codeReviews, etc.) from previous iterations.
-          if (err instanceof Error) {
-            (err as Error & { lastState?: PipelineState }).lastState = currentState;
+          // Producer/reviewer failures surface as PipelineError subclasses (runAgent
+          // always throws one); the typed `partialState` field replaces the old
+          // `(err as Error & { lastState }).lastState` monkey-patch.
+          if (err instanceof PipelineError) {
+            err.partialState = currentState;
           }
           throw err;
         }
@@ -101,8 +121,10 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
           logger?.log(`Reviewer approved on attempt ${attempt}`);
           // Clear the budget so a later rewind to this loop starts fresh.
           return {
-            ...currentState,
-            revisionAttempts: { ...currentState.revisionAttempts, [config.name]: 0 },
+            state: {
+              ...currentState,
+              revisionAttempts: { ...currentState.revisionAttempts, [config.name]: 0 },
+            },
           };
         }
 

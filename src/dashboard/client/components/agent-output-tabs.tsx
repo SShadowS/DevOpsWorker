@@ -4,6 +4,13 @@ import type { DashboardSession } from '../../types.ts';
 const activeTab = signal('readiness');
 
 type AdoCfg = DashboardSession['config'];
+type ReadinessData = DashboardSession['readiness'];
+type DevPlanData = DashboardSession['devPlan'];
+type ChangesetData = DashboardSession['changeset'];
+type TestCasesData = DashboardSession['testCases'];
+type DraftPRData = DashboardSession['draftPR'];
+type HumanFeedbackData = DashboardSession['humanFeedback'];
+type ReviewVerdicts = DashboardSession['planReviews'];
 
 /** Base Azure DevOps URL for a session's org/project, or null if config is absent.
  *  Org/project come from the persisted pipeline config — never hardcode them. */
@@ -34,7 +41,7 @@ const TABS: TabDef[] = [
   { key: 'learnedRules', label: 'Learned Rules', hasData: (s) => !!s.learnedRules, render: (s) => <JsonBlock data={s.learnedRules} /> },
 ];
 
-function JsonBlock({ data }: { data: any }) {
+function JsonBlock({ data }: { data: unknown }) {
   return <pre class="json-block">{JSON.stringify(data, null, 2)}</pre>;
 }
 
@@ -51,7 +58,7 @@ function Section({ title, children }: { title: string; children: any }) {
   );
 }
 
-function ReadinessView({ data }: { data: any }) {
+function ReadinessView({ data }: { data?: ReadinessData }) {
   if (!data) return null;
   return (
     <div class="output-structured">
@@ -61,7 +68,7 @@ function ReadinessView({ data }: { data: any }) {
       </div>
       {data.gaps?.length > 0 && (
         <Section title="Gaps">
-          {data.gaps.map((g: any, i: number) => (
+          {data.gaps.map((g, i) => (
             <div key={i} class={`gap-item gap-item--${g.severity}`}>
               <div class="gap-item__header">
                 <strong>{g.field}</strong>
@@ -87,13 +94,13 @@ function ReadinessView({ data }: { data: any }) {
             {data.enrichedContext.codebaseInsights?.length > 0 && (
               <div class="context-field context-field--full">
                 <label>Codebase Insights</label>
-                <ul class="context-list">{data.enrichedContext.codebaseInsights.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
+                <ul class="context-list">{data.enrichedContext.codebaseInsights.map((c, i) => <li key={i}>{c}</li>)}</ul>
               </div>
             )}
             {data.enrichedContext.relatedWorkItems?.length > 0 && (
               <div class="context-field context-field--full">
                 <label>Related Work Items</label>
-                <ul class="context-list">{data.enrichedContext.relatedWorkItems.map((w: any, i: number) => <li key={i}>#{w.id} — {w.title} ({w.relationship})</li>)}</ul>
+                <ul class="context-list">{data.enrichedContext.relatedWorkItems.map((w, i) => <li key={i}>#{w.id} — {w.title} ({w.relationship})</li>)}</ul>
               </div>
             )}
           </div>
@@ -103,7 +110,7 @@ function ReadinessView({ data }: { data: any }) {
   );
 }
 
-function DevPlanView({ data }: { data: any }) {
+function DevPlanView({ data }: { data?: DevPlanData }) {
   if (!data) return null;
   return (
     <div class="output-structured">
@@ -117,7 +124,7 @@ function DevPlanView({ data }: { data: any }) {
           <table class="plan-table">
             <thead><tr><th>Action</th><th>Type</th><th>Name</th><th>Description</th></tr></thead>
             <tbody>
-              {data.objects.map((o: any, i: number) => (
+              {data.objects.map((o, i) => (
                 <tr key={i}>
                   <td><Badge label={o.action} /></td>
                   <td>{o.objectType}{o.objectId ? ` ${o.objectId}` : ''}</td>
@@ -131,7 +138,7 @@ function DevPlanView({ data }: { data: any }) {
       )}
       {data.testScenarios?.length > 0 && (
         <Section title={`Test Scenarios (${data.testScenarios.length})`}>
-          {data.testScenarios.map((t: any, i: number) => (
+          {data.testScenarios.map((t, i) => (
             <div key={i} class="test-scenario">
               <strong>{t.name}</strong>
               <p>{t.description}</p>
@@ -147,17 +154,17 @@ function DevPlanView({ data }: { data: any }) {
         <Section title="Risk Assessment">
           <div class={`risk-card risk-card--${data.riskAssessment.level}`}>
             {data.riskAssessment.factors?.length > 0 && (
-              <div><strong>Factors</strong><ul class="context-list">{data.riskAssessment.factors.map((f: string, i: number) => <li key={i}>{f}</li>)}</ul></div>
+              <div><strong>Factors</strong><ul class="context-list">{data.riskAssessment.factors.map((f, i) => <li key={i}>{f}</li>)}</ul></div>
             )}
             {data.riskAssessment.mitigations?.length > 0 && (
-              <div><strong>Mitigations</strong><ul class="context-list">{data.riskAssessment.mitigations.map((m: string, i: number) => <li key={i}>{m}</li>)}</ul></div>
+              <div><strong>Mitigations</strong><ul class="context-list">{data.riskAssessment.mitigations.map((m, i) => <li key={i}>{m}</li>)}</ul></div>
             )}
           </div>
         </Section>
       )}
       {data.dependencies?.length > 0 && (
         <Section title="Dependencies">
-          <ul class="context-list">{data.dependencies.map((d: string, i: number) => <li key={i}>{d}</li>)}</ul>
+          <ul class="context-list">{data.dependencies.map((d, i) => <li key={i}>{d}</li>)}</ul>
         </Section>
       )}
       {data.notes && (
@@ -169,7 +176,7 @@ function DevPlanView({ data }: { data: any }) {
   );
 }
 
-function ChangesetView({ data, cfg }: { data: any; cfg?: AdoCfg }) {
+function ChangesetView({ data, cfg }: { data?: ChangesetData; cfg?: AdoCfg }) {
   const base = adoBase(cfg);
   if (!data) return null;
   return (
@@ -202,29 +209,36 @@ function ChangesetView({ data, cfg }: { data: any; cfg?: AdoCfg }) {
       </div>
       {data.filesModified?.length > 0 && (
         <Section title={`Files Modified (${data.filesModified.length})`}>
-          <ul class="context-list">{data.filesModified.map((f: string, i: number) => <li key={i}><code style={{ fontSize: '0.8rem' }}>{f}</code></li>)}</ul>
+          <ul class="context-list">{data.filesModified.map((f, i) => <li key={i}><code style={{ fontSize: '0.8rem' }}>{f}</code></li>)}</ul>
         </Section>
       )}
       {data.filesCreated?.length > 0 && (
         <Section title={`Files Created (${data.filesCreated.length})`}>
-          <ul class="context-list">{data.filesCreated.map((f: string, i: number) => <li key={i}><code style={{ fontSize: '0.8rem' }}>{f}</code></li>)}</ul>
+          <ul class="context-list">{data.filesCreated.map((f, i) => <li key={i}><code style={{ fontSize: '0.8rem' }}>{f}</code></li>)}</ul>
         </Section>
       )}
-      {data.compilationErrors?.length > 0 && (
+      {data.compilationErrors && data.compilationErrors.length > 0 && (
         <Section title={`Compilation Errors (${data.compilationErrors.length})`}>
-          <ul class="context-list">{data.compilationErrors.map((e: string, i: number) => <li key={i} style={{ color: 'var(--color-error)' }}>{e}</li>)}</ul>
+          <ul class="context-list">{data.compilationErrors.map((e, i) => <li key={i} style={{ color: 'var(--color-error)' }}>{e}</li>)}</ul>
         </Section>
       )}
-      {data.failedTests?.length > 0 && (
+      {data.failedTests && data.failedTests.length > 0 && (
         <Section title={`Failed Tests (${data.failedTests.length})`}>
-          <ul class="context-list">{data.failedTests.map((t: string, i: number) => <li key={i} style={{ color: 'var(--color-error)' }}>{t}</li>)}</ul>
+          {/* failedTests is an array of FailedTest objects ({ testName, codeunitName, errorMessage,
+              stackTrace? }), not strings — the previous `(t: string) => <li>{t}</li>` rendered
+              "[object Object]" for every failure. Render the actual failure detail instead. */}
+          <ul class="context-list">{data.failedTests.map((t, i) => (
+            <li key={i} style={{ color: 'var(--color-error)' }}>
+              <strong>{t.codeunitName}.{t.testName}</strong>: {t.errorMessage}
+            </li>
+          ))}</ul>
         </Section>
       )}
     </div>
   );
 }
 
-function TestCasesView({ data, cfg }: { data: any; cfg?: AdoCfg }) {
+function TestCasesView({ data, cfg }: { data?: TestCasesData; cfg?: AdoCfg }) {
   if (!data) return null;
   const base = adoBase(cfg);
   const cases = data.testCases ?? [];
@@ -241,7 +255,7 @@ function TestCasesView({ data, cfg }: { data: any; cfg?: AdoCfg }) {
           <table class="plan-table">
             <thead><tr><th>ID</th><th>Title</th><th>Steps</th><th>Derived From</th></tr></thead>
             <tbody>
-              {cases.map((tc: any, i: number) => (
+              {cases.map((tc, i) => (
                 <tr key={i}>
                   <td>
                     {tc.id
@@ -263,7 +277,7 @@ function TestCasesView({ data, cfg }: { data: any; cfg?: AdoCfg }) {
   );
 }
 
-function DraftPRView({ data, cfg }: { data: any; cfg?: AdoCfg }) {
+function DraftPRView({ data, cfg }: { data?: DraftPRData; cfg?: AdoCfg }) {
   if (!data) return null;
   const base = adoBase(cfg);
   return (
@@ -317,11 +331,11 @@ function htmlToText(input: unknown): string {
   return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-function HumanFeedbackView({ data }: { data: any }) {
+function HumanFeedbackView({ data }: { data?: HumanFeedbackData }) {
   if (!data) return null;
-  const prComments: any[] = data.prReviewComments ?? [];
-  const wiComments: any[] = data.workItemComments ?? [];
-  const testFailures: any[] = data.testCaseFailures ?? [];
+  const prComments = data.prReviewComments ?? [];
+  const wiComments = data.workItemComments ?? [];
+  const testFailures = data.testCaseFailures ?? [];
   return (
     <div class="output-structured">
       {data.source && (
@@ -376,7 +390,7 @@ function HumanFeedbackView({ data }: { data: any }) {
               </div>
               {(t.failedSteps?.length ?? 0) > 0 && (
                 <ul class="context-list">
-                  {t.failedSteps.map((s: any, j: number) => (
+                  {t.failedSteps.map((s, j) => (
                     <li key={j}>
                       Step {s.stepNumber}: {s.action} — expected {s.expectedResult}
                       {s.comment ? ` (${s.comment})` : ''}
@@ -392,7 +406,7 @@ function HumanFeedbackView({ data }: { data: any }) {
   );
 }
 
-function ReviewList({ reviews }: { reviews?: any[] }) {
+function ReviewList({ reviews }: { reviews?: ReviewVerdicts }) {
   if (!reviews || reviews.length === 0) return <p class="empty-state">No reviews.</p>;
   return (
     <div class="review-list">

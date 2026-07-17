@@ -89,7 +89,7 @@ export class LogPoller {
       for (const entry of entries) {
         this.broadcast('log-entry', {
           workItemId,
-          stageName: entry.stage_name,
+          stageName: entry.stageName,
           entry,
         });
         if (entry.id > p.lastId) p.lastId = entry.id;

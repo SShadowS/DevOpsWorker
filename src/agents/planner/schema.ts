@@ -42,3 +42,14 @@ export const DevPlanSchema = z.object({
 });
 
 export type DevPlan = z.infer<typeof DevPlanSchema>;
+
+// ---------------------------------------------------------------------------
+// PipelineState slice — the Planner OWNS `state.devPlan`.
+// Module augmentation registers the field on core's PipelineStateSlices so
+// core never has to import this schema. See src/types/pipeline.types.ts.
+// ---------------------------------------------------------------------------
+declare module '../../types/pipeline.types.ts' {
+  interface PipelineStateSlices {
+    devPlan?: DevPlan;
+  }
+}

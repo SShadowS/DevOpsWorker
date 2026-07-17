@@ -1,12 +1,4 @@
-import type { z } from 'zod';
 import type { AgentConfig } from './agent.types.ts';
-import type { ReadinessReport } from '../agents/analyzer/schema.ts';
-import type { DevPlan } from '../agents/planner/schema.ts';
-import type { Changeset } from '../agents/coder/schema.ts';
-import type { DraftPullRequest } from '../agents/draft-pr/schema.ts';
-import type { WorkItemUpdate } from '../agents/documenter/schema.ts';
-import type { TestCasesOutput } from '../agents/test-cases/schema.ts';
-import type { DocsWriterOutput } from '../agents/docs-writer/schema.ts';
 import type { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import type { PRReviewComment } from '../sdk/azure-devops-client.ts';
 import type { OverlayManifest } from '../overlay/types.ts';
@@ -156,26 +148,54 @@ export interface TestCaseFailure {
 }
 
 // ---------------------------------------------------------------------------
+// PipelineStateSlices — agent-owned extension points for PipelineState
+// ---------------------------------------------------------------------------
+
+/**
+ * Open interface each agent augments with the state field it OWNS (its output
+ * slice). Core deliberately leaves this empty so it never imports agent schemas
+ * — inverting the old god-type coupling where `PipelineState` imported all 7
+ * agent output schemas and every new agent meant editing core.
+ *
+ * Each agent registers its slice next to its schema via TS module augmentation:
+ *
+ * ```ts
+ * // src/agents/planner/schema.ts
+ * declare module '../../types/pipeline.types.ts' {
+ *   interface PipelineStateSlices {
+ *     devPlan?: DevPlan;
+ *   }
+ * }
+ * ```
+ *
+ * `PipelineState extends Partial<PipelineStateSlices>`, so the augmented fields
+ * appear on `state` with the same names + optionality they had inline. The
+ * augmenting files live under `src/agents/**`, which every tsconfig include glob
+ * pulls in (core `tsconfig.json` and the composed `tsconfig.private.json`), so
+ * the fields stay visible to core, tests, AND the private overlay.
+ */
+export interface PipelineStateSlices {}
+
+// ---------------------------------------------------------------------------
 // PipelineState — mutable bag of accumulated stage results
 // ---------------------------------------------------------------------------
 
-export interface PipelineState {
+export interface PipelineState extends Partial<PipelineStateSlices> {
   currentStage: string;
   /** Transient liveness marker (see ActiveAgentMarker). Non-durable — stripped on load. */
   activeAgent?: ActiveAgentMarker;
 
-  // Stage outputs (populated as pipeline progresses)
-  readiness?: ReadinessReport;
-  devPlan?: DevPlan;
+  // Stage outputs owned by agents are contributed via PipelineStateSlices
+  // augmentation (see above): readiness (analyzer), devPlan (planner),
+  // changeset (coder), draftPR (draft-pr), testCases (test-cases),
+  // workItemUpdate (documenter), docsWriterDrafts (docs-writer).
+  //
+  // The remaining stage outputs below are core frame fields (shared
+  // ReviewVerdict shape or plain inline types), NOT agent output schemas.
   planReviews?: ReviewVerdict[];
-  changeset?: Changeset;
   codeReviews?: ReviewVerdict[];
-  draftPR?: DraftPullRequest;
-  testCases?: TestCasesOutput;
   testCaseReviews?: ReviewVerdict[];
   testCaseActivation?: { activatedAt: string };
-  workItemUpdate?: WorkItemUpdate;
-  docsWriterDrafts?: DocsWriterOutput;
   learnedRules?: unknown;
 
   // Error state
@@ -249,11 +269,11 @@ export interface PipelineState {
       username: string;
       password: string;
       tenantId: string;
-      selectedBy: 'flag' | 'config-override' | 'fallback-Tll';
+      selectedBy: 'flag' | 'config-override' | 'fallback-default';
     };
 
     // Staged readiness flags.
-    coreActivated?: boolean; // env + baseline app + InternalActivation core activation done
+    coreActivated?: boolean; // env + baseline app + overlay activation done
     activated?: boolean;     // bc-activation wizard completed; bc-mcp safe to wire in
     wizardNotes?: string;    // free-form notes from bc-activation agent
   };
@@ -317,10 +337,39 @@ export interface ReviewVerdict {
 // Stage — the unit of pipeline composition
 // ---------------------------------------------------------------------------
 
+/**
+ * Explicit control-flow signal a stage returns to the orchestrator.
+ *
+ * This is how a stage tells the orchestrator to halt or rewind — replacing the
+ * old implicit channel where the orchestrator sniffed `state.checkpoint` /
+ * `state.revisionFeedback` off the returned state. Those state fields are still
+ * set + persisted (external observers — the watcher, dashboard, and resume path
+ * read them), but they no longer drive the orchestrator's in-loop decision.
+ *
+ * - `pause`  — the pipeline should stop and wait for human action (a checkpoint
+ *   that isn't satisfied yet). The checkpoint stage also sets `state.checkpoint`.
+ * - `rewind` — the pipeline should jump back to `targetStage` (a checkpoint that
+ *   detected a `/rerun-*` command). The checkpoint stage also sets
+ *   `state.revisionFeedback` (persisted, so a later resume can rewind too).
+ */
+export type StageSignal =
+  | { kind: 'pause' }
+  | { kind: 'rewind'; targetStage: string };
+
+/**
+ * Return value of `Stage.execute`. Carries the (possibly mutated) state plus an
+ * optional control-flow signal. Absent `signal` means "continue to the next
+ * stage" — the common case for agent stages.
+ */
+export interface StageResult {
+  state: PipelineState;
+  signal?: StageSignal;
+}
+
 export interface Stage {
   readonly name: string;
   canRun(state: PipelineState): boolean;
-  execute(state: PipelineState, context: PipelineContext): Promise<PipelineState>;
+  execute(state: PipelineState, context: PipelineContext): Promise<StageResult>;
 }
 
 export type PipelineDefinition = Stage[];

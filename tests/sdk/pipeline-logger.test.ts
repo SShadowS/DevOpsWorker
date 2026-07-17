@@ -28,7 +28,7 @@ describe('PipelineLogger with SqliteLogSink', () => {
 
     const entries = sink.readStageLog('analyzer');
     expect(entries.length).toBeGreaterThanOrEqual(1);
-    expect(entries[0]!.entry_type).toBe('header');
+    expect(entries[0]!.entryType).toBe('header');
     expect(entries[0]!.content).toContain('analyzer');
     db.close();
   });
@@ -43,7 +43,7 @@ describe('PipelineLogger with SqliteLogSink', () => {
     logger.log('Turn 1');
 
     const entries = sink.readStageLog('coder');
-    const logEntries = entries.filter(e => e.entry_type === 'log');
+    const logEntries = entries.filter(e => e.entryType === 'log');
     expect(logEntries).toHaveLength(1);
     expect(logEntries[0]!.content).toContain('Turn 1');
     db.close();
@@ -59,7 +59,7 @@ describe('PipelineLogger with SqliteLogSink', () => {
     logger.logJson('CONFIG', { model: 'sonnet' });
 
     const entries = sink.readStageLog('coder');
-    const jsonEntries = entries.filter(e => e.entry_type === 'json');
+    const jsonEntries = entries.filter(e => e.entryType === 'json');
     expect(jsonEntries).toHaveLength(1);
     expect(jsonEntries[0]!.content).toContain('sonnet');
     db.close();
@@ -75,7 +75,7 @@ describe('PipelineLogger with SqliteLogSink', () => {
     logger.stageError(new Error('boom'));
 
     const entries = sink.readStageLog('coder');
-    const errorEntries = entries.filter(e => e.entry_type === 'error');
+    const errorEntries = entries.filter(e => e.entryType === 'error');
     expect(errorEntries).toHaveLength(1);
     expect(errorEntries[0]!.content).toContain('boom');
     db.close();

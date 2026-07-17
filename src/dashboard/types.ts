@@ -1,4 +1,12 @@
-import type { PipelineStatus, TelemetryData, ActiveAgentMarker } from '../types/pipeline.types.ts';
+import type { PipelineStatus, TelemetryData, ActiveAgentMarker, ReviewVerdict, TestCaseFailure } from '../types/pipeline.types.ts';
+import type { PRReviewComment } from '../sdk/azure-devops-client.ts';
+import type { ReadinessReport } from '../agents/analyzer/schema.ts';
+import type { DevPlan } from '../agents/planner/schema.ts';
+import type { Changeset } from '../agents/coder/schema.ts';
+import type { DraftPullRequest } from '../agents/draft-pr/schema.ts';
+import type { WorkItemUpdate } from '../agents/documenter/schema.ts';
+import type { TestCasesOutput } from '../agents/test-cases/schema.ts';
+import type { DocsWriterOutput } from '../agents/docs-writer/schema.ts';
 
 // ---------------------------------------------------------------------------
 // Action types — shared between dashboard server and watch process
@@ -39,18 +47,23 @@ export interface DashboardSession {
   availableActions?: ActionType[];
   activeAgent?: ActiveAgentMarker;
 
-  // Agent output pass-through (raw JSON blobs rendered by the frontend)
-  readiness?: any;
-  devPlan?: any;
-  planReviews?: any[];
-  changeset?: any;
-  codeReviews?: any[];
-  draftPR?: any;
-  workItemUpdate?: any;
-  learnedRules?: any;
-  testCases?: any;
-  testCaseReviews?: any[];
-  docsWriterDrafts?: any;
+  // Agent output pass-through (schema-typed, straight from the owning agent's
+  // Zod schema / core's shared verdict shape — see the agents' schema.ts files
+  // and PipelineState in src/types/pipeline.types.ts for the source of truth).
+  readiness?: ReadinessReport;
+  devPlan?: DevPlan;
+  planReviews?: ReviewVerdict[];
+  changeset?: Changeset;
+  codeReviews?: ReviewVerdict[];
+  draftPR?: DraftPullRequest;
+  workItemUpdate?: WorkItemUpdate;
+  /** Raw learn-rules CLI output: either ProposedRules JSON or an { error, stderr? } shape.
+   *  Not schema-validated (comes from a subprocess, not a Zod-checked agent run) — PipelineState
+   *  types this the same way (`unknown`), so the dashboard mirrors it rather than inventing a union. */
+  learnedRules?: unknown;
+  testCases?: TestCasesOutput;
+  testCaseReviews?: ReviewVerdict[];
+  docsWriterDrafts?: DocsWriterOutput;
   environment?: {
     envId: string;
     url: string;
@@ -61,8 +74,11 @@ export interface DashboardSession {
   humanFeedback?: {
     rerunComment?: string;
     source?: string;
-    prReviewComments?: any[];
+    prReviewComments?: PRReviewComment[];
     commentSummary?: string;
+    /** Human discussion comments from the work item (since checkpoint entry). */
+    workItemComments?: Array<{ author: string; text: string; createdDate: string }>;
+    testCaseFailures?: TestCaseFailure[];
   };
   activeStages?: string[];
   legacySkipped?: string[];

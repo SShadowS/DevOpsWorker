@@ -1,5 +1,3 @@
-import type { RepoRegistry } from '../config/repo-config.ts';
-import type { CompanionDef } from '../config/companions.ts';
 import type { PipelineDefinition } from '../types/pipeline.types.ts';
 import { registerRepos } from '../config/repos.ts';
 import { registerCompanions } from '../config/companions.ts';
@@ -9,7 +7,7 @@ import type { OverlayManifest, PipelineBuildContext } from './types.ts';
 export type { OverlayManifest, AdoDefaults, PipelineBuildContext } from './types.ts';
 export type { PipelineEdit } from './stage-edit.ts';
 export { applyPipelineEdits } from './stage-edit.ts';
-export { loadManifest, resolvePrivateDir, resetManifestCache, resolveAgentOverlayDir } from './loader.ts';
+export { loadManifest, resolvePrivateDir, resetManifestCache, resolveAgentOverlayDir, getCachedManifest } from './loader.ts';
 export { resolveAgentKnobs } from './agent-knobs.ts';
 export type { ResolvedAgentKnobs } from './agent-knobs.ts';
 
@@ -32,18 +30,6 @@ export function applyOverlayRegistries(manifest: OverlayManifest): void {
   registerCompanions(manifest.companions ?? {});
 }
 
-/** ADD: overlay repos merged into the core registry (overlay wins on key clash). */
-export function resolveRepos(base: RepoRegistry, manifest: OverlayManifest): RepoRegistry {
-  return { ...base, ...(manifest.repos ?? {}) };
-}
-
-/** ADD: overlay companions merged into the core companion registry. */
-export function resolveCompanions(
-  base: Record<string, CompanionDef>,
-  manifest: OverlayManifest,
-): Record<string, CompanionDef> {
-  return { ...base, ...(manifest.companions ?? {}) };
-}
 
 /** Declarative stage edits applied to the core pipeline, built from config/repo.
  *  With no overlay (or no `pipeline` builder) this is the identity on `base`. */

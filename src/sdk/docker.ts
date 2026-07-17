@@ -66,18 +66,44 @@ export function buildDockerArgs(config: ContainerConfig): string[] {
 }
 
 /**
- * Create a workspace volume for a work item.
+ * Create a docker volume by exact name. Low-level primitive — prefer
+ * `createWorkspaceVolume` for the `wi-{id}` naming convention; call this
+ * directly only when a caller uses its own naming scheme (e.g. PR review's
+ * `pr-review-{prId}`) and still wants to share the spawn logic.
  */
-export async function createWorkspaceVolume(workItemId: number): Promise<string> {
-  const volumeName = `wi-${workItemId}`;
-  const proc = Bun.spawn(['docker', 'volume', 'create', volumeName], {
+export async function createVolume(name: string): Promise<void> {
+  const proc = Bun.spawn(['docker', 'volume', 'create', name], {
     stdout: 'pipe', stderr: 'pipe',
   });
   await proc.exited;
   if (proc.exitCode !== 0) {
     const stderr = await new Response(proc.stderr).text();
-    throw new Error(`Failed to create volume ${volumeName}: ${stderr}`);
+    throw new Error(`Failed to create volume ${name}: ${stderr}`);
   }
+}
+
+/** Remove a docker volume by exact name. Ignores errors — volume may not exist. */
+export async function removeVolume(name: string): Promise<void> {
+  const proc = Bun.spawn(['docker', 'volume', 'rm', '-f', name], {
+    stdout: 'pipe', stderr: 'pipe',
+  });
+  await proc.exited;
+}
+
+/** Remove a docker container by exact name. Ignores errors — container may not exist. */
+export async function removeContainer(name: string): Promise<void> {
+  const proc = Bun.spawn(['docker', 'rm', '-f', name], {
+    stdout: 'pipe', stderr: 'pipe',
+  });
+  await proc.exited;
+}
+
+/**
+ * Create a workspace volume for a work item.
+ */
+export async function createWorkspaceVolume(workItemId: number): Promise<string> {
+  const volumeName = `wi-${workItemId}`;
+  await createVolume(volumeName);
   return volumeName;
 }
 
@@ -85,24 +111,14 @@ export async function createWorkspaceVolume(workItemId: number): Promise<string>
  * Remove a workspace volume.
  */
 export async function removeWorkspaceVolume(workItemId: number): Promise<void> {
-  const volumeName = `wi-${workItemId}`;
-  const proc = Bun.spawn(['docker', 'volume', 'rm', '-f', volumeName], {
-    stdout: 'pipe', stderr: 'pipe',
-  });
-  await proc.exited;
-  // Ignore errors — volume may not exist
+  await removeVolume(`wi-${workItemId}`);
 }
 
 /**
  * Remove any stale container with the given work item ID.
  */
 export async function removeStaleContainer(workItemId: number): Promise<void> {
-  const containerName = `wi-${workItemId}`;
-  const proc = Bun.spawn(['docker', 'rm', '-f', containerName], {
-    stdout: 'pipe', stderr: 'pipe',
-  });
-  await proc.exited;
-  // Ignore errors — container may not exist
+  await removeContainer(`wi-${workItemId}`);
 }
 
 /**

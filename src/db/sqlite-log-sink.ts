@@ -5,7 +5,7 @@ import type {
   LogPage,
   ReadStageLogPageOptions,
 } from '../pipeline/log-sink.interface.ts';
-import { buildLogPage } from './pg-log-sink.ts';
+import { buildLogPage, rowToLogEntry } from './pg-log-sink.ts';
 
 export type { LogEntry };
 
@@ -32,9 +32,10 @@ export class SqliteLogSink implements ILogSink {
   /** Read all log entries for a given stage (for dashboard/debugging). */
   readStageLog(stageName: string): LogEntry[] {
     try {
-      return this.db.query(
+      const rows = this.db.query(
         'SELECT id, stage_name, entry_type, content, created_at FROM stage_logs WHERE work_item_id = ? AND stage_name = ? ORDER BY id',
-      ).all(this.workItemId, stageName) as LogEntry[];
+      ).all(this.workItemId, stageName) as any[];
+      return rows.map(rowToLogEntry);
     } catch {
       return [];
     }
@@ -51,8 +52,8 @@ export class SqliteLogSink implements ILogSink {
           ).all(this.workItemId, stageName, beforeId, fetchCount)
         : this.db.query(
             'SELECT id, stage_name, entry_type, content, created_at FROM stage_logs WHERE work_item_id = ? AND stage_name = ? ORDER BY id DESC LIMIT ?',
-          ).all(this.workItemId, stageName, fetchCount)) as LogEntry[];
-      return buildLogPage(descRows, limit);
+          ).all(this.workItemId, stageName, fetchCount)) as any[];
+      return buildLogPage(descRows.map(rowToLogEntry), limit);
     } catch {
       return empty;
     }

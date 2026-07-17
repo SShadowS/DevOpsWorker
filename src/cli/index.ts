@@ -8,6 +8,15 @@ const args = process.argv.slice(2);
 const command = args[0];
 
 async function main() {
+  // Set agent-runtime env (e.g. CLAUDE_CODE_DISABLE_BACKGROUND_TASKS) before any
+  // command that might run an agent. Every CLI command is dispatched from here,
+  // so a single call covers run/continue/diagnose/review-pr/watch's spawned
+  // containers (which re-enter this same main() in their own process). Explicit
+  // rather than an import-time side effect in run-agent.ts, so tests that import
+  // its pure helpers don't get process-global env mutated on them.
+  const { initAgentRuntime } = await import('../sdk/run-agent.ts');
+  initAgentRuntime();
+
   // Load the private overlay (if any) and populate the repo/companion registries
   // before any command runs. Public core ships empty registries; the overlay
   // supplies the real ones. Idempotent + cheap (manifest load is memoised).

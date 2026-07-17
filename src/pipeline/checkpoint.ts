@@ -5,6 +5,7 @@ import type {
   PipelineConfig,
   CheckpointConfig,
   TestCaseFailure,
+  StageResult,
 } from '../types/pipeline.types.ts';
 import {
   checkWorkItemTag,
@@ -138,7 +139,7 @@ export function checkpoint(config: CheckpointConfig): Stage {
       return true;
     },
 
-    async execute(state: PipelineState, context: PipelineContext): Promise<PipelineState> {
+    async execute(state: PipelineState, context: PipelineContext): Promise<StageResult> {
       const now = new Date().toISOString();
       const logger = context.logger;
 
@@ -234,23 +235,29 @@ export function checkpoint(config: CheckpointConfig): Stage {
               }
             }
 
+            // Set revisionFeedback on the returned state (persisted — the
+            // watcher/dashboard/resume path read it) AND emit an explicit rewind
+            // signal so the orchestrator's in-loop decision doesn't sniff state.
             return {
-              ...state,
-              checkpoint: undefined,
-              rerunMode: cmd.rerunMode as PipelineState['rerunMode'],
-              revisionFeedback: {
-                source,
-                feedback,
-                targetStage: cmd.rewindToStage,
+              state: {
+                ...state,
+                checkpoint: undefined,
+                rerunMode: cmd.rerunMode as PipelineState['rerunMode'],
+                revisionFeedback: {
+                  source,
+                  feedback,
+                  targetStage: cmd.rewindToStage,
+                },
+                humanFeedback: {
+                  rerunComment: feedback,
+                  source,
+                  prReviewComments,
+                  commentSummary,
+                  workItemComments,
+                  testCaseFailures,
+                },
               },
-              humanFeedback: {
-                rerunComment: feedback,
-                source,
-                prReviewComments,
-                commentSummary,
-                workItemComments,
-                testCaseFailures,
-              },
+              signal: { kind: 'rewind', targetStage: cmd.rewindToStage },
             };
           }
         }
@@ -282,20 +289,27 @@ export function checkpoint(config: CheckpointConfig): Stage {
       if (satisfied) {
         logger?.log('Checkpoint satisfied — proceeding');
         return {
-          ...state,
-          checkpoint: undefined,
+          state: {
+            ...state,
+            checkpoint: undefined,
+          },
         };
       }
 
-      // Not satisfied — record checkpoint and return
+      // Not satisfied — record checkpoint (persisted — external observers read it)
+      // and emit a pause signal so the orchestrator halts on the signal, not on a
+      // sniffed state field.
       logger?.log('Checkpoint not satisfied — pipeline will pause');
       const checkpoint = state.checkpoint?.name === config.name
         ? { ...state.checkpoint, lastPolledAt: now }
         : { name: config.name, enteredAt: now, lastPolledAt: now };
 
       return {
-        ...state,
-        checkpoint,
+        state: {
+          ...state,
+          checkpoint,
+        },
+        signal: { kind: 'pause' },
       };
     },
   };

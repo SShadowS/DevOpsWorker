@@ -24,6 +24,8 @@ export type { PipelineEdit } from './stage-edit.ts';
 // --- Core domain types an overlay's stages / providers operate on ----------
 export type {
   Stage,
+  StageResult,
+  StageSignal,
   PipelineState,
   PipelineContext,
   PipelineConfig,

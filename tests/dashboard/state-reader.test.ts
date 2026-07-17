@@ -322,9 +322,11 @@ describe('state-reader: session structure', () => {
 
   test('agent outputs are passed through to session', async () => {
     const store = setup();
-    const readiness = { verdict: 'proceed', enrichedContext: {} as any, gaps: [], summary: 'ok' };
-    const devPlan = { summary: 'plan', objects: [], testScenarios: [] };
-    const draftPR = { title: 'PR', sourceBranch: 'feat', targetBranch: 'master', linkedWorkItemId: 1, isDraft: true };
+    // Deliberately partial — this test only cares that state-reader passes agent output
+    // through untouched, not that it satisfies the full agent schema.
+    const readiness: any = { verdict: 'proceed', enrichedContext: {}, gaps: [], summary: 'ok' };
+    const devPlan: any = { summary: 'plan', objects: [], testScenarios: [] };
+    const draftPR: any = { title: 'PR', sourceBranch: 'feat', targetBranch: 'master', linkedWorkItemId: 1, isDraft: true };
 
     const session = await saveAndRead(store, 1, freshState({
       currentStage: 'checkpoint:pr-published',

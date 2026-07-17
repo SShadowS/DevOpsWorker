@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { AgentConfig } from '../types/agent.types.ts';
-import type { PipelineState, PipelineContext, Stage } from '../types/pipeline.types.ts';
+import type { PipelineState, PipelineContext, Stage, StageResult } from '../types/pipeline.types.ts';
 import { runAgent } from '../sdk/run-agent.ts';
 import { AgentExecutionError } from '../sdk/errors.ts';
 
@@ -37,7 +37,7 @@ export function agentStage<T extends z.ZodType>(
     name: config.agent.name,
     canRun: config.canRun,
 
-    async execute(state: PipelineState, context: PipelineContext): Promise<PipelineState> {
+    async execute(state: PipelineState, context: PipelineContext): Promise<StageResult> {
       const startedAt = new Date().toISOString();
 
       let result;
@@ -80,11 +80,13 @@ export function agentStage<T extends z.ZodType>(
       const newState = config.applyOutput(state, result.output);
 
       return {
-        ...newState,
-        telemetry: {
-          totalCostUsd: state.telemetry.totalCostUsd + result.costUsd,
-          totalDurationMs: state.telemetry.totalDurationMs + result.durationMs,
-          stages: [...state.telemetry.stages, telemetryEntry],
+        state: {
+          ...newState,
+          telemetry: {
+            totalCostUsd: state.telemetry.totalCostUsd + result.costUsd,
+            totalDurationMs: state.telemetry.totalDurationMs + result.durationMs,
+            stages: [...state.telemetry.stages, telemetryEntry],
+          },
         },
       };
     },

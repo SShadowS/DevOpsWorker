@@ -1,9 +1,9 @@
 export interface LogEntry {
   id: number;
-  stage_name: string;
-  entry_type: string;
+  stageName: string;
+  entryType: string;
   content: string;
-  created_at: string;
+  createdAt: string;
 }
 
 /** A bounded, keyset-paginated slice of a stage's log, in ascending id order. */

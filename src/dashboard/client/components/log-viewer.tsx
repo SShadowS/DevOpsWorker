@@ -25,7 +25,7 @@ function entryClass(type: string): string {
 
 function formatTimestamp(entry: LogEntry, firstTimestamp: string | null): string {
   if (!firstTimestamp) return '';
-  const diff = new Date(entry.created_at).getTime() - new Date(firstTimestamp).getTime();
+  const diff = new Date(entry.createdAt).getTime() - new Date(firstTimestamp).getTime();
   if (isNaN(diff)) return '';
   const secs = (diff / 1000).toFixed(1);
   return `+${secs}s`;
@@ -40,7 +40,7 @@ export function LogViewer() {
   const hasMoreBefore = logHasMoreBefore.value;
   const loadingOlder = logLoadingOlder.value;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const firstTimestamp = entries.length > 0 ? entries[0]!.created_at : null;
+  const firstTimestamp = entries.length > 0 ? entries[0]!.createdAt : null;
 
   // Whether the user is parked at (near) the bottom — gates auto-scroll.
   const pinnedRef = useRef(true);
@@ -103,7 +103,7 @@ export function LogViewer() {
             </button>
           )}
           {entries.map((entry) => (
-            <div key={entry.id} class={`log-entry ${entryClass(entry.entry_type)}`}>
+            <div key={entry.id} class={`log-entry ${entryClass(entry.entryType)}`}>
               <span class="log-entry__time">{formatTimestamp(entry, firstTimestamp)}</span>
               <pre class="log-entry__content">{entry.content}</pre>
             </div>

@@ -60,10 +60,10 @@ describe('loadManifest', () => {
 
   test('loads the default export from manifest.ts', async () => {
     const dir = makeOverlayDir(
-      `export default { models: { coder: 'sonnet' }, pipeline: [] };`,
+      `export default { agents: { coder: { model: 'sonnet' } }, pipeline: [] };`,
     );
     const manifest = await loadManifest({ dir, force: true });
-    expect(manifest.models).toEqual({ coder: 'sonnet' });
+    expect(manifest.agents).toEqual({ coder: { model: 'sonnet' } });
   });
 
   test('throws when the manifest does not default-export an object', async () => {
@@ -72,7 +72,7 @@ describe('loadManifest', () => {
   });
 
   test('memoises the result until reset', async () => {
-    const dir = makeOverlayDir(`export default { models: { coder: 'a' } };`);
+    const dir = makeOverlayDir(`export default { agents: { coder: { model: 'a' } } };`);
     const first = await loadManifest({ dir, force: true });
     // Second call without force returns the cached value regardless of dir.
     const second = await loadManifest({ dir: join(tmpdir(), 'nope-xyz') });

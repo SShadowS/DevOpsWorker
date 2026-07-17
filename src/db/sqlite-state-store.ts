@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import type { IStateStore } from '../pipeline/state-store.interface.ts';
+import type { IStateStore, StateWatermark } from '../pipeline/state-store.interface.ts';
 import type { PipelineState, PipelineConfig } from '../types/pipeline.types.ts';
 
 export class SqliteStateStore implements IStateStore {
@@ -45,5 +45,13 @@ export class SqliteStateStore implements IStateStore {
   listAll(): number[] {
     const rows = this.db.query('SELECT work_item_id FROM pipeline_state').all() as { work_item_id: number }[];
     return rows.map(r => r.work_item_id);
+  }
+
+  /** One cheap aggregate query — no JSON deserialization. */
+  getWatermark(): StateWatermark {
+    const row = this.db.query(
+      'SELECT count(*) AS count, max(updated_at) AS max FROM pipeline_state',
+    ).get() as { count: number; max: string | null };
+    return { count: row.count, maxUpdatedAt: row.max };
   }
 }

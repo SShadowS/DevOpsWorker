@@ -1,4 +1,4 @@
-import type { Stage, PipelineState, PipelineContext } from '../types/pipeline.types.ts';
+import type { Stage, PipelineState, PipelineContext, StageResult } from '../types/pipeline.types.ts';
 import { updateWorkItemFields, postPRComment } from '../sdk/azure-devops-client.ts';
 
 /**
@@ -14,7 +14,7 @@ export function testCaseActivation(): Stage {
       return state.testCases != null && state.testCases.testCases.length > 0;
     },
 
-    async execute(state: PipelineState, context: PipelineContext): Promise<PipelineState> {
+    async execute(state: PipelineState, context: PipelineContext): Promise<StageResult> {
       const testCases = state.testCases!;
 
       // Setting System.State to Ready is idempotent — safe to retry all on failure.
@@ -40,7 +40,7 @@ export function testCaseActivation(): Stage {
 
       state.testCaseActivation = { activatedAt: new Date().toISOString() };
 
-      return state;
+      return { state };
     },
   };
 }

@@ -32,7 +32,7 @@ export class PgLogSink implements ILogSink {
         WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName}
         ORDER BY id
       `;
-      return rows as unknown as LogEntry[];
+      return rows.map(rowToLogEntry);
     } catch {
       return [];
     }
@@ -62,7 +62,7 @@ export class PgLogSink implements ILogSink {
             ORDER BY id DESC
             LIMIT ${fetchCount}
           `;
-      return buildLogPage(rows as unknown as LogEntry[], limit);
+      return buildLogPage(rows.map(rowToLogEntry), limit);
     } catch {
       return empty;
     }
@@ -90,7 +90,7 @@ export class PgLogSink implements ILogSink {
         ORDER BY id
         LIMIT ${limit}
       `;
-      return rows as unknown as LogEntry[];
+      return rows.map(rowToLogEntry);
     } catch {
       return [];
     }
@@ -108,6 +108,17 @@ export class PgLogSink implements ILogSink {
       return 0;
     }
   }
+}
+
+/** Map a raw (snake_case) stage_logs row to the camelCase LogEntry DTO. Shared by the PG, SQLite, and PR-review log sinks. */
+export function rowToLogEntry(r: any): LogEntry {
+  return {
+    id: r.id,
+    stageName: r.stage_name,
+    entryType: r.entry_type,
+    content: r.content,
+    createdAt: r.created_at,
+  };
 }
 
 /**

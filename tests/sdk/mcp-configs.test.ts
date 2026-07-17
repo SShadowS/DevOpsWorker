@@ -201,10 +201,10 @@ const baseEnv: Env = {
   coreActivated: true,
   activated: true,
   credentials: {
-    username: 'Tll',
+    username: 'testuser',
     password: 'secret',
     tenantId: 'default',
-    selectedBy: 'fallback-Tll',
+    selectedBy: 'fallback-default',
   },
 };
 
@@ -229,7 +229,7 @@ describe('bcMcp', () => {
 
   test('wires credentials into env', () => {
     const cfg = bcMcp(baseEnv)!;
-    expect(cfg.env!['BC_USERNAME']).toBe('Tll');
+    expect(cfg.env!['BC_USERNAME']).toBe('testuser');
     expect(cfg.env!['BC_PASSWORD']).toBe('secret');
     expect(cfg.env!['BC_TENANT_ID']).toBe('default');
     expect(cfg.env!['BC_INVOKE_TIMEOUT']).toBe('60000');

@@ -89,9 +89,11 @@ describe('checkpoint', () => {
       detect: { type: 'tag', tag: 'plan-approved' },
     });
 
-    const result = await cp.execute(freshState(), mockContext());
+    const { state: result, signal } = await cp.execute(freshState(), mockContext());
 
     expect(result.checkpoint).toBeUndefined();
+    // Satisfied → proceed: no control-flow signal.
+    expect(signal).toBeUndefined();
   });
 
   test('tag not found -> checkpoint recorded', async () => {
@@ -112,10 +114,13 @@ describe('checkpoint', () => {
       detect: { type: 'tag', tag: 'plan-approved' },
     });
 
-    const result = await cp.execute(freshState(), mockContext());
+    const { state: result, signal } = await cp.execute(freshState(), mockContext());
 
     expect(result.checkpoint).toBeDefined();
     expect(result.checkpoint!.name).toBe('plan-approved');
+    // Not satisfied → the stage signals a pause; state.checkpoint is still set
+    // (persisted) for external observers.
+    expect(signal).toEqual({ kind: 'pause' });
   });
 
   test('PR published -> satisfied', async () => {
@@ -130,7 +135,7 @@ describe('checkpoint', () => {
       draftPR: { id: 100, url: 'http://test', isDraft: true, sourceBranch: 'b', targetBranch: 'master', title: 'T', description: 'D', linkedWorkItemId: 42 },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.checkpoint).toBeUndefined();
   });
@@ -147,7 +152,7 @@ describe('checkpoint', () => {
       draftPR: { id: 100, url: 'http://test', isDraft: true, sourceBranch: 'b', targetBranch: 'master', title: 'T', description: 'D', linkedWorkItemId: 42 },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.checkpoint).toBeDefined();
     expect(result.checkpoint!.name).toBe('pr-published');
@@ -162,7 +167,7 @@ describe('checkpoint', () => {
       detect: { type: 'draft-pr' },
     });
 
-    const result = await cp.execute(freshState(), mockContext());
+    const { state: result } = await cp.execute(freshState(), mockContext());
 
     expect(result.checkpoint).toBeDefined();
     // fetch should NOT have been called since there's no PR ID
@@ -189,7 +194,7 @@ describe('checkpoint', () => {
     });
 
     // No checkpoint in state — first entry
-    const result = await cp.execute(freshState(), mockContext());
+    const { state: result } = await cp.execute(freshState(), mockContext());
 
     // Should NOT have revision feedback — rerun check was skipped
     expect(result.revisionFeedback).toBeUndefined();
@@ -217,12 +222,15 @@ describe('checkpoint', () => {
       checkpoint: { name: 'plan-approved', enteredAt: '2020-01-01T00:00:00Z' },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result, signal } = await cp.execute(state, mockContext());
 
     expect(result.revisionFeedback).toBeDefined();
     expect(result.revisionFeedback!.targetStage).toBe('planning');
     expect(result.revisionFeedback!.feedback).toContain('/rerun-plan');
     expect(result.checkpoint).toBeUndefined();
+    // Rerun detected → the stage signals a rewind to the target; state.revisionFeedback
+    // is still set (persisted) for the resume path + dashboard.
+    expect(signal).toEqual({ kind: 'rewind', targetStage: 'planning' });
   });
 
   test('rerun command populates humanFeedback with rerun comment', async () => {
@@ -244,7 +252,7 @@ describe('checkpoint', () => {
       checkpoint: { name: 'plan-approved', enteredAt: '2020-01-01T00:00:00Z' },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.humanFeedback).toBeDefined();
     expect(result.humanFeedback!.rerunComment).toContain('/rerun-plan focus on error handling');
@@ -299,7 +307,7 @@ describe('checkpoint', () => {
       draftPR: { id: 100, url: 'http://test', isDraft: true, sourceBranch: 'b', targetBranch: 'master', title: 'T', description: 'D', linkedWorkItemId: 42 },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.humanFeedback).toBeDefined();
     expect(result.humanFeedback!.prReviewComments).toBeDefined();
@@ -357,7 +365,7 @@ describe('checkpoint', () => {
       draftPR: { id: 100, url: 'http://test', isDraft: true, sourceBranch: 'b', targetBranch: 'master', title: 'T', description: 'D', linkedWorkItemId: 42 },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     // Only the "New comment" should pass the timestamp filter
     expect(result.humanFeedback!.prReviewComments).toBeDefined();
@@ -385,7 +393,7 @@ describe('checkpoint', () => {
       // No draftPR
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.humanFeedback).toBeDefined();
     expect(result.humanFeedback!.prReviewComments).toBeUndefined();
@@ -420,7 +428,7 @@ describe('checkpoint', () => {
     });
 
     // Should not throw
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.humanFeedback).toBeDefined();
     expect(result.humanFeedback!.rerunComment).toContain('/fix');
@@ -451,7 +459,7 @@ describe('checkpoint', () => {
       checkpoint: { name: 'pr-published', enteredAt: '2020-01-01T00:00:00Z' },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.revisionFeedback).toBeDefined();
     expect(result.revisionFeedback!.targetStage).toBe('coding');
@@ -503,7 +511,7 @@ describe('checkpoint', () => {
       checkpoint: { name: 'pr-published', enteredAt: '2020-01-01T00:00:00Z' },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.revisionFeedback).toBeDefined();
     expect(result.revisionFeedback!.targetStage).toBe('planning');
@@ -555,7 +563,7 @@ describe('checkpoint', () => {
       checkpoint: { name: 'plan-approved', enteredAt: '2020-01-01T00:00:00Z' },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.revisionFeedback).toBeDefined();
     expect(result.revisionFeedback!.targetStage).toBe('planning');
@@ -592,7 +600,7 @@ describe('checkpoint', () => {
     });
 
     // Should not throw
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     // Rewind still happens despite tag removal failure
     expect(result.revisionFeedback).toBeDefined();
@@ -619,7 +627,7 @@ describe('checkpoint', () => {
       checkpoint: { name: 'plan-approved', enteredAt: '2020-01-01T00:00:00Z' },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.revisionFeedback).toBeDefined();
     expect(result.revisionFeedback!.targetStage).toBe('planning');
@@ -645,7 +653,7 @@ describe('checkpoint', () => {
       checkpoint: { name: 'test-cp', enteredAt: '2026-01-01T00:00:00Z' },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
     expect(result.rerunMode).toBe('fix');
     expect(result.revisionFeedback?.targetStage).toBe('coding');
   });
@@ -670,7 +678,7 @@ describe('checkpoint', () => {
       checkpoint: { name: 'test-cp', enteredAt: '2026-01-01T00:00:00Z' },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
     expect(result.rerunMode).toBeUndefined();
     expect(result.revisionFeedback?.targetStage).toBe('planning');
   });
@@ -692,7 +700,7 @@ describe('checkpoint', () => {
       checkpoint: { name: 'plan-approved', enteredAt: '2020-01-01T00:00:00Z' },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.revisionFeedback).toBeDefined();
     expect(result.revisionFeedback!.targetStage).toBe('plan-approved');
@@ -749,7 +757,7 @@ describe('checkpoint', () => {
       draftPR: { id: 100, url: 'http://test', isDraft: false, sourceBranch: 'b', targetBranch: 'master', title: 'T', description: 'D', linkedWorkItemId: 42 },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.rerunMode).toBe('fix-test');
     expect(result.revisionFeedback).toBeDefined();
@@ -857,7 +865,7 @@ describe('checkpoint', () => {
       draftPR: { id: 100, url: 'http://test', isDraft: false, sourceBranch: 'b', targetBranch: 'master', title: 'T', description: 'D', linkedWorkItemId: 42 },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.rerunMode).toBe('fix-test');
     expect(result.humanFeedback).toBeDefined();
@@ -881,7 +889,7 @@ describe('checkpoint', () => {
       draftPR: { id: 100, url: 'http://test', isDraft: false, sourceBranch: 'b', targetBranch: 'master', title: 'T', description: 'D', linkedWorkItemId: 42 },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.checkpoint).toBeUndefined();
   });
@@ -898,7 +906,7 @@ describe('checkpoint', () => {
       draftPR: { id: 100, url: 'http://test', isDraft: false, sourceBranch: 'b', targetBranch: 'master', title: 'T', description: 'D', linkedWorkItemId: 42 },
     });
 
-    const result = await cp.execute(state, mockContext());
+    const { state: result } = await cp.execute(state, mockContext());
 
     expect(result.checkpoint).toBeDefined();
     expect(result.checkpoint!.name).toBe('pr-completed');
@@ -913,7 +921,7 @@ describe('checkpoint', () => {
       detect: { type: 'pr-completed' },
     });
 
-    const result = await cp.execute(freshState(), mockContext());
+    const { state: result } = await cp.execute(freshState(), mockContext());
 
     expect(result.checkpoint).toBeDefined();
     expect(fetchMock).not.toHaveBeenCalled();

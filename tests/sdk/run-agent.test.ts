@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach, afterAll } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, afterEach, afterAll } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -19,7 +19,7 @@ mock.module('@anthropic-ai/claude-agent-sdk', () => ({
 }));
 
 // Import AFTER mock is set up
-const { runAgent, isRetryableError, detectApiError } = await import('../../src/sdk/run-agent.ts');
+const { runAgent, isRetryableError, detectApiError, initAgentRuntime } = await import('../../src/sdk/run-agent.ts');
 
 // Shared temp agent directory for tests using the preset path
 const testTempDir = mkdtempSync(join(tmpdir(), 'runagent-test-'));
@@ -506,6 +506,54 @@ describe('isRetryableError', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests: initAgentRuntime
+//
+// Note: we can't practically assert "importing run-agent.ts does NOT set
+// CLAUDE_CODE_DISABLE_BACKGROUND_TASKS" here — Bun caches modules per process,
+// and this file already imported run-agent.ts above (before this describe
+// block even runs) to get at runAgent/isRetryableError/detectApiError. That
+// import already happened without setting the env var (there's no top-level
+// statement left in run-agent.ts that could), which is the structural
+// guarantee the brief asks for: the mutation now only happens inside the
+// exported function body, never at module-eval time. What IS practical to
+// assert directly is initAgentRuntime()'s own contract below.
+// ---------------------------------------------------------------------------
+
+describe('initAgentRuntime', () => {
+  const ENV_KEY = 'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS';
+  let original: string | undefined;
+
+  beforeEach(() => {
+    original = process.env[ENV_KEY];
+    delete process.env[ENV_KEY];
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = original;
+  });
+
+  test('sets the env var to "1" when unset', () => {
+    expect(process.env[ENV_KEY]).toBeUndefined();
+    initAgentRuntime();
+    expect(process.env[ENV_KEY]).toBe('1');
+  });
+
+  test('is idempotent across repeated calls', () => {
+    initAgentRuntime();
+    initAgentRuntime();
+    initAgentRuntime();
+    expect(process.env[ENV_KEY]).toBe('1');
+  });
+
+  test('does not override a pre-existing value', () => {
+    process.env[ENV_KEY] = '0';
+    initAgentRuntime();
+    expect(process.env[ENV_KEY]).toBe('0');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tests: detectApiError
 // ---------------------------------------------------------------------------
 
@@ -874,7 +922,7 @@ describe('agentStage (integration)', () => {
       applyOutput: (s, output) => { captured = output; return s; },
     });
 
-    const result = await stage.execute(freshState(), testContext());
+    const { state: result } = await stage.execute(freshState(), testContext());
 
     expect(captured).toEqual({ value: 'hello' });
     expect(result.telemetry.totalCostUsd).toBe(0.15);
@@ -910,7 +958,7 @@ describe('agentStage (integration)', () => {
       applyOutput: (s, _output) => s,
     });
 
-    const result = await stage.execute(freshState(), testContext());
+    const { state: result } = await stage.execute(freshState(), testContext());
 
     expect(result.telemetry.stages[0]!.toolCalls).toEqual({ Read: 2, Bash: 1 });
   });
@@ -936,7 +984,7 @@ describe('agentStage (integration)', () => {
       },
     };
 
-    const result = await stage.execute(state, testContext());
+    const { state: result } = await stage.execute(state, testContext());
 
     expect(result.telemetry.totalCostUsd).toBeCloseTo(0.15);
     expect(result.telemetry.totalDurationMs).toBe(3000);

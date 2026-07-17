@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, mock, spyOn } from 'bun:test';
 import { runPipeline } from '../../src/pipeline/orchestrator.ts';
 import { StateStore } from '../../src/pipeline/state-store.ts';
-import type { Stage, PipelineState, PipelineContext, PipelineConfig } from '../../src/types/pipeline.types.ts';
+import type { Stage, StageSignal, PipelineState, PipelineContext, PipelineConfig } from '../../src/types/pipeline.types.ts';
 import { PipelineError, AgentExecutionError } from '../../src/sdk/errors.ts';
 
 // ---------------------------------------------------------------------------
@@ -48,11 +48,21 @@ function mockContext(): PipelineContext {
   };
 }
 
+// The signal a stage returns now drives the orchestrator's pause/rewind decision.
+// This test double mirrors the real checkpoint stage: it sets the persisted state
+// field (checkpoint / revisionFeedback) AND emits the matching control signal, so
+// existing tests keep exercising the same behavior through the new contract.
 function mockStage(name: string, effect?: (s: PipelineState) => PipelineState): Stage {
   return {
     name,
     canRun: () => true,
-    execute: async (state) => effect ? effect(state) : state,
+    execute: async (state) => {
+      const next = effect ? effect(state) : state;
+      let signal: StageSignal | undefined;
+      if (next.checkpoint) signal = { kind: 'pause' };
+      else if (next.revisionFeedback) signal = { kind: 'rewind', targetStage: next.revisionFeedback.targetStage };
+      return { state: next, signal };
+    },
   };
 }
 
@@ -423,7 +433,7 @@ describe('runPipeline', () => {
     const reporting = mockStage('planning', (s) => s);
     reporting.execute = async (s, ctx) => {
       await ctx.reportActiveAgent?.(s, { name: 'plan-reviewer', loop: 'planning', role: 'reviewer', iteration: 1, startedAt: '2024-01-01T00:00:00.000Z' });
-      return s;
+      return { state: s };
     };
 
     await runPipeline({ stages: [reporting], context: mockContext(), stateStore: fakeStore });
@@ -445,7 +455,7 @@ describe('runPipeline', () => {
     const stage = mockStage('coding', (s) => s);
     stage.execute = async (s, ctx) => {
       await ctx.reportActiveAgent?.(s, { name: 'x', loop: 'planning', role: 'reviewer', iteration: 1, startedAt: '2024-01-01T00:00:00.000Z' });
-      return s;
+      return { state: s };
     };
 
     await runPipeline({ stages: [stage], context: mockContext(), stateStore: fakeStore });
@@ -465,7 +475,7 @@ describe('runPipeline', () => {
     stage.execute = async (s, ctx) => {
       await ctx.reportActiveAgent?.(s, { name: 'p', loop: 'planning', role: 'producer', iteration: 1, startedAt: '2024-01-01T00:00:00.000Z' });
       executed = true;
-      return s;
+      return { state: s };
     };
 
     const result = await runPipeline({ stages: [stage], context: mockContext(), stateStore: fakeStore });
@@ -483,7 +493,7 @@ describe('runPipeline', () => {
 
     let captured: PipelineContext['reportActiveAgent'];
     const stage = mockStage('planning');
-    stage.execute = async (s, ctx) => { captured = ctx.reportActiveAgent; return s; };
+    stage.execute = async (s, ctx) => { captured = ctx.reportActiveAgent; return { state: s }; };
 
     await runPipeline({ stages: [stage], context: mockContext(), stateStore: fakeStore });
     const before = saved.length;

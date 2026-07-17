@@ -24,8 +24,7 @@ const CORE_TOOLS = new Set([
  * Validates overridden knobs and throws a clear error rather than letting a typo
  * surface as a cryptic mid-run SDK failure.
  *
- * `model` precedence: override → base.model → perAgent[name] → default.
- * (The deprecated OverlayManifest.models map is deliberately NOT consulted.)
+ * `model` precedence: override (manifest.agents[name].model) → base.model → perAgent[name] → default.
  */
 export function resolveAgentKnobs(
   base: AgentConfig<any>,
