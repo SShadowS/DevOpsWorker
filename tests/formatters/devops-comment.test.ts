@@ -5,6 +5,7 @@ import {
   formatChangesetSummary,
   formatErrorComment,
   formatTelemetrySummary,
+  isPipelineComment,
 } from '../../src/formatters/devops-comment.ts';
 import { TransientAgentError } from '../../src/sdk/errors.ts';
 import type { ReadinessReport } from '../../src/agents/analyzer/schema.ts';
@@ -445,6 +446,37 @@ describe('formatErrorComment', () => {
     expect(html).toContain('<li>Restart the service</li>');
     expect(html).toContain('<li>Verify the output</li>');
     expect(html).toContain('</ol>');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isPipelineComment — moved here from the ADO transport client (task 11):
+// the signatures encode what THIS module's formatters emit, so detecting
+// them belongs here, not in the HTTP layer.
+// ---------------------------------------------------------------------------
+
+describe('isPipelineComment', () => {
+  test('is importable from formatters (not the ADO transport client)', () => {
+    expect(typeof isPipelineComment).toBe('function');
+  });
+
+  test('recognizes output produced by formatReadinessComment', () => {
+    const html = formatReadinessComment(1, makeReadinessReport());
+    expect(isPipelineComment(html)).toBe(true);
+  });
+
+  test('recognizes output produced by formatPlanComment', () => {
+    const md = formatPlanComment(1, makeDevPlan());
+    expect(isPipelineComment(md)).toBe(true);
+  });
+
+  test('recognizes output produced by formatErrorComment', () => {
+    const html = formatErrorComment(1, 'coder', new Error('boom'));
+    expect(isPipelineComment(html)).toBe(true);
+  });
+
+  test('does not flag ordinary human comments', () => {
+    expect(isPipelineComment('This looks good, but use pattern X')).toBe(false);
   });
 });
 
