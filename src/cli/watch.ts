@@ -2,24 +2,13 @@ import { execSync } from 'node:child_process';
 import type { IStateStore } from '../pipeline/state-store.interface.ts';
 import type { IActionStore } from '../pipeline/action-store.interface.ts';
 import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
-import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import { connectStores } from '../db/connect-stores.ts';
 import { loadConfig } from './config.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
-import { queryWorkItems, postWorkItemComment, addWorkItemTags, removeWorkItemTags, findRerunCommandInComments, findRerunCommandInPRComments, getPullRequestStatus, fetchTestCaseFailures } from '../sdk/azure-devops-client.ts';
-import { formatErrorComment } from '../formatters/devops-comment.ts';
-import { findRepoByRepositoryId, buildAreaPathFilter, getActiveAreaPaths } from '../config/repos.ts';
-import {
-  buildDockerArgs,
-  removeWorkspaceVolume,
-  spawnContainer,
-  createVolume,
-  removeVolume,
-  removeContainer,
-} from '../sdk/docker.ts';
+import { queryWorkItems, addWorkItemTags, removeWorkItemTags, findRerunCommandInComments, findRerunCommandInPRComments, getPullRequestStatus, fetchTestCaseFailures } from '../sdk/azure-devops-client.ts';
+import { buildAreaPathFilter, getActiveAreaPaths } from '../config/repos.ts';
+import { removeWorkspaceVolume } from '../sdk/docker.ts';
 import type { PipelineConfig, PipelineState, TestCaseFailure } from '../types/pipeline.types.ts';
-import type { PipelineAction } from '../dashboard/actions.ts';
-import { loadManifest } from '../overlay/index.ts';
 import { notifyDiscord } from '../sdk/discord-notify.ts';
 import {
   detectWork,
@@ -46,11 +35,12 @@ import {
 } from './watch/watch-logger.ts';
 import {
   getPrReviewContainerEnv,
-  handleContainerOutcome,
   executeStartFresh,
   executeContinue,
   type WatchConfig,
 } from './watch/container-dispatcher.ts';
+import { ensurePat, reprovisionEnv } from './watch/env-actions.ts';
+import { processActionFiles } from './watch/action-processor.ts';
 
 // Re-exported for existing consumers/tests that import these from watch.ts.
 export { colorForWI, releaseColor, _resetColorState, getPrReviewContainerEnv };
@@ -237,7 +227,7 @@ async function gatherWorkDetectionInputs(
       continue;
     }
     // Ensure PAT is available (persisted config may have empty PAT).
-    if (!prConfig.azureDevOps.pat) prConfig.azureDevOps.pat = config.azureDevOps.pat;
+    ensurePat(prConfig, config.azureDevOps.pat);
 
     let prStatus: { status: string; isDraft: boolean } | null = null;
     try {
@@ -260,7 +250,7 @@ async function gatherWorkDetectionInputs(
 
     const prConfig = await stateStore.loadConfig(id);
     if (!prConfig) continue;
-    if (!prConfig.azureDevOps.pat) prConfig.azureDevOps.pat = config.azureDevOps.pat;
+    ensurePat(prConfig, config.azureDevOps.pat);
 
     const since = sinceFor(state);
     const found = await findRerunCommandInPRComments(state.draftPR!.id, '/reprovision-env', prConfig, since).catch(() => null);
@@ -295,7 +285,7 @@ async function applyDetectedActions(
 
     if (action.kind === 'reprovision') {
       const ctx = reprovisionCtx.get(action.workItemId);
-      if (ctx) await executeReprovision(action.workItemId, ctx.state, ctx.prConfig, stateStore);
+      if (ctx) await reprovisionEnv(action.workItemId, ctx.state, ctx.prConfig, stateStore);
       continue; // side effect only — not dispatched to a container
     }
 
@@ -321,30 +311,11 @@ async function applyDetectedActions(
   return result;
 }
 
-/** Execute a /reprovision-env action: reprovision the BC env, or escalate on failure. */
-async function executeReprovision(
-  workItemId: number,
-  state: PipelineState,
-  prConfig: PipelineConfig,
-  stateStore: IStateStore,
-): Promise<void> {
-  try {
-    const ep = (await loadManifest()).envProvider?.({ config: prConfig });
-    if (!ep) { logWI(workItemId, 'No env provider configured (no overlay) — skipping reprovision'); return; }
-    await ep.reprovision(workItemId, state, prConfig, stateStore);
-    logWI(workItemId, 'Environment reprovisioned successfully');
-  } catch (err) {
-    logWIError(workItemId, 'Failed to reprovision environment', err);
-    const comment = formatErrorComment(workItemId, 'env-reprovision', err instanceof Error ? err : new Error(String(err)));
-    await postWorkItemComment(workItemId, comment, prConfig).catch(() => {});
-    await addWorkItemTags(workItemId, ['need-input'], prConfig).catch(() => {});
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Container dispatch — getContainerEnv/getPrReviewContainerEnv/
 // handleContainerOutcome/executeStartFresh/executeContinue/resolveRepoForWorkItem
-// live in ./watch/container-dispatcher.ts (imported above).
+// live in ./watch/container-dispatcher.ts (imported above). reprovisionEnv/
+// ensurePat/getEnvProvider live in ./watch/env-actions.ts (imported above).
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -397,367 +368,11 @@ async function findOrphanedSessions(
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard action file processing
+// Dashboard action queue — trackedExecute/processActionFiles/executeAction
+// (the 12-arm dispatch: approve-plan/rerun-plan/fix/fix-test/continue/
+// review-pr/force-poll/env-start/env-stop/env-delete/env-share/
+// reprovision-env) live in ./watch/action-processor.ts (imported above).
 // ---------------------------------------------------------------------------
-
-/** Run an action's body and record terminal status in the action store.
- *  On success: markCompleted. On failure: markFailed (the original error is still rethrown). */
-async function trackedExecute(
-  actionStore: IActionStore,
-  actionId: number,
-  body: () => Promise<void>,
-): Promise<void> {
-  try {
-    await body();
-    await actionStore.markCompleted(actionId);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await actionStore.markFailed(actionId, msg).catch(() => {});
-    throw err;
-  }
-}
-
-async function processActionFiles(
-  stateStore: IStateStore,
-  actionStore: IActionStore,
-  prReviewStore: IPRReviewStore,
-  running: Map<number, Promise<void>>,
-  maxConcurrency: number,
-  pollingConfig: PipelineConfig,
-  watchConfig: WatchConfig,
-): Promise<void> {
-  const ids = await actionStore.listPending();
-  if (ids.length === 0) return;
-
-  for (const workItemId of ids) {
-    // Check concurrency limit before claiming (claim transitions pending → running)
-    if (running.size >= maxConcurrency) {
-      log(`Concurrency limit reached (${running.size}/${maxConcurrency}), deferring remaining actions`);
-      break;
-    }
-
-    const action = await actionStore.claimNextPending(workItemId);
-    if (!action) continue;
-    const actionId = action.id!;
-
-    // Force-poll: terminal immediately, no body
-    if (action.type === 'force-poll') {
-      log('Force-poll requested from dashboard');
-      await actionStore.markCompleted(actionId);
-      continue;
-    }
-
-    // Env actions are quick CLI calls — execute without taking a concurrency slot
-    if (action.type.startsWith('env-')) {
-      logWI(workItemId, `Processing env action: ${action.type}`);
-      trackedExecute(actionStore, actionId,
-        () => executeAction(action, stateStore, prReviewStore, pollingConfig, watchConfig),
-      ).catch(err => logWIError(workItemId, `Failed env action ${action.type}`, err));
-      continue;
-    }
-
-    // PR reviews share workItemId=0 — use negative PR ID as concurrency key to allow parallel reviews
-    let concurrencyKey = workItemId;
-    if (action.type === 'review-pr') {
-      const prId = JSON.parse(action.feedback ?? '{}').prId;
-      concurrencyKey = prId ? -prId : workItemId;
-      if (running.has(concurrencyKey)) {
-        log(`[PR #${prId}] Already reviewing, skipping`);
-        // Release the claim — another worker still holds the slot.
-        await actionStore.markFailed(actionId, 'duplicate: another review for this PR is already running');
-        continue;
-      }
-      log(`[PR #${prId ?? '?'}] Processing review-pr action`);
-    } else {
-      if (running.has(workItemId)) {
-        log(`Skipping action for WI #${workItemId} — pipeline already running`);
-        await actionStore.markFailed(actionId, 'duplicate: pipeline already running for this work item');
-        continue;
-      }
-      logWI(workItemId, `Processing dashboard action: ${action.type}`);
-    }
-
-    const promise = trackedExecute(actionStore, actionId,
-      () => executeAction(action, stateStore, prReviewStore, pollingConfig, watchConfig),
-    )
-      .catch(err => logWIError(workItemId, `Failed to execute action ${action.type}`, err))
-      .finally(() => { running.delete(concurrencyKey); releaseColor(workItemId); });
-    running.set(concurrencyKey, promise);
-  }
-}
-
-async function executeAction(
-  action: PipelineAction,
-  stateStore: IStateStore,
-  prReviewStore: IPRReviewStore,
-  pollingConfig: PipelineConfig,
-  watchConfig: WatchConfig,
-): Promise<void> {
-  // review-pr actions don't have pipeline state (workItemId is 0)
-  // Spawn a Docker container that runs the review (same infra as pipeline stages)
-  if (action.type === 'review-pr') {
-    const payload = JSON.parse(action.feedback ?? '{}');
-    const { prId, repoKey, repositoryId, project, sourceBranch, targetBranch, prUrl } = payload;
-    if (!prId || !repoKey) {
-      log(`Invalid review-pr action: missing prId or repoKey`);
-      return;
-    }
-
-    const repo = findRepoByRepositoryId(repositoryId);
-    if (!repo) {
-      log(`Cannot review PR #${prId}: unknown repo ${repositoryId}`);
-      return;
-    }
-
-    // Use PR ID as workspace volume name (not work item ID)
-    const workspaceVolume = `pr-review-${prId}`;
-    const containerName = `pr-review-${prId}`;
-    try {
-      // Create workspace volume. Names here are PR-keyed (pr-review-{prId}), not the
-      // wi-{id} scheme createWorkspaceVolume derives — use the generic, name-agnostic
-      // primitives instead of that helper. Swallow create failures exactly like the
-      // original raw spawn did (it awaited .exited without checking the exit code).
-      await createVolume(workspaceVolume).catch(() => {});
-
-      // Remove any stale container
-      await removeContainer(containerName);
-
-      // Build container args
-      const args = buildDockerArgs({
-        workItemId: 0,
-        repoKey: repo.key,
-        repo: repo.config,
-        command: 'review-pr',
-        env: getPrReviewContainerEnv(),
-        stateVolume: watchConfig.stateVolume,
-        workspaceVolume,
-        imageName: watchConfig.imageName,
-        extraArgs: [
-          '--pr-id', String(prId),
-          '--repo-id', repositoryId,
-          '--source-branch', sourceBranch || '',
-          '--target-branch', targetBranch || '',
-          ...(prUrl ? ['--pr-url', prUrl] : []),
-          '--action-id', String(action.id),
-        ],
-      });
-
-      // Override container name (buildDockerArgs uses wi-{id} by default)
-      const nameIdx = args.indexOf('--name');
-      if (nameIdx !== -1 && args[nameIdx + 1]) {
-        args[nameIdx + 1] = containerName;
-      }
-
-      log(`[PR #${prId}] Spawning review container`);
-      const exitCode = await spawnContainer(args);
-
-      if (exitCode === 0) {
-        log(`[PR #${prId}] Review completed`);
-      } else {
-        log(`[PR #${prId}] Review container exited with code ${exitCode}`);
-        // Dedup: review-pr.ts inside the container already notifies on agent
-        // errors (rate-limit, validation, etc.) and writes a pr_reviews row.
-        // Only notify here when the container died before saving — i.e. there
-        // is no row for this action yet (OOM kill, segfault, image issue).
-        const existing = action.id != null
-          ? await prReviewStore.findByActionId(action.id).catch(() => null)
-          : null;
-        if (!existing) {
-          await notifyDiscord({
-            title: `PR review container exit ${exitCode}`,
-            description: `Container died without saving a review row — likely a host-level issue (OOM, image, docker socket).`,
-            severity: 'error',
-            source: 'pr-review-watcher',
-            url: prUrl,
-            fields: [
-              { name: 'PR', value: `#${prId}`, inline: true },
-              { name: 'Repo', value: repo.config.azureDevOps.repositoryName, inline: true },
-              { name: 'Exit code', value: String(exitCode), inline: true },
-            ],
-          });
-        }
-      }
-    } catch (err) {
-      logError(`[PR #${prId}] Failed to review`, err);
-      const msg = err instanceof Error ? err.message : String(err);
-      await notifyDiscord({
-        title: `PR review spawn failed`,
-        description: msg,
-        severity: 'error',
-        source: 'pr-review-watcher',
-        url: prUrl,
-        fields: [
-          { name: 'PR', value: `#${prId}`, inline: true },
-          { name: 'Repo', value: repo.config.azureDevOps.repositoryName, inline: true },
-        ],
-      });
-    } finally {
-      // Clean up workspace volume (PR-keyed name — see createVolume call above)
-      await removeVolume(workspaceVolume);
-    }
-    return;
-  }
-
-  // Normal pipeline actions require state
-  const state = await stateStore.load(action.workItemId);
-  if (!state) {
-    logWI(action.workItemId, `No state found, skipping`);
-    return;
-  }
-
-  switch (action.type) {
-    case 'approve-plan': {
-      // Add the plan-approved tag, then continue the pipeline
-      try {
-        await addWorkItemTags(action.workItemId, ['plan-approved'], pollingConfig);
-        logWI(action.workItemId, `Added "plan-approved" tag`);
-      } catch (err) {
-        logWI(action.workItemId, `Warning: failed to add tag: ${err}`);
-      }
-      await executeContinue(action.workItemId, stateStore, pollingConfig, watchConfig);
-      break;
-    }
-
-    case 'rerun-plan': {
-      state.revisionFeedback = {
-        source: 'dashboard',
-        feedback: action.feedback ?? '',
-        targetStage: 'planning',
-      };
-      state.error = undefined;
-      state.checkpoint = undefined;
-      const rerunFeedback = action.feedback ?? '';
-      const rerunMessage = rerunFeedback.replace(/^\s*\/rerun-plan\s*/i, '').trim();
-      state.humanFeedback = { rerunComment: rerunMessage || rerunFeedback, source: 'work-item-comment' };
-      await stateStore.save(action.workItemId, state);
-      await executeContinue(action.workItemId, stateStore, pollingConfig, watchConfig);
-      break;
-    }
-
-    case 'fix': {
-      state.revisionFeedback = {
-        source: 'dashboard',
-        feedback: action.feedback ?? '',
-        targetStage: 'coding',
-      };
-      state.rerunMode = 'fix';
-      state.error = undefined;
-      state.checkpoint = undefined;
-      const fixFeedbackStr = action.feedback ?? '';
-      const fixMessage = fixFeedbackStr.replace(/^\s*\/fix\s*/i, '').trim();
-      state.humanFeedback = { rerunComment: fixMessage || fixFeedbackStr, source: 'work-item-comment' };
-      await stateStore.save(action.workItemId, state);
-      await executeContinue(action.workItemId, stateStore, pollingConfig, watchConfig);
-      break;
-    }
-
-    case 'fix-test': {
-      state.revisionFeedback = {
-        source: 'dashboard',
-        feedback: action.feedback ?? '',
-        targetStage: 'coding',
-      };
-      state.rerunMode = 'fix-test';
-      state.error = undefined;
-      state.checkpoint = undefined;
-      const fixTestFeedbackStr = action.feedback ?? '';
-      const fixTestMessage = fixTestFeedbackStr.replace(/^\s*\/fix-test\s*/i, '').trim();
-      let dashboardTestCaseFailures: TestCaseFailure[] | undefined;
-      try {
-        dashboardTestCaseFailures = await fetchTestCaseFailures(action.workItemId, pollingConfig);
-      } catch (err) {
-        logWI(action.workItemId, `Warning: failed to fetch test case failures: ${err}`);
-      }
-      state.humanFeedback = {
-        rerunComment: fixTestMessage || fixTestFeedbackStr,
-        source: 'work-item-comment',
-        testCaseFailures: dashboardTestCaseFailures,
-      };
-      await stateStore.save(action.workItemId, state);
-      await executeContinue(action.workItemId, stateStore, pollingConfig, watchConfig);
-      break;
-    }
-
-    case 'continue': {
-      if (state.error?.type === 'revision-exhausted') {
-        state.skipResetState = true;
-      }
-      state.error = undefined;
-      await stateStore.save(action.workItemId, state);
-      await executeContinue(action.workItemId, stateStore, pollingConfig, watchConfig);
-      break;
-    }
-
-    case 'env-start': {
-      if (!state.environment) { logWI(action.workItemId, 'No environment to start'); break; }
-      const config = await stateStore.loadConfig(action.workItemId);
-      if (!config) { logWI(action.workItemId, 'No config found'); break; }
-      const ep = (await loadManifest()).envProvider?.({ config });
-      if (!ep) { logWI(action.workItemId, 'No env provider configured (no overlay)'); break; }
-      await ep.startEnv(state.environment.envId, 'dashboard');
-      logWI(action.workItemId, `Environment started`);
-      break;
-    }
-
-    case 'env-stop': {
-      if (!state.environment) { logWI(action.workItemId, 'No environment to stop'); break; }
-      const config = await stateStore.loadConfig(action.workItemId);
-      if (!config) { logWI(action.workItemId, 'No config found'); break; }
-      const ep = (await loadManifest()).envProvider?.({ config });
-      if (!ep) { logWI(action.workItemId, 'No env provider configured (no overlay)'); break; }
-      await ep.stopEnv(state.environment.envId, { strict: true }, 'dashboard');
-      logWI(action.workItemId, `Environment stopped`);
-      break;
-    }
-
-    case 'env-delete': {
-      if (!state.environment) { logWI(action.workItemId, 'No environment to delete'); break; }
-      const config = await stateStore.loadConfig(action.workItemId);
-      if (!config) { logWI(action.workItemId, 'No config found'); break; }
-      const ep = (await loadManifest()).envProvider?.({ config });
-      if (!ep) { logWI(action.workItemId, 'No env provider configured (no overlay)'); break; }
-      await ep.stopEnv(state.environment.envId, { strict: true }, 'dashboard');
-      await ep.deleteEnv(state.environment.envId, { strict: true }, 'dashboard');
-      state.environment = undefined;
-      await stateStore.save(action.workItemId, state);
-      logWI(action.workItemId, `Environment deleted`);
-      break;
-    }
-
-    case 'env-share': {
-      if (!state.environment) { logWI(action.workItemId, 'No environment to share'); break; }
-      if (!action.email) { logWI(action.workItemId, 'No email provided for env-share'); break; }
-      const config = await stateStore.loadConfig(action.workItemId);
-      if (!config) { logWI(action.workItemId, 'No config found'); break; }
-      const ep = (await loadManifest()).envProvider?.({ config });
-      if (!ep) { logWI(action.workItemId, 'No env provider configured (no overlay)'); break; }
-      await ep.shareEnv(state.environment.envId, action.email, 'dashboard');
-      logWI(action.workItemId, `Environment shared with ${action.email}`);
-      break;
-    }
-
-    case 'reprovision-env': {
-      const config = await stateStore.loadConfig(action.workItemId);
-      if (!config) { logWI(action.workItemId, 'No config found for reprovision'); break; }
-      // Inject live PAT (persisted config strips it to '')
-      if (!config.azureDevOps.pat) {
-        config.azureDevOps.pat = pollingConfig.azureDevOps.pat;
-      }
-      try {
-        const ep = (await loadManifest()).envProvider?.({ config });
-        if (!ep) { logWI(action.workItemId, 'No env provider configured (no overlay) — skipping reprovision'); break; }
-        await ep.reprovision(action.workItemId, state, config, stateStore);
-        logWI(action.workItemId, 'Environment reprovisioned successfully');
-      } catch (err) {
-        logWIError(action.workItemId, 'Failed to reprovision environment', err);
-        const comment = formatErrorComment(action.workItemId, 'env-reprovision', err instanceof Error ? err : new Error(String(err)));
-        await postWorkItemComment(action.workItemId, comment, pollingConfig).catch(() => {});
-        await addWorkItemTags(action.workItemId, ['need-input'], pollingConfig).catch(() => {});
-      }
-      break;
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Abortable sleep

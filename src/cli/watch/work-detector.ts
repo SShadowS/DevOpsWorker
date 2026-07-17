@@ -109,6 +109,66 @@ export function sinceFor(s: PipelineState): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// applyRerun — the shared rerun state-delta builder
+//
+// Both the comment-scan decision below (`decideCheckpointScan`, called with
+// `{}` to build a `stateDelta`) and the dashboard's rerun-plan/fix/fix-test
+// action arms (`action-processor.ts`, called with the loaded `PipelineState`
+// to mutate it directly before saving) previously carried their own copy of
+// this exact block. This is now the one definition both call.
+// ---------------------------------------------------------------------------
+
+export type RerunMode = 'rerun-plan' | 'fix' | 'fix-test';
+
+export interface ApplyRerunOptions {
+  mode: RerunMode;
+  /** Raw feedback text, command prefix included (e.g. "/fix null-ref"). */
+  feedback: string;
+  source: 'work-item-comment' | 'pr-comment' | 'dashboard';
+  targetStage: string;
+  /** Only meaningful for mode 'fix-test'. */
+  testCaseFailures?: TestCaseFailure[];
+}
+
+const RERUN_COMMAND_PREFIX: Record<RerunMode, RegExp> = {
+  'rerun-plan': /^\s*\/rerun-plan\s*/i,
+  'fix': /^\s*\/fix\s*/i,
+  'fix-test': /^\s*\/fix-test\s*/i,
+};
+
+/**
+ * Apply the rerun state-delta: clears error/checkpoint, records
+ * revisionFeedback + humanFeedback (command prefix stripped from the
+ * feedback text), and sets rerunMode for fix/fix-test (rerun-plan sets no
+ * rerunMode key at all, matching the original per-mode behaviour).
+ *
+ * `humanFeedback.source` only accepts 'work-item-comment' | 'pr-comment' —
+ * there is no dashboard-authored comment to attribute — so a 'dashboard'
+ * revisionFeedback source maps to 'work-item-comment' here, matching what
+ * the original dashboard action arms hardcoded.
+ *
+ * Pass `{}` to build a standalone delta (the pure decision below); pass a
+ * loaded `PipelineState` to mutate it in place (the dashboard action arm).
+ * Mutates and returns its first argument.
+ */
+export function applyRerun(state: Partial<PipelineState>, opts: ApplyRerunOptions): Partial<PipelineState> {
+  const { mode, feedback, source, targetStage, testCaseFailures } = opts;
+
+  state.error = undefined;
+  state.checkpoint = undefined;
+  if (mode !== 'rerun-plan') state.rerunMode = mode;
+  state.revisionFeedback = { source, feedback, targetStage };
+
+  const message = feedback.replace(RERUN_COMMAND_PREFIX[mode], '').trim();
+  const humanFeedbackSource: 'work-item-comment' | 'pr-comment' = source === 'pr-comment' ? 'pr-comment' : 'work-item-comment';
+  state.humanFeedback = mode === 'fix-test'
+    ? { rerunComment: message || feedback, source: humanFeedbackSource, testCaseFailures }
+    : { rerunComment: message || feedback, source: humanFeedbackSource };
+
+  return state;
+}
+
+// ---------------------------------------------------------------------------
 // Per-item decisions
 // ---------------------------------------------------------------------------
 
@@ -117,50 +177,36 @@ function decideCheckpointScan(scan: CheckpointScan): DetectedAction | null {
   const { id, rerunPlanFeedback, fixFeedback, fixTestFeedback, fixTestSource, testCaseFailures } = scan;
 
   if (rerunPlanFeedback) {
-    const message = rerunPlanFeedback.replace(/^\s*\/rerun-plan\s*/i, '').trim();
     return {
       kind: 'rerun',
       workItemId: id,
-      stateDelta: {
-        error: undefined,
-        checkpoint: undefined,
-        revisionFeedback: { source: 'work-item-comment', feedback: rerunPlanFeedback, targetStage: 'planning' },
-        humanFeedback: { rerunComment: message || rerunPlanFeedback, source: 'work-item-comment' },
-      },
+      stateDelta: applyRerun({}, {
+        mode: 'rerun-plan', feedback: rerunPlanFeedback, source: 'work-item-comment', targetStage: 'planning',
+      }),
       tagOps: { remove: ['need-input', 'plan-approved'] },
       log: 'Found /rerun-plan comment — restarting planning',
     };
   }
 
   if (fixFeedback) {
-    const message = fixFeedback.replace(/^\s*\/fix\s*/i, '').trim();
     return {
       kind: 'rerun',
       workItemId: id,
-      stateDelta: {
-        error: undefined,
-        checkpoint: undefined,
-        rerunMode: 'fix',
-        revisionFeedback: { source: 'work-item-comment', feedback: fixFeedback, targetStage: 'coding' },
-        humanFeedback: { rerunComment: message || fixFeedback, source: 'work-item-comment' },
-      },
+      stateDelta: applyRerun({}, {
+        mode: 'fix', feedback: fixFeedback, source: 'work-item-comment', targetStage: 'coding',
+      }),
       tagOps: { remove: ['need-input'] },
       log: 'Found /fix comment — restarting coding',
     };
   }
 
   if (fixTestFeedback && fixTestSource) {
-    const message = fixTestFeedback.replace(/^\s*\/fix-test\s*/i, '').trim();
     return {
       kind: 'rerun',
       workItemId: id,
-      stateDelta: {
-        error: undefined,
-        checkpoint: undefined,
-        rerunMode: 'fix-test',
-        revisionFeedback: { source: fixTestSource, feedback: fixTestFeedback, targetStage: 'coding' },
-        humanFeedback: { rerunComment: message || fixTestFeedback, source: fixTestSource, testCaseFailures },
-      },
+      stateDelta: applyRerun({}, {
+        mode: 'fix-test', feedback: fixTestFeedback, source: fixTestSource, targetStage: 'coding', testCaseFailures,
+      }),
       tagOps: { remove: ['need-input'] },
       log: 'Found /fix-test comment — fetching test case failures and restarting coding',
     };

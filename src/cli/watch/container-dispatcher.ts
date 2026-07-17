@@ -13,6 +13,7 @@ import {
   spawnContainer,
 } from '../../sdk/docker.ts';
 import { logWI, workItemUrl } from './watch-logger.ts';
+import { ensurePat } from './env-actions.ts';
 
 // ---------------------------------------------------------------------------
 // Container dispatcher
@@ -196,9 +197,7 @@ export async function executeStartFresh(
     const prId = existingState.draftPR.id;
     // Use persisted config for the correct repositoryId, fall back to polling config
     const prConfig = (await stateStore.loadConfig(workItemId)) ?? pollingConfig;
-    if (prConfig.azureDevOps.pat === '') {
-      prConfig.azureDevOps.pat = pollingConfig.azureDevOps.pat;
-    }
+    ensurePat(prConfig, pollingConfig.azureDevOps.pat);
     const prStatus = await getPullRequestStatus(prId, prConfig);
 
     if (prStatus && prStatus.status === 'active') {
