@@ -20,7 +20,7 @@ export function connectSSE(): void {
   es.addEventListener('log-entry', (e: MessageEvent) => {
     const data = JSON.parse(e.data) as { workItemId: number; stageName: string; entry: LogEntry };
     const viewer = activeLogViewer.value;
-    if (!viewer || viewer.workItemId !== data.workItemId) return;
+    if (!viewer || viewer.kind !== 'session' || viewer.workItemId !== data.workItemId) return;
     if (viewer.selectedStage && viewer.selectedStage !== data.stageName) return;
     appendLogEntry(data.entry);
   });

@@ -114,7 +114,7 @@ export function MobileSessionCard({ session }: Props) {
           )}
           <button
             type="button"
-            class={`mobile-card__logs ${activeLogViewer.value?.workItemId === session.workItemId ? 'mobile-card__logs--active' : ''}`}
+            class={`mobile-card__logs ${activeLogViewer.value?.kind === 'session' && activeLogViewer.value.workItemId === session.workItemId ? 'mobile-card__logs--active' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
               openLogViewer(session.workItemId);

@@ -80,7 +80,7 @@ export function LogViewer() {
   return (
     <div class="log-viewer">
       <div class="log-viewer__header">
-        <h2>Logs — #{viewer.workItemId}</h2>
+        <h2>Logs — {viewer.title}</h2>
         <button class="log-viewer__close" onClick={closeLogViewer} title="Close">✕</button>
       </div>
       <div class="log-viewer__body">
