@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { readAllSessions, readSession, readPRReviews } from './state-reader.ts';
-import { sessionChangeKey } from './session-key.ts';
+import { SessionPoller } from './session-poller.ts';
 import { validateAction } from './actions.ts';
 import type { PipelineAction } from './actions.ts';
 import type { ActionType } from './types.ts';
@@ -67,31 +67,11 @@ export function startDashboard(options: DashboardOptions): void {
     if (session) broadcastSSE('session-update', session);
   };
 
-  // Poll for new/changed sessions from other processes (pipeline containers write directly to DB)
-  const knownSessions = new Map<number, { key: string; lastSeen: number }>(); // workItemId → state hash + timestamp
-  const sessionPollInterval = setInterval(async () => {
-    try {
-      const now = Date.now();
-      const allSessions = await readAllSessions(stateStore);
-      for (const session of allSessions) {
-        const key = sessionChangeKey(session);
-        const existing = knownSessions.get(session.workItemId);
-        if (existing?.key !== key) {
-          knownSessions.set(session.workItemId, { key, lastSeen: now });
-          broadcastSSE('session-update', session);
-        } else {
-          existing.lastSeen = now;
-        }
-      }
-      // Evict entries not seen in the last hour (stale sessions)
-      if (knownSessions.size > 500) {
-        const staleThreshold = now - 3_600_000;
-        for (const [id, entry] of knownSessions) {
-          if (entry.lastSeen < staleThreshold) knownSessions.delete(id);
-        }
-      }
-    } catch { /* non-critical */ }
-  }, 5_000);
+  // Poll for new/changed sessions from other processes (pipeline containers write directly to DB).
+  // Gated behind a cheap watermark inside SessionPoller — the full readAllSessions() scan only
+  // runs when pipeline_state's row count or max(updated_at) has moved since the last poll.
+  const sessionPoller = new SessionPoller(stateStore, broadcastSSE);
+  const sessionPollInterval = setInterval(() => { void sessionPoller.poll(); }, 5_000);
 
   // Poll for PR review changes (new completions, status transitions)
   let lastPRReviewHash = '';
