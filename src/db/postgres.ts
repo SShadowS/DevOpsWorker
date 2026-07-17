@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS pr_reviews (
 );
 CREATE INDEX IF NOT EXISTS idx_pr_reviews_created ON pr_reviews (created_at DESC);
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_body TEXT;
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_run_id TEXT;
 `;
 
 /**

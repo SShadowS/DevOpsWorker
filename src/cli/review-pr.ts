@@ -188,6 +188,7 @@ export async function reviewPR(args: string[]): Promise<void> {
           reviewBody: result.output.reviewBody,
           createdAt: new Date().toISOString(),
           actionId: actionId ?? null,
+          reviewRunId,
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -225,6 +226,7 @@ export async function reviewPR(args: string[]): Promise<void> {
         reviewBody: null,
         createdAt: new Date().toISOString(),
         actionId: actionId ?? null,
+        reviewRunId,
       });
     }
 

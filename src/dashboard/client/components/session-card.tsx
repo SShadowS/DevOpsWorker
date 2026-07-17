@@ -100,7 +100,7 @@ export function SessionCard({ session }: Props) {
         )}
         <button
           type="button"
-          class={`session-card__logs-btn ${activeLogViewer.value?.workItemId === session.workItemId ? 'session-card__logs-btn--active' : ''}`}
+          class={`session-card__logs-btn ${activeLogViewer.value?.kind === 'session' && activeLogViewer.value.workItemId === session.workItemId ? 'session-card__logs-btn--active' : ''}`}
           onClick={(e) => {
             e.stopPropagation();
             openLogViewer(session.workItemId);

@@ -845,6 +845,28 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review__pill--minor { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
 .pr-review__pill--nitpick { background: color-mix(in srgb, var(--color-text-muted) 12%, transparent); color: var(--color-text-muted); }
 
+.pr-review-row--clickable { cursor: pointer; }
+.pr-review-row--clickable:focus-visible { outline: 2px solid var(--color-accent, #58a6ff); outline-offset: -2px; }
+
+.pr-review-detail {
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--color-border, #30363d);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.pr-review-detail__meta { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; font-size: 0.85rem; }
+.pr-review-detail__tools { display: flex; flex-direction: column; gap: 0.25rem; }
+.pr-review-detail__tools h4,
+.pr-review-detail__body h4 { margin: 0 0 0.25rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+.pr-review-detail__tool-row { display: grid; grid-template-columns: 12rem 1fr 3rem; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+.pr-review-detail__tool-name { font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-review-detail__tool-bar-wrap { background: rgba(88, 166, 255, 0.12); border-radius: 3px; height: 0.8rem; }
+.pr-review-detail__tool-bar { display: block; height: 100%; background: rgba(88, 166, 255, 0.6); border-radius: 3px; }
+.pr-review-detail__tool-count { text-align: right; font-variant-numeric: tabular-nums; }
+.pr-review-detail__logs-btn { padding: 0.3rem 0.7rem; font-size: 0.85rem; cursor: pointer; }
+.pr-review-detail__body-text { white-space: pre-wrap; word-break: break-word; max-height: 24rem; overflow: auto; font-size: 0.85rem; }
+
 /* Timeline */
 .timeline { padding: var(--space-md) 0; }
 .timeline__summary { display: flex; gap: var(--space-lg); margin-bottom: var(--space-md); font-size: 0.875rem; color: var(--color-text-secondary); }

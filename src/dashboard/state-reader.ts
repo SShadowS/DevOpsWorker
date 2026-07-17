@@ -2,7 +2,7 @@ import type { IStateStore } from '../pipeline/state-store.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import type { IActionStore } from '../pipeline/action-store.interface.ts';
 import type { PipelineState, PipelineStatus, PipelineConfig, ActiveAgentMarker } from '../types/pipeline.types.ts';
-import type { DashboardSession, DashboardPRReview, StageProgress } from './types.ts';
+import type { DashboardSession, DashboardPRReview, DashboardPRReviewDetail, StageProgress } from './types.ts';
 import { getAvailableActions } from './actions.ts';
 import { getRepoConfig } from '../config/repos.ts';
 
@@ -350,4 +350,17 @@ export async function readPRReviews(store: IPRReviewStore, actionStore?: IAction
   }
 
   return completed;
+}
+
+export async function readPRReviewDetail(store: IPRReviewStore, id: number): Promise<DashboardPRReviewDetail | null> {
+  const r = await store.findById(id);
+  if (!r) return null;
+  return {
+    id: r.id, prId: r.prId, repoKey: r.repoKey, sourceBranch: r.sourceBranch,
+    targetBranch: r.targetBranch, title: r.title, recommendation: r.recommendation,
+    findings: r.findings, findingsCount: r.findingsCount, costUsd: r.costUsd,
+    durationMs: r.durationMs, turns: r.turns, toolCalls: r.toolCalls, error: r.error,
+    createdAt: r.createdAt, webUrl: buildPrWebUrl(r.repoKey, r.prId),
+    pendingStatus: undefined, reviewBody: r.reviewBody,
+  };
 }
