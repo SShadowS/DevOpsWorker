@@ -6,20 +6,21 @@ import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import { connectStores } from '../db/connect-stores.ts';
 import { loadConfig } from './config.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
-import { queryWorkItems, postWorkItemComment, addWorkItemTags, removeWorkItemTags, fetchWorkItem, findRerunCommandInComments, findRerunCommandInPRComments, getPullRequestStatus, fetchTestCaseFailures } from '../sdk/azure-devops-client.ts';
+import { queryWorkItems, postWorkItemComment, addWorkItemTags, removeWorkItemTags, findRerunCommandInComments, findRerunCommandInPRComments, getPullRequestStatus, fetchTestCaseFailures } from '../sdk/azure-devops-client.ts';
 import { formatErrorComment } from '../formatters/devops-comment.ts';
-import { findRepoByAreaPath, findRepoByRepositoryId, buildAreaPathFilter, getActiveAreaPaths } from '../config/repos.ts';
+import { findRepoByRepositoryId, buildAreaPathFilter, getActiveAreaPaths } from '../config/repos.ts';
 import {
   buildDockerArgs,
-  createWorkspaceVolume,
   removeWorkspaceVolume,
-  removeStaleContainer,
   spawnContainer,
+  createVolume,
+  removeVolume,
+  removeContainer,
 } from '../sdk/docker.ts';
 import type { PipelineConfig, PipelineState, TestCaseFailure } from '../types/pipeline.types.ts';
 import type { PipelineAction } from '../dashboard/actions.ts';
 import { loadManifest } from '../overlay/index.ts';
-import { notifyDiscord, notifyPipelineError } from '../sdk/discord-notify.ts';
+import { notifyDiscord } from '../sdk/discord-notify.ts';
 import {
   detectWork,
   isCheckpointScannable,
@@ -33,6 +34,27 @@ import {
   type PrCompletedItem,
   type ReprovisionItem,
 } from './watch/work-detector.ts';
+import {
+  log,
+  logError,
+  logWI,
+  logWIError,
+  workItemUrl,
+  colorForWI,
+  releaseColor,
+  _resetColorState,
+} from './watch/watch-logger.ts';
+import {
+  getPrReviewContainerEnv,
+  handleContainerOutcome,
+  executeStartFresh,
+  executeContinue,
+  type WatchConfig,
+} from './watch/container-dispatcher.ts';
+
+// Re-exported for existing consumers/tests that import these from watch.ts.
+export { colorForWI, releaseColor, _resetColorState, getPrReviewContainerEnv };
+export type { WatchConfig };
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -42,15 +64,6 @@ const DEFAULT_INTERVAL_MINUTES = 15;
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_STATE_VOLUME = process.env['DO_STATE_VOLUME'] ?? 'do-pipeline-state';
 const DEFAULT_IMAGE_NAME = process.env['DO_PIPELINE_IMAGE'] ?? 'devopsworker:latest';
-
-// ---------------------------------------------------------------------------
-// Watch config
-// ---------------------------------------------------------------------------
-
-export interface WatchConfig {
-  stateVolume: string;
-  imageName: string;
-}
 
 // ---------------------------------------------------------------------------
 // WIQL queries — area path filter restricts to active repos only
@@ -83,72 +96,10 @@ WHERE [System.Tags] CONTAINS 'need-input'
 `.trim();
 
 // ---------------------------------------------------------------------------
-// Logging
+// Logging — log/logError/logWI/logWIError/workItemUrl/colorForWI/releaseColor
+// live in ./watch/watch-logger.ts (imported above; colorForWI/releaseColor
+// re-exported for existing test imports).
 // ---------------------------------------------------------------------------
-
-function log(message: string): void {
-  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  console.log(`[${ts}] ${message}`);
-}
-
-function logError(label: string, err: unknown): void {
-  log(`${label}: ${err}`);
-  if (err && typeof err === 'object') {
-    const e = err as Record<string, unknown>;
-    if (e.code) log(`  code: ${e.code}`);
-    if (e.status !== undefined) log(`  exit status: ${e.status}`);
-    if (e.stderr) log(`  stderr: ${Buffer.isBuffer(e.stderr) ? e.stderr.toString().trim() : e.stderr}`);
-    if (e.stack) log(`  stack: ${String(e.stack).split('\n').slice(1, 4).join('\n')}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Color-coded per-WI logging
-// ---------------------------------------------------------------------------
-
-const COLORS = [
-  '\x1b[36m', // cyan
-  '\x1b[35m', // magenta
-  '\x1b[33m', // yellow
-  '\x1b[32m', // green
-  '\x1b[34m', // blue
-  '\x1b[91m', // bright red
-];
-const RESET = '\x1b[0m';
-
-let colorIndex = 0;
-const wiColors = new Map<number, string>();
-
-export function colorForWI(id: number): string {
-  if (!wiColors.has(id)) wiColors.set(id, COLORS[colorIndex++ % COLORS.length]!);
-  return wiColors.get(id)!;
-}
-
-export function releaseColor(id: number): void {
-  wiColors.delete(id);
-}
-
-function logWI(id: number, message: string): void {
-  const c = colorForWI(id);
-  log(`${c}[WI #${id}]${RESET} ${message}`);
-}
-
-function logWIError(id: number, label: string, err: unknown): void {
-  logWI(id, `${label}: ${err}`);
-  if (err && typeof err === 'object') {
-    const e = err as Record<string, unknown>;
-    if (e.code) logWI(id, `  code: ${e.code}`);
-    if (e.status !== undefined) logWI(id, `  exit status: ${e.status}`);
-    if (e.stderr) logWI(id, `  stderr: ${Buffer.isBuffer(e.stderr) ? e.stderr.toString().trim() : e.stderr}`);
-    if (e.stack) logWI(id, `  stack: ${String(e.stack).split('\n').slice(1, 4).join('\n')}`);
-  }
-}
-
-function workItemUrl(id: number, config: PipelineConfig): string {
-  const org = encodeURIComponent(config.azureDevOps.organization);
-  const project = encodeURIComponent(config.azureDevOps.project);
-  return `https://dev.azure.com/${org}/${project}/_workitems/edit/${id}`;
-}
 
 async function notifyInfraFailure(
   workItemId: number,
@@ -168,12 +119,6 @@ async function notifyInfraFailure(
       { name: 'Label', value: label, inline: true },
     ],
   });
-}
-
-/** Reset module-level color state — exported for testing only. */
-export function _resetColorState(): void {
-  colorIndex = 0;
-  wiColors.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -397,261 +342,10 @@ async function executeReprovision(
 }
 
 // ---------------------------------------------------------------------------
-// Docker dispatch helpers
+// Container dispatch — getContainerEnv/getPrReviewContainerEnv/
+// handleContainerOutcome/executeStartFresh/executeContinue/resolveRepoForWorkItem
+// live in ./watch/container-dispatcher.ts (imported above).
 // ---------------------------------------------------------------------------
-
-function getContainerEnv(): Record<string, string> {
-  return {
-    AZURE_DEVOPS_PAT: process.env['AZURE_DEVOPS_PAT'] ?? '',
-    CLAUDE_CODE_OAUTH_TOKEN: process.env['CLAUDE_CODE_OAUTH_TOKEN'] ?? '',
-    ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'] ?? '',
-    ENV_API_TOKEN: process.env['ENV_API_TOKEN'] ?? '',
-    DATABASE_URL: process.env['DATABASE_URL'] ?? '',
-    DISCORD_WEBHOOK_URL: process.env['DISCORD_WEBHOOK_URL'] ?? '',
-    PR_REVIEW_NO_POST: process.env['PR_REVIEW_NO_POST'] ?? '',
-    // Git identity inside pipeline containers. Email must be authorized in the
-    // AL Object ID Ninja backend app pool; name marks commits as AI-made.
-    GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',
-    GIT_USER_EMAIL: process.env['GIT_USER_EMAIL'] ?? '',
-  };
-}
-
-// PR review uses pay-per-token API key when PR_REVIEW_ANTHROPIC_API_KEY is set,
-// so the OAuth subscription is reserved for the main pipeline.
-export function getPrReviewContainerEnv(): Record<string, string> {
-  const prKey = process.env['PR_REVIEW_ANTHROPIC_API_KEY'];
-  if (!prKey) return getContainerEnv();
-  return {
-    AZURE_DEVOPS_PAT: process.env['AZURE_DEVOPS_PAT'] ?? '',
-    CLAUDE_CODE_OAUTH_TOKEN: '',
-    ANTHROPIC_API_KEY: prKey,
-    ENV_API_TOKEN: process.env['ENV_API_TOKEN'] ?? '',
-    DATABASE_URL: process.env['DATABASE_URL'] ?? '',
-    DISCORD_WEBHOOK_URL: process.env['DISCORD_WEBHOOK_URL'] ?? '',
-    PR_REVIEW_NO_POST: process.env['PR_REVIEW_NO_POST'] ?? '',
-    // Git identity inside pipeline containers. Email must be authorized in the
-    // AL Object ID Ninja backend app pool; name marks commits as AI-made.
-    GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',
-    GIT_USER_EMAIL: process.env['GIT_USER_EMAIL'] ?? '',
-  };
-}
-
-async function handleContainerOutcome(
-  workItemId: number,
-  exitCode: number,
-  stateStore: IStateStore,
-  pollingConfig: PipelineConfig,
-  watchConfig: WatchConfig,
-): Promise<void> {
-  if (exitCode === 0) {
-    // Container exited successfully — clean up stale need-input tag if present
-    await removeWorkItemTags(workItemId, ['need-input'], pollingConfig).catch(() => {});
-
-    // Check state for checkpoint vs completed
-    const state = await stateStore.load(workItemId);
-    if (state?.completedAt) {
-      logWI(workItemId, 'Pipeline completed successfully');
-      await removeWorkspaceVolume(workItemId);
-    } else if (state?.checkpoint) {
-      logWI(workItemId, `Pipeline paused at checkpoint: ${state.checkpoint.name}`);
-    } else {
-      logWI(workItemId, 'Container exited successfully (no checkpoint, no completion)');
-    }
-  } else {
-    logWI(workItemId, `Container exited with code ${exitCode}`);
-    // Error handling: post error comment and tag work item
-    // Check state file for rich error details (e.g., analyzer needs-input questions)
-    try {
-      const state = await stateStore.load(workItemId);
-      const stateError = state?.error;
-      const errorForComment = stateError?.message
-        ? new Error(stateError.message)
-        : new Error(`Container exited with code ${exitCode}`);
-      const stage = stateError?.stage ?? 'container';
-
-      // Persist error to state if not already set — prevents findOrphanedSessions
-      // from treating this as a resumable mid-stage crash on next watcher restart
-      if (state && !stateError) {
-        state.error = {
-          type: 'ContainerError',
-          stage,
-          message: `Container exited with code ${exitCode}`,
-          timestamp: new Date().toISOString(),
-        };
-        await stateStore.save(workItemId, state);
-      }
-
-      const comment = formatErrorComment(
-        workItemId,
-        stage,
-        errorForComment,
-      );
-      await postWorkItemComment(workItemId, comment, pollingConfig);
-      logWI(workItemId, 'Posted error comment to work item');
-
-      const errorType = stateError?.type ?? 'container-error';
-      await notifyPipelineError(
-        { type: errorType, stage, message: errorForComment.message },
-        {
-          source: 'pipeline-container',
-          url: workItemUrl(workItemId, pollingConfig),
-          fields: [
-            { name: 'Work item', value: `#${workItemId}`, inline: true },
-            { name: 'Stage', value: stage, inline: true },
-            { name: 'Exit code', value: String(exitCode), inline: true },
-          ],
-        },
-      );
-    } catch (err) {
-      logWI(workItemId, `Warning: failed to post error comment: ${err}`);
-    }
-
-    try {
-      await addWorkItemTags(workItemId, ['need-input'], pollingConfig);
-      await removeWorkItemTags(workItemId, ['analyse'], pollingConfig);
-      logWI(workItemId, 'Tagged "need-input", removed "analyse" for error escalation');
-    } catch (err) {
-      logWI(workItemId, `Warning: failed to update tags: ${err}`);
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Pipeline execution helpers
-// ---------------------------------------------------------------------------
-
-async function executeStartFresh(
-  workItemId: number,
-  stateStore: IStateStore,
-  pollingConfig: PipelineConfig,
-  watchConfig: WatchConfig,
-): Promise<void> {
-  // 0a. Guard: refuse to restart if work item already has an active PR
-  const existingState = await stateStore.load(workItemId);
-  if (existingState?.draftPR?.id) {
-    const prId = existingState.draftPR.id;
-    // Use persisted config for the correct repositoryId, fall back to polling config
-    const prConfig = (await stateStore.loadConfig(workItemId)) ?? pollingConfig;
-    if (prConfig.azureDevOps.pat === '') {
-      prConfig.azureDevOps.pat = pollingConfig.azureDevOps.pat;
-    }
-    const prStatus = await getPullRequestStatus(prId, prConfig);
-
-    if (prStatus && prStatus.status === 'active') {
-      const prUrl = existingState.draftPR.url;
-      const statusLabel = prStatus.isDraft ? 'draft' : 'published';
-      logWI(workItemId, `Blocked fresh start — active ${statusLabel} PR #${prId} exists`);
-
-      const comment =
-        `<b>⚠️ Fresh pipeline run blocked</b><br><br>` +
-        `This work item already has an active ${statusLabel} pull request: ` +
-        `<a href="${prUrl}">PR #${prId}</a>.<br><br>` +
-        `To re-analyse from scratch, first <b>abandon or complete</b> the existing PR, ` +
-        `then re-add the <code>analyse</code> tag.<br>` +
-        `To iterate on existing code, use <code>/fix</code> or <code>/rerun-plan</code> comments instead.`;
-      await postWorkItemComment(workItemId, comment, pollingConfig).catch(() => {});
-      await removeWorkItemTags(workItemId, ['analyse'], pollingConfig).catch(() => {});
-      return;
-    }
-  }
-
-  // 0b. Clean up tags — remove analyse (consumed). Keep need-input until container
-  // succeeds — if the container fails, handleContainerOutcome re-adds it anyway,
-  // and removing it prematurely leaves a gap where a watcher restart would see
-  // no tag and no error in state, causing a false orphan resume.
-  await removeWorkItemTags(workItemId, ['analyse'], pollingConfig).catch(() => {});
-
-  // 1. Fetch work item to get area path
-  const workItem = await fetchWorkItem(workItemId, pollingConfig);
-  const match = findRepoByAreaPath(workItem.areaPath);
-  if (!match) {
-    throw new Error(
-      `No repo config found for area path "${workItem.areaPath}" (WI #${workItemId})`,
-    );
-  }
-  const { key: repoKey, config: repoConfig } = match;
-  logWI(workItemId, `Matched repo "${repoKey}" for area path "${workItem.areaPath}"`);
-
-  // 2. Create workspace volume
-  const workspaceVolume = await createWorkspaceVolume(workItemId);
-  logWI(workItemId, `Created workspace volume: ${workspaceVolume}`);
-
-  // 3. Remove any stale container
-  await removeStaleContainer(workItemId);
-
-  // 4. Build and spawn container
-  const args = buildDockerArgs({
-    workItemId,
-    repoKey,
-    repo: repoConfig,
-    command: 'run',
-    env: getContainerEnv(),
-    stateVolume: watchConfig.stateVolume,
-    workspaceVolume,
-    imageName: watchConfig.imageName,
-  });
-  logWI(workItemId, `Spawning container for fresh pipeline run`);
-  const exitCode = await spawnContainer(args);
-
-  // 5. Handle outcome
-  await handleContainerOutcome(workItemId, exitCode, stateStore, pollingConfig, watchConfig);
-}
-
-async function executeContinue(
-  workItemId: number,
-  stateStore: IStateStore,
-  pollingConfig: PipelineConfig,
-  watchConfig: WatchConfig,
-): Promise<void> {
-  // Determine repo from persisted config's area path
-  const persistedConfig = await stateStore.loadConfig(workItemId);
-  let repoKey: string;
-  let repoConfig;
-
-  if (persistedConfig) {
-    const match = findRepoByAreaPath(persistedConfig.azureDevOps.areaPath);
-    if (!match) {
-      throw new Error(
-        `No repo config for persisted area path "${persistedConfig.azureDevOps.areaPath}" (WI #${workItemId})`,
-      );
-    }
-    repoKey = match.key;
-    repoConfig = match.config;
-  } else {
-    // Fall back to fetching work item
-    const workItem = await fetchWorkItem(workItemId, pollingConfig);
-    const match = findRepoByAreaPath(workItem.areaPath);
-    if (!match) {
-      throw new Error(
-        `No repo config found for area path "${workItem.areaPath}" (WI #${workItemId})`,
-      );
-    }
-    repoKey = match.key;
-    repoConfig = match.config;
-  }
-
-  logWI(workItemId, `Continuing pipeline with repo "${repoKey}"`);
-
-  // Remove any stale container (but reuse existing workspace volume)
-  await removeStaleContainer(workItemId);
-
-  // Build and spawn container
-  const workspaceVolume = `wi-${workItemId}`;
-  const args = buildDockerArgs({
-    workItemId,
-    repoKey,
-    repo: repoConfig,
-    command: 'continue',
-    env: getContainerEnv(),
-    stateVolume: watchConfig.stateVolume,
-    workspaceVolume,
-    imageName: watchConfig.imageName,
-  });
-  logWI(workItemId, `Spawning container for pipeline continue`);
-  const exitCode = await spawnContainer(args);
-
-  await handleContainerOutcome(workItemId, exitCode, stateStore, pollingConfig, watchConfig);
-}
 
 // ---------------------------------------------------------------------------
 // Crash recovery — find orphaned sessions for pool recovery
@@ -819,13 +513,14 @@ async function executeAction(
     const workspaceVolume = `pr-review-${prId}`;
     const containerName = `pr-review-${prId}`;
     try {
-      // Create workspace volume
-      const createProc = Bun.spawn(['docker', 'volume', 'create', workspaceVolume], { stdout: 'pipe', stderr: 'pipe' });
-      await createProc.exited;
+      // Create workspace volume. Names here are PR-keyed (pr-review-{prId}), not the
+      // wi-{id} scheme createWorkspaceVolume derives — use the generic, name-agnostic
+      // primitives instead of that helper. Swallow create failures exactly like the
+      // original raw spawn did (it awaited .exited without checking the exit code).
+      await createVolume(workspaceVolume).catch(() => {});
 
       // Remove any stale container
-      const rmProc = Bun.spawn(['docker', 'rm', '-f', containerName], { stdout: 'pipe', stderr: 'pipe' });
-      await rmProc.exited;
+      await removeContainer(containerName);
 
       // Build container args
       const args = buildDockerArgs({
@@ -897,9 +592,8 @@ async function executeAction(
         ],
       });
     } finally {
-      // Clean up workspace volume
-      const cleanProc = Bun.spawn(['docker', 'volume', 'rm', '-f', workspaceVolume], { stdout: 'pipe', stderr: 'pipe' });
-      await cleanProc.exited;
+      // Clean up workspace volume (PR-keyed name — see createVolume call above)
+      await removeVolume(workspaceVolume);
     }
     return;
   }

@@ -31,7 +31,7 @@ services:
       DATABASE_URL: postgres://pipeline:${PG_PASSWORD:-pipeline}@postgres:5432/pipeline
       # No-post replay control (empty = post normally in production; set to 1 for measurement replays).
       # Takes precedence over any PR_REVIEW_NO_POST in .env. Forwarded into spawned review containers
-      # by getPrReviewContainerEnv() in src/cli/watch.ts.
+      # by getPrReviewContainerEnv() in src/cli/watch/container-dispatcher.ts.
       PR_REVIEW_NO_POST: ${PR_REVIEW_NO_POST:-}
       # ABSOLUTE host path to this repo's private/ overlay. The watcher passes it as the
       # bind-mount source when spawning pipeline/review containers (docker.ts), so they
