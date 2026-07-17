@@ -4,7 +4,7 @@ import type { IActionStore } from '../pipeline/action-store.interface.ts';
 import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import { connectStores } from '../db/connect-stores.ts';
-import { loadConfig, loadConfigFromState } from './config.ts';
+import { loadConfig } from './config.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
 import { queryWorkItems, postWorkItemComment, addWorkItemTags, removeWorkItemTags, fetchWorkItem, findRerunCommandInComments, findRerunCommandInPRComments, getPullRequestStatus, fetchTestCaseFailures } from '../sdk/azure-devops-client.ts';
 import { formatErrorComment } from '../formatters/devops-comment.ts';
