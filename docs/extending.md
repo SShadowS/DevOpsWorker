@@ -12,7 +12,7 @@ Support status at a glance:
 | Axis | Status | Mechanism |
 |------|--------|-----------|
 | Swap / add / remove **stages** | ✅ Supported | `manifest.pipeline` declarative edits |
-| Customize **agents** (prompt, rules, skills, model) | ✅ Supported | overlay asset-staging + `manifest.models` |
+| Customize **agents** (prompt, rules, skills, model) | ✅ Supported | overlay asset-staging + `manifest.agents[name].model` |
 | Replace a whole **agent** | ✅ Supported | replace its stage |
 | Fine-grained agent override (one field) | ⚠️ Via stage replace only | — |
 | Swap the **agent/LLM provider** | ❌ Not yet (Claude-only) | planned `AgentRunner` seam |
@@ -77,11 +77,21 @@ private/prompts/<fragment>.md                 # overrides src/prompts/<fragment>
 This is the right tool for product-specific guidance (naming conventions, an
 environment CLI workflow, domain rules) without touching public code.
 
-### b) Model — `manifest.models`
+### b) Model — per-agent override
+
+Set the model via `manifest.agents[name].model`:
 
 ```ts
-models: { coder: 'claude-sonnet-4-6', planner: 'claude-opus-4-8' }
+// private/manifest.ts
+const manifest: OverlayManifest = {
+  agents: {
+    coder: { model: 'claude-sonnet-4-6' },
+    planner: { model: 'claude-opus-4-8' },
+  },
+};
 ```
+
+Model resolution follows this precedence: override → base agent config → `pipelineModels.perAgent[name]` → `pipelineModels.default`.
 
 ### c) Whole agent — replace its stage
 
