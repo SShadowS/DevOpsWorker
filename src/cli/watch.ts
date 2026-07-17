@@ -20,6 +20,19 @@ import type { PipelineConfig, PipelineState, TestCaseFailure } from '../types/pi
 import type { PipelineAction } from '../dashboard/actions.ts';
 import { loadManifest } from '../overlay/index.ts';
 import { notifyDiscord, notifyPipelineError } from '../sdk/discord-notify.ts';
+import {
+  detectWork,
+  isCheckpointScannable,
+  isPrCompletedCandidate,
+  isReprovisionCandidate,
+  sinceFor,
+  type DetectedAction,
+  type WorkDetectionInputs,
+  type CheckpointScan,
+  type PlanApprovedItem,
+  type PrCompletedItem,
+  type ReprovisionItem,
+} from './watch/work-detector.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -180,219 +193,207 @@ export async function pollForAllWork(
   stateStore: IStateStore,
   skipIds: Set<number>,
 ): Promise<WatchAction[]> {
-  const actions: WatchAction[] = [];
+  // Three-phase pipeline: gather (I/O) → detectWork (pure decision) → apply (writes + dispatch).
+  const { detection, reprovisionCtx } = await gatherWorkDetectionInputs(config, stateStore, skipIds);
+  const detected = detectWork(detection);
+  return applyDetectedActions(detected, reprovisionCtx, config, stateStore);
+}
 
-  // Pre-fetch need-input tagged items — used to prevent auto-retry loops
+/** Effectful context needed to execute a reprovision action, keyed by work item id. */
+type ReprovisionContext = Map<number, { state: PipelineState; prConfig: PipelineConfig }>;
+
+/**
+ * Phase 1 — gather. Runs every effectful query the detector needs (WIQL buckets,
+ * per-item state loads, comment/PR scans) and packages them as plain data. Comment
+ * and PR scans are gated on the set already claimed by an earlier path (reusing the
+ * pure `detectWork` for that set) so API-call volume matches the legacy poll, and
+ * the /rerun-plan → /fix → /fix-test scans short-circuit in precedence order to
+ * preserve the legacy prefix-shadowing (a '/fix-test' work-item comment is caught
+ * by the '/fix' scan first).
+ */
+async function gatherWorkDetectionInputs(
+  config: PipelineConfig,
+  stateStore: IStateStore,
+  skipIds: Set<number>,
+): Promise<{ detection: WorkDetectionInputs; reprovisionCtx: ReprovisionContext }> {
+  // Pre-fetch need-input tagged items — used to prevent auto-retry loops.
   const needInputIds = new Set(
     await queryWorkItems(WIQL_NEED_INPUT, config).catch(() => [] as number[]),
   );
-
-  // Check for items needing fresh analysis.
-  // The 'analyse' tag is an explicit "start from scratch" signal — always honour it,
-  // even if state already exists (user may be re-running after a previous attempt).
+  // WIQL order is load-bearing for the fetch-ordinal tests: need-input, analyse, plan-approved.
   const analyseIds = await queryWorkItems(WIQL_ANALYSE, config);
-  for (const id of analyseIds) {
-    if (skipIds.has(id)) continue;
-    actions.push({ type: 'start-fresh', workItemId: id });
-  }
-
-  // Check for items with approved plans ready to continue
   const planApprovedIds = await queryWorkItems(WIQL_PLAN_APPROVED, config);
+
+  const planApproved: PlanApprovedItem[] = [];
   for (const id of planApprovedIds) {
     if (skipIds.has(id)) continue;
+    planApproved.push({ id, state: await stateStore.load(id) });
+  }
+
+  // Ids the analyse / plan-approved paths already claim. Later (expensive) scans
+  // skip these, exactly like the legacy poll's `actions.some(...)` guards. Reusing
+  // the pure decision keeps the gate and the decision from ever drifting apart.
+  const claimed = new Set(
+    detectWork({ skipIds, needInputIds, analyseIds, planApproved, checkpointScans: [], prCompleted: [], reprovision: [] })
+      .map(a => a.workItemId),
+  );
+
+  const allIds = await stateStore.listAll();
+
+  // Paths 3/4/5 — scan paused items (scannable checkpoint or error state) for
+  // /rerun-plan | /fix | /fix-test.
+  const checkpointScans: CheckpointScan[] = [];
+  for (const id of allIds) {
+    if (skipIds.has(id) || claimed.has(id)) continue;
     const state = await stateStore.load(id);
-    if (state?.checkpoint?.name === 'plan-approved') {
-      actions.push({ type: 'continue-pipeline', workItemId: id });
-    } else if (state?.error && !needInputIds.has(id)) {
-      // Pipeline failed after the plan-approved checkpoint (e.g., at env-provision or coding).
-      // The plan-approved tag is still present and the user has removed need-input,
-      // signalling they want to retry. Only resume if need-input is absent — this prevents
-      // infinite retry loops (handleContainerOutcome re-adds need-input on failure).
-      logWI(id, `plan-approved tag present with error at "${state.error.stage}", need-input removed — resuming`);
-      if (state.error.type === 'revision-exhausted') {
-        state.skipResetState = true;
+    if (!state || !isCheckpointScannable(state)) continue;
+    const since = sinceFor(state);
+
+    const rerunPlanFeedback = await findRerunCommandInComments(id, '/rerun-plan', config, since);
+    let fixFeedback: string | null = null;
+    let fixTestFeedback: string | null = null;
+    let fixTestSource: 'work-item-comment' | 'pr-comment' | null = null;
+    let testCaseFailures: TestCaseFailure[] | undefined;
+
+    if (!rerunPlanFeedback) {
+      fixFeedback = await findRerunCommandInComments(id, '/fix', config, since);
+      if (!fixFeedback) {
+        const prId = state.draftPR?.id;
+        const fixTestWI = await findRerunCommandInComments(id, '/fix-test', config, since);
+        const fixTestPR = !fixTestWI && prId ? await findRerunCommandInPRComments(prId, '/fix-test', config, since) : null;
+        fixTestFeedback = fixTestWI ?? fixTestPR;
+        if (fixTestFeedback) {
+          fixTestSource = fixTestWI ? 'work-item-comment' : 'pr-comment';
+          try {
+            testCaseFailures = await fetchTestCaseFailures(id, config);
+          } catch (err) {
+            logWI(id, `Warning: failed to fetch test case failures: ${err}`);
+          }
+        }
       }
-      state.error = undefined;
-      await stateStore.save(id, state);
-      actions.push({ type: 'continue-pipeline', workItemId: id });
+    }
+
+    if (rerunPlanFeedback || fixFeedback || fixTestFeedback) {
+      checkpointScans.push({ id, rerunPlanFeedback, fixFeedback, fixTestFeedback, fixTestSource, testCaseFailures });
+      claimed.add(id);
     }
   }
 
-  // Check for /rerun-plan or /fix comments on paused items (checkpoint or error state).
-  // This catches the case where a user posts feedback instead of adding a tag.
-  // Only scan items paused at plan-approved or pr-published checkpoints, or in error state.
-  // Skip old completed items to avoid excessive API calls.
-  const SCANNABLE_CHECKPOINTS = new Set(['plan-approved', 'pr-published']);
-  const allIdsForScan = await stateStore.listAll();
-  const checkpointedIds: number[] = [];
-  for (const id of allIdsForScan) {
-    if (skipIds.has(id)) continue;
-    const s = await stateStore.load(id);
-    if (!s || s.completedAt) continue;
-    if (s.error) { checkpointedIds.push(id); continue; }
-    if (s.checkpoint && SCANNABLE_CHECKPOINTS.has(s.checkpoint.name)) checkpointedIds.push(id);
-  }
-
-  for (const id of checkpointedIds) {
-    if (actions.some(a => a.workItemId === id)) continue; // already queued
+  // Path 6 — completed PRs on items paused at pr-published / pr-completed.
+  const prCompleted: PrCompletedItem[] = [];
+  for (const id of allIds) {
+    if (skipIds.has(id) || claimed.has(id)) continue;
     const state = await stateStore.load(id);
-    if (!state) continue;
-    const since = state.error?.timestamp ?? state.checkpoint?.enteredAt;
-
-    // Check for /rerun-plan
-    const rerunFeedback = await findRerunCommandInComments(id, '/rerun-plan', config, since);
-    if (rerunFeedback) {
-      logWI(id, `Found /rerun-plan comment — restarting planning`);
-      state.error = undefined;
-      state.checkpoint = undefined;
-      state.revisionFeedback = {
-        source: 'work-item-comment',
-        feedback: rerunFeedback,
-        targetStage: 'planning',
-      };
-      // humanFeedback is what buildPrompt reads for the agent's prompt
-      // Strip the command prefix so the agent only sees the user's message
-      const rerunMessage = rerunFeedback.replace(/^\s*\/rerun-plan\s*/i, '').trim();
-      state.humanFeedback = { rerunComment: rerunMessage || rerunFeedback, source: 'work-item-comment' };
-      await stateStore.save(id, state);
-      await removeWorkItemTags(id, ['need-input', 'plan-approved'], config).catch(() => {});
-      actions.push({ type: 'continue-pipeline', workItemId: id });
-      continue;
-    }
-
-    // Check for /fix
-    const fixFeedback = await findRerunCommandInComments(id, '/fix', config, since);
-    if (fixFeedback) {
-      logWI(id, `Found /fix comment — restarting coding`);
-      state.error = undefined;
-      state.checkpoint = undefined;
-      state.rerunMode = 'fix';
-      state.revisionFeedback = {
-        source: 'work-item-comment',
-        feedback: fixFeedback,
-        targetStage: 'coding',
-      };
-      const fixMessage = fixFeedback.replace(/^\s*\/fix\s*/i, '').trim();
-      state.humanFeedback = { rerunComment: fixMessage || fixFeedback, source: 'work-item-comment' };
-      await stateStore.save(id, state);
-      await removeWorkItemTags(id, ['need-input'], config).catch(() => {});
-      actions.push({ type: 'continue-pipeline', workItemId: id });
-      continue;
-    }
-
-    // Check for /fix-test
-    const prId = state.draftPR?.id;
-    const fixTestWI = await findRerunCommandInComments(id, '/fix-test', config, since);
-    const fixTestPR = !fixTestWI && prId ? await findRerunCommandInPRComments(prId, '/fix-test', config, since) : null;
-    const fixTestFeedback = fixTestWI ?? fixTestPR;
-    if (fixTestFeedback) {
-      const fixTestSource: 'work-item-comment' | 'pr-comment' = fixTestWI ? 'work-item-comment' : 'pr-comment';
-      logWI(id, `Found /fix-test comment — fetching test case failures and restarting coding`);
-      let testCaseFailures: TestCaseFailure[] | undefined;
-      try {
-        testCaseFailures = await fetchTestCaseFailures(id, config);
-      } catch (err) {
-        logWI(id, `Warning: failed to fetch test case failures: ${err}`);
-      }
-      state.error = undefined;
-      state.checkpoint = undefined;
-      state.rerunMode = 'fix-test';
-      state.revisionFeedback = {
-        source: fixTestSource,
-        feedback: fixTestFeedback,
-        targetStage: 'coding',
-      };
-      const fixTestMessage = fixTestFeedback.replace(/^\s*\/fix-test\s*/i, '').trim();
-      state.humanFeedback = {
-        rerunComment: fixTestMessage || fixTestFeedback,
-        source: fixTestSource,
-        testCaseFailures,
-      };
-      await stateStore.save(id, state);
-      await removeWorkItemTags(id, ['need-input'], config).catch(() => {});
-      actions.push({ type: 'continue-pipeline', workItemId: id });
-      continue;
-    }
-  }
-
-  // Check for completed PRs on items paused at pr-published or pr-completed checkpoint.
-  // This is the 5th detection path — auto-continues without manual intervention.
-  const allIdsForPR = await stateStore.listAll();
-  const prCompletedIds: number[] = [];
-  for (const id of allIdsForPR) {
-    if (skipIds.has(id)) continue;
-    if (actions.some(a => a.workItemId === id)) continue;
-    const s = await stateStore.load(id);
-    if (!s || s.completedAt) continue;
-    if ((s.checkpoint?.name === 'pr-completed' || s.checkpoint?.name === 'pr-published') && s.draftPR?.id && !s.error) prCompletedIds.push(id);
-  }
-
-  for (const id of prCompletedIds) {
-    const state = await stateStore.load(id);
-    if (!state?.draftPR?.id) continue;
+    if (!state || !isPrCompletedCandidate(state)) continue;
 
     const prConfig = await stateStore.loadConfig(id);
     if (!prConfig) {
       log(`Warning: no persisted config for WI #${id}, skipping PR completion check`);
       continue;
     }
-    // Ensure PAT is available (persisted config may have empty PAT)
-    if (!prConfig.azureDevOps.pat) {
-      prConfig.azureDevOps.pat = config.azureDevOps.pat;
-    }
+    // Ensure PAT is available (persisted config may have empty PAT).
+    if (!prConfig.azureDevOps.pat) prConfig.azureDevOps.pat = config.azureDevOps.pat;
 
+    let prStatus: { status: string; isDraft: boolean } | null = null;
     try {
-      const prStatus = await getPullRequestStatus(state.draftPR.id, prConfig);
-      if (prStatus?.status === 'completed') {
-        logWI(id, 'PR completed — auto-continuing pipeline');
-        actions.push({ type: 'continue-pipeline', workItemId: id });
-      }
+      prStatus = await getPullRequestStatus(state.draftPR!.id, prConfig);
     } catch (err) {
       log(`Warning: failed to check PR status for WI #${id}: ${err}`);
     }
+    prCompleted.push({ id, prStatus });
+    if (prStatus?.status === 'completed') claimed.add(id);
   }
 
-  // Path #6: Check for /reprovision-env PR comment — reprovision BC environment outside pipeline
-  // Scan items that have a PR and are paused at a PR-related checkpoint or in error state.
-  const allIdsForReprovision = await stateStore.listAll();
-  const reprovisionCandidates: number[] = [];
-  for (const id of allIdsForReprovision) {
-    if (skipIds.has(id)) continue;
-    if (actions.some(a => a.workItemId === id)) continue;
-    const s = await stateStore.load(id);
-    if (!s || s.completedAt || !s.draftPR?.id) continue;
-    if (s.checkpoint != null || s.error != null) reprovisionCandidates.push(id);
-  }
-
-  for (const id of reprovisionCandidates) {
+  // Path 7 — /reprovision-env PR comment. Reprovisions the BC environment outside
+  // the pipeline; the decision is emitted here, the side effect runs in apply.
+  const reprovision: ReprovisionItem[] = [];
+  const reprovisionCtx: ReprovisionContext = new Map();
+  for (const id of allIds) {
+    if (skipIds.has(id) || claimed.has(id)) continue;
     const state = await stateStore.load(id);
-    if (!state?.draftPR?.id) continue;
+    if (!state || !isReprovisionCandidate(state)) continue;
 
     const prConfig = await stateStore.loadConfig(id);
     if (!prConfig) continue;
-    if (!prConfig.azureDevOps.pat) {
-      prConfig.azureDevOps.pat = config.azureDevOps.pat;
-    }
+    if (!prConfig.azureDevOps.pat) prConfig.azureDevOps.pat = config.azureDevOps.pat;
 
-    const since = state.error?.timestamp ?? state.checkpoint?.enteredAt;
-    const found = await findRerunCommandInPRComments(state.draftPR.id, '/reprovision-env', prConfig, since).catch(() => null);
-    if (found) {
-      logWI(id, 'Found /reprovision-env PR comment — scheduling environment reprovision');
-      try {
-        const ep = (await loadManifest()).envProvider?.({ config: prConfig });
-        if (!ep) { logWI(id, 'No env provider configured (no overlay) — skipping reprovision'); continue; }
-        await ep.reprovision(id, state, prConfig, stateStore);
-        logWI(id, 'Environment reprovisioned successfully');
-      } catch (err) {
-        logWIError(id, 'Failed to reprovision environment', err);
-        const comment = formatErrorComment(id, 'env-reprovision', err instanceof Error ? err : new Error(String(err)));
-        await postWorkItemComment(id, comment, prConfig).catch(() => {});
-        await addWorkItemTags(id, ['need-input'], prConfig).catch(() => {});
-      }
+    const since = sinceFor(state);
+    const found = await findRerunCommandInPRComments(state.draftPR!.id, '/reprovision-env', prConfig, since).catch(() => null);
+    const commentFound = found != null;
+    reprovision.push({ id, commentFound });
+    if (commentFound) {
+      claimed.add(id);
+      reprovisionCtx.set(id, { state, prConfig });
     }
   }
 
-  return actions;
+  return {
+    detection: { skipIds, needInputIds, analyseIds, planApproved, checkpointScans, prCompleted, reprovision },
+    reprovisionCtx,
+  };
+}
+
+/**
+ * Phase 3 — apply. Persists each action's intended state-delta + tag-ops, executes
+ * the reprovision side effect, and returns the dispatchable actions for the main
+ * loop. Reprovision actions are consumed here (side effect only) and never returned.
+ */
+async function applyDetectedActions(
+  detected: DetectedAction[],
+  reprovisionCtx: ReprovisionContext,
+  config: PipelineConfig,
+  stateStore: IStateStore,
+): Promise<WatchAction[]> {
+  const result: WatchAction[] = [];
+  for (const action of detected) {
+    if (action.log) logWI(action.workItemId, action.log);
+
+    if (action.kind === 'reprovision') {
+      const ctx = reprovisionCtx.get(action.workItemId);
+      if (ctx) await executeReprovision(action.workItemId, ctx.state, ctx.prConfig, stateStore);
+      continue; // side effect only — not dispatched to a container
+    }
+
+    if (action.stateDelta) {
+      const state = await stateStore.load(action.workItemId);
+      if (state) {
+        Object.assign(state, action.stateDelta);
+        await stateStore.save(action.workItemId, state);
+      }
+    }
+    if (action.tagOps?.remove?.length) {
+      await removeWorkItemTags(action.workItemId, action.tagOps.remove, config).catch(() => {});
+    }
+    if (action.tagOps?.add?.length) {
+      await addWorkItemTags(action.workItemId, action.tagOps.add, config).catch(() => {});
+    }
+
+    result.push({
+      type: action.kind === 'start-fresh' ? 'start-fresh' : 'continue-pipeline',
+      workItemId: action.workItemId,
+    });
+  }
+  return result;
+}
+
+/** Execute a /reprovision-env action: reprovision the BC env, or escalate on failure. */
+async function executeReprovision(
+  workItemId: number,
+  state: PipelineState,
+  prConfig: PipelineConfig,
+  stateStore: IStateStore,
+): Promise<void> {
+  try {
+    const ep = (await loadManifest()).envProvider?.({ config: prConfig });
+    if (!ep) { logWI(workItemId, 'No env provider configured (no overlay) — skipping reprovision'); return; }
+    await ep.reprovision(workItemId, state, prConfig, stateStore);
+    logWI(workItemId, 'Environment reprovisioned successfully');
+  } catch (err) {
+    logWIError(workItemId, 'Failed to reprovision environment', err);
+    const comment = formatErrorComment(workItemId, 'env-reprovision', err instanceof Error ? err : new Error(String(err)));
+    await postWorkItemComment(workItemId, comment, prConfig).catch(() => {});
+    await addWorkItemTags(workItemId, ['need-input'], prConfig).catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------
