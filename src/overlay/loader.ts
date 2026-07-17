@@ -65,6 +65,21 @@ export function resetManifestCache(): void {
 }
 
 /**
+ * Sync accessor for the memoised manifest. Returns `null` when `loadManifest()`
+ * has not resolved yet (cold cache).
+ *
+ * Safe for synchronous consumers (e.g. `loadConfig`) because CLI entrypoints
+ * `await loadManifest()` at startup (`src/cli/index.ts`) before any command
+ * runs, so the cache is warm by the time sync code reads it. When cold — some
+ * unit tests, or ad-hoc scripts that never call `loadManifest()` — this
+ * returns `null` and callers fall through to their own generic defaults; that
+ * is expected, not an error.
+ */
+export function getCachedManifest(): OverlayManifest | null {
+  return cached;
+}
+
+/**
  * Resolve the overlay asset directory for a named agent:
  * `<privateDir>/agents/<name>`. Returns the absolute path if it exists, else
  * `null` (no overlay assets for this agent). Used by agent-workspace staging to

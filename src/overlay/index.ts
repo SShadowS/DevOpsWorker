@@ -9,7 +9,7 @@ import type { OverlayManifest, PipelineBuildContext } from './types.ts';
 export type { OverlayManifest, AdoDefaults, PipelineBuildContext } from './types.ts';
 export type { PipelineEdit } from './stage-edit.ts';
 export { applyPipelineEdits } from './stage-edit.ts';
-export { loadManifest, resolvePrivateDir, resetManifestCache, resolveAgentOverlayDir } from './loader.ts';
+export { loadManifest, resolvePrivateDir, resetManifestCache, resolveAgentOverlayDir, getCachedManifest } from './loader.ts';
 export { resolveAgentKnobs } from './agent-knobs.ts';
 export type { ResolvedAgentKnobs } from './agent-knobs.ts';
 

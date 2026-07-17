@@ -3,29 +3,52 @@ import type { PipelineConfig } from '../types/pipeline.types.ts';
 import type { IStateStore } from '../pipeline/state-store.interface.ts';
 import type { RepoConfig } from '../config/repo-config.ts';
 import { companionRegistry } from '../config/companions.ts';
+import { getCachedManifest } from '../overlay/index.ts';
 
 // ---------------------------------------------------------------------------
 // Config loading — constructs PipelineConfig from env + CLI flags
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve an ADO config field with precedence: env var → overlay manifest's
+ * `ado` defaults → generic fallback. Empty strings count as "unset" so an
+ * explicitly-blank env var doesn't shadow a real manifest/fallback value.
+ *
+ * Pure by design — this is the unit-test seam for the resolution order,
+ * independent of where the env value and manifest value come from.
+ */
+export function resolveAdoField(
+  envValue: string | undefined,
+  manifestValue: string | undefined,
+  fallback: string,
+): string {
+  if (envValue) return envValue;
+  if (manifestValue) return manifestValue;
+  return fallback;
+}
+
+/**
  * Build PipelineConfig from a session path and environment variables.
  */
 export function loadConfig(sessionPath: string): PipelineConfig {
   const pat = process.env['AZURE_DEVOPS_PAT'] ?? '';
-  const org = process.env['AZURE_DEVOPS_ORG'] ?? 'your-org';
+  // `getCachedManifest()` is sync and may be `null` if `loadManifest()` hasn't
+  // resolved yet (cold cache) — that's fine, `resolveAdoField` just falls
+  // through to the generic default below.
+  const manifestAdo = getCachedManifest()?.ado;
+  const org = resolveAdoField(process.env['AZURE_DEVOPS_ORG'], manifestAdo?.organization, 'your-org');
 
   return {
     azureDevOps: {
       organization: org,
-      orgUrl: process.env['AZURE_DEVOPS_ORG_URL'] ?? `https://dev.azure.com/${org}`,
-      project: process.env['AZURE_DEVOPS_PROJECT'] ?? 'Your Project',
+      orgUrl: resolveAdoField(process.env['AZURE_DEVOPS_ORG_URL'], manifestAdo?.orgUrl, `https://dev.azure.com/${org}`),
+      project: resolveAdoField(process.env['AZURE_DEVOPS_PROJECT'], manifestAdo?.project, 'Your Project'),
       repositoryId: process.env['AZURE_DEVOPS_REPO_ID'] ?? '00000000-0000-0000-0000-000000000000',
       repositoryName: process.env['AZURE_DEVOPS_REPO_NAME'] ?? 'Your Repository',
       ciPipelineId: parseInt(process.env['AZURE_DEVOPS_CI_PIPELINE'] ?? '0', 10),
       cdPipelineId: parseInt(process.env['AZURE_DEVOPS_CD_PIPELINE'] ?? '0', 10),
-      areaPath: process.env['AZURE_DEVOPS_AREA_PATH'] ?? 'Your Area',
-      iterationPath: process.env['AZURE_DEVOPS_ITERATION'] ?? 'Your Area',
+      areaPath: resolveAdoField(process.env['AZURE_DEVOPS_AREA_PATH'], manifestAdo?.areaPath, 'Your Area'),
+      iterationPath: resolveAdoField(process.env['AZURE_DEVOPS_ITERATION'], manifestAdo?.iterationPath, 'Your Area'),
       pat,
     },
 
@@ -90,7 +113,11 @@ export function buildConfigFromRepo(
   const pat = env['AZURE_DEVOPS_PAT'];
   if (!pat) throw new Error('AZURE_DEVOPS_PAT is required');
 
-  const org = repo.azureDevOps.organization ?? env['AZURE_DEVOPS_ORG'] ?? 'your-org';
+  // Repo registration wins when present (it's the most specific source); below
+  // that, the same env var → manifest.ado → generic default fallback as loadConfig.
+  const manifestAdo = getCachedManifest()?.ado;
+  const org = repo.azureDevOps.organization
+    ?? resolveAdoField(env['AZURE_DEVOPS_ORG'], manifestAdo?.organization, 'your-org');
   const sessionRoot = env['SESSION_ROOT'] ?? '/workspace/session';
 
   // Build default appPaths from companions (exclude BC — external reference)
