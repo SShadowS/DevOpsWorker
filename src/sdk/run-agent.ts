@@ -15,14 +15,22 @@ import { AgentExecutionError, AgentValidationError, BudgetExceededError, RateLim
 // runAgent — generic wrapper around the Claude Agent SDK query()
 // ---------------------------------------------------------------------------
 
-// Disable Claude Code CLI v2 (SDK 0.3+) auto-backgrounding of long-running bash.
-// The spawned CLI inherits this process's env. When unset, the CLI auto-backgrounds
-// blocking commands past 120s and exposes `run_in_background` (which the model uses on
-// await-pipeline, abandoning the CI wait → ciResult=not-run / error_max_turns). Setting
-// this strips `run_in_background` from the tool schema and skips the 120s speculation.
-// (Belt-and-suspenders with the Dockerfile ENV; covers local non-container runs too.)
-if (process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS == null) {
-  process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
+/**
+ * Disable Claude Code CLI v2 (SDK 0.3+) auto-backgrounding of long-running bash.
+ * The spawned CLI inherits this process's env. When unset, the CLI auto-backgrounds
+ * blocking commands past 120s and exposes `run_in_background` (which the model uses on
+ * await-pipeline, abandoning the CI wait → ciResult=not-run / error_max_turns). Setting
+ * this strips `run_in_background` from the tool schema and skips the 120s speculation.
+ * (Belt-and-suspenders with the Dockerfile ENV; covers local non-container runs too.)
+ *
+ * Called explicitly from CLI entrypoints (not as an import-time side effect) so that
+ * merely importing this module — e.g. from tests that exercise the pure helpers below —
+ * doesn't silently mutate process-global env.
+ */
+export function initAgentRuntime(): void {
+  if (process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS == null) {
+    process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
+  }
 }
 
 /**
