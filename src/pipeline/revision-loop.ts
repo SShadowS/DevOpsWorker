@@ -3,8 +3,9 @@ import type {
   PipelineState,
   PipelineContext,
   RevisionLoopConfig,
+  StageResult,
 } from '../types/pipeline.types.ts';
-import { RevisionExhaustedError } from '../sdk/errors.ts';
+import { PipelineError, RevisionExhaustedError } from '../sdk/errors.ts';
 
 // ---------------------------------------------------------------------------
 // revisionLoop — generic review→revise loop with circuit breaker
@@ -31,7 +32,7 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
       return config.producer.canRun(state);
     },
 
-    async execute(state: PipelineState, context: PipelineContext): Promise<PipelineState> {
+    async execute(state: PipelineState, context: PipelineContext): Promise<StageResult> {
       let currentState = state;
       const logger = context.logger;
 
@@ -72,7 +73,7 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
             name: config.producer.name, loop: config.name, role: 'producer',
             iteration: attempt, startedAt: new Date().toISOString(),
           });
-          currentState = await config.producer.execute(currentState, context);
+          currentState = (await config.producer.execute(currentState, context)).state;
 
           // Run optional post-producer hook (e.g. server-side CI verification)
           if (config.postProducer) {
@@ -86,12 +87,15 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
             name: config.reviewer.name, loop: config.name, role: 'reviewer',
             iteration: attempt, startedAt: new Date().toISOString(),
           });
-          currentState = await config.reviewer.execute(currentState, context);
+          currentState = (await config.reviewer.execute(currentState, context)).state;
         } catch (err) {
           // Attach accumulated state to the error so the orchestrator can preserve
           // stage outputs (changeset, codeReviews, etc.) from previous iterations.
-          if (err instanceof Error) {
-            (err as Error & { lastState?: PipelineState }).lastState = currentState;
+          // Producer/reviewer failures surface as PipelineError subclasses (runAgent
+          // always throws one); the typed `partialState` field replaces the old
+          // `(err as Error & { lastState }).lastState` monkey-patch.
+          if (err instanceof PipelineError) {
+            err.partialState = currentState;
           }
           throw err;
         }
@@ -101,8 +105,10 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
           logger?.log(`Reviewer approved on attempt ${attempt}`);
           // Clear the budget so a later rewind to this loop starts fresh.
           return {
-            ...currentState,
-            revisionAttempts: { ...currentState.revisionAttempts, [config.name]: 0 },
+            state: {
+              ...currentState,
+              revisionAttempts: { ...currentState.revisionAttempts, [config.name]: 0 },
+            },
           };
         }
 

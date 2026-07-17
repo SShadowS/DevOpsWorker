@@ -317,10 +317,39 @@ export interface ReviewVerdict {
 // Stage — the unit of pipeline composition
 // ---------------------------------------------------------------------------
 
+/**
+ * Explicit control-flow signal a stage returns to the orchestrator.
+ *
+ * This is how a stage tells the orchestrator to halt or rewind — replacing the
+ * old implicit channel where the orchestrator sniffed `state.checkpoint` /
+ * `state.revisionFeedback` off the returned state. Those state fields are still
+ * set + persisted (external observers — the watcher, dashboard, and resume path
+ * read them), but they no longer drive the orchestrator's in-loop decision.
+ *
+ * - `pause`  — the pipeline should stop and wait for human action (a checkpoint
+ *   that isn't satisfied yet). The checkpoint stage also sets `state.checkpoint`.
+ * - `rewind` — the pipeline should jump back to `targetStage` (a checkpoint that
+ *   detected a `/rerun-*` command). The checkpoint stage also sets
+ *   `state.revisionFeedback` (persisted, so a later resume can rewind too).
+ */
+export type StageSignal =
+  | { kind: 'pause' }
+  | { kind: 'rewind'; targetStage: string };
+
+/**
+ * Return value of `Stage.execute`. Carries the (possibly mutated) state plus an
+ * optional control-flow signal. Absent `signal` means "continue to the next
+ * stage" — the common case for agent stages.
+ */
+export interface StageResult {
+  state: PipelineState;
+  signal?: StageSignal;
+}
+
 export interface Stage {
   readonly name: string;
   canRun(state: PipelineState): boolean;
-  execute(state: PipelineState, context: PipelineContext): Promise<PipelineState>;
+  execute(state: PipelineState, context: PipelineContext): Promise<StageResult>;
 }
 
 export type PipelineDefinition = Stage[];

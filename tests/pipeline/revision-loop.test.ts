@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { revisionLoop } from '../../src/pipeline/revision-loop.ts';
-import { RevisionExhaustedError } from '../../src/sdk/errors.ts';
+import { AgentExecutionError, RevisionExhaustedError } from '../../src/sdk/errors.ts';
 import type { Stage, PipelineState, PipelineContext, PipelineConfig } from '../../src/types/pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ describe('revisionLoop', () => {
     const producer: Stage = {
       name: 'producer',
       canRun: () => true,
-      execute: async (s) => { producerCalls++; return { ...s, devPlan: {} as any }; },
+      execute: async (s) => { producerCalls++; return { state: { ...s, devPlan: {} as any } }; },
     };
 
     const reviewer: Stage = {
@@ -64,7 +64,7 @@ describe('revisionLoop', () => {
       canRun: () => true,
       execute: async (s) => {
         reviewerCalls++;
-        return { ...s, planReviews: [{ verdict: 'approve' as const, feedback: 'good' }] };
+        return { state: { ...s, planReviews: [{ verdict: 'approve' as const, feedback: 'good' }] } };
       },
     };
 
@@ -76,7 +76,7 @@ describe('revisionLoop', () => {
       isApproved: (s) => s.planReviews?.at(-1)?.verdict === 'approve',
     });
 
-    const result = await loop.execute(freshState(), mockContext());
+    const { state: result } = await loop.execute(freshState(), mockContext());
 
     expect(producerCalls).toBe(1);
     expect(reviewerCalls).toBe(1);
@@ -90,7 +90,7 @@ describe('revisionLoop', () => {
     const producer: Stage = {
       name: 'producer',
       canRun: () => true,
-      execute: async (s) => { producerCalls++; return { ...s, devPlan: {} as any }; },
+      execute: async (s) => { producerCalls++; return { state: { ...s, devPlan: {} as any } }; },
     };
 
     const reviewer: Stage = {
@@ -100,8 +100,10 @@ describe('revisionLoop', () => {
         reviewerCalls++;
         const verdict = reviewerCalls === 1 ? 'revise' as const : 'approve' as const;
         return {
-          ...s,
-          planReviews: [...(s.planReviews ?? []), { verdict, feedback: verdict === 'revise' ? 'fix it' : 'good' }],
+          state: {
+            ...s,
+            planReviews: [...(s.planReviews ?? []), { verdict, feedback: verdict === 'revise' ? 'fix it' : 'good' }],
+          },
         };
       },
     };
@@ -114,7 +116,7 @@ describe('revisionLoop', () => {
       isApproved: (s) => s.planReviews?.at(-1)?.verdict === 'approve',
     });
 
-    const result = await loop.execute(freshState(), mockContext());
+    const { state: result } = await loop.execute(freshState(), mockContext());
 
     expect(producerCalls).toBe(2);
     expect(reviewerCalls).toBe(2);
@@ -125,15 +127,17 @@ describe('revisionLoop', () => {
     const producer: Stage = {
       name: 'producer',
       canRun: () => true,
-      execute: async (s) => s,
+      execute: async (s) => ({ state: s }),
     };
 
     const reviewer: Stage = {
       name: 'reviewer',
       canRun: () => true,
       execute: async (s) => ({
-        ...s,
-        planReviews: [...(s.planReviews ?? []), { verdict: 'revise' as const, feedback: 'not good' }],
+        state: {
+          ...s,
+          planReviews: [...(s.planReviews ?? []), { verdict: 'revise' as const, feedback: 'not good' }],
+        },
       }),
     };
 
@@ -152,15 +156,17 @@ describe('revisionLoop', () => {
     const producer: Stage = {
       name: 'producer',
       canRun: () => true,
-      execute: async (s) => ({ ...s, devPlan: {} as any }),
+      execute: async (s) => ({ state: { ...s, devPlan: {} as any } }),
     };
 
     const reviewer: Stage = {
       name: 'reviewer',
       canRun: () => true,
       execute: async (s) => ({
-        ...s,
-        planReviews: [...(s.planReviews ?? []), { verdict: 'approve' as const, feedback: 'looks good' }],
+        state: {
+          ...s,
+          planReviews: [...(s.planReviews ?? []), { verdict: 'approve' as const, feedback: 'looks good' }],
+        },
       }),
     };
 
@@ -182,7 +188,7 @@ describe('revisionLoop', () => {
       resetState: (state) => ({ ...state, planReviews: [] }),
     });
 
-    const result = await loop.execute(staleState, mockContext());
+    const { state: result } = await loop.execute(staleState, mockContext());
 
     // Should only contain the single review from this pass, not the stale ones
     expect(result.planReviews).toHaveLength(1);
@@ -198,7 +204,7 @@ describe('revisionLoop', () => {
       canRun: () => true,
       execute: async (s) => {
         producerReceivedReviews = s.codeReviews as unknown[];
-        return { ...s, changeset: {} as any };
+        return { state: { ...s, changeset: {} as any } };
       },
     };
 
@@ -206,8 +212,10 @@ describe('revisionLoop', () => {
       name: 'reviewer',
       canRun: () => true,
       execute: async (s) => ({
-        ...s,
-        codeReviews: [...(s.codeReviews ?? []), { verdict: 'approve' as const, feedback: 'good' }],
+        state: {
+          ...s,
+          codeReviews: [...(s.codeReviews ?? []), { verdict: 'approve' as const, feedback: 'good' }],
+        },
       }),
     };
 
@@ -243,7 +251,7 @@ describe('revisionLoop', () => {
       canRun: () => true,
       execute: async (s) => {
         producerReceivedReviews = s.codeReviews as unknown[];
-        return { ...s, changeset: {} as any };
+        return { state: { ...s, changeset: {} as any } };
       },
     };
 
@@ -251,8 +259,10 @@ describe('revisionLoop', () => {
       name: 'reviewer',
       canRun: () => true,
       execute: async (s) => ({
-        ...s,
-        codeReviews: [...(s.codeReviews ?? []), { verdict: 'approve' as const, feedback: 'good' }],
+        state: {
+          ...s,
+          codeReviews: [...(s.codeReviews ?? []), { verdict: 'approve' as const, feedback: 'good' }],
+        },
       }),
     };
 
@@ -273,7 +283,7 @@ describe('revisionLoop', () => {
       resetState: (state) => ({ ...state, codeReviews: [] }),
     });
 
-    const result = await loop.execute(stateWithSkipFlag, mockContext());
+    const { state: result } = await loop.execute(stateWithSkipFlag, mockContext());
 
     // Producer should have seen the preserved reviews (resetState was skipped)
     expect(producerReceivedReviews).toHaveLength(1);
@@ -290,7 +300,7 @@ describe('revisionLoop', () => {
       canRun: () => true,
       execute: async (s) => {
         callOrder.push('producer');
-        return { ...s, changeset: { ciResult: 'passed', ciRunId: 100 } as any };
+        return { state: { ...s, changeset: { ciResult: 'passed', ciRunId: 100 } as any } };
       },
     };
 
@@ -302,8 +312,10 @@ describe('revisionLoop', () => {
         // Reviewer should see the modified ciResult from postProducer
         expect((s.changeset as any)?.ciResult).toBe('failed');
         return {
-          ...s,
-          codeReviews: [{ verdict: 'approve' as const, feedback: 'good' }],
+          state: {
+            ...s,
+            codeReviews: [{ verdict: 'approve' as const, feedback: 'good' }],
+          },
         };
       },
     };
@@ -334,7 +346,7 @@ describe('revisionLoop', () => {
     expect(callOrder.slice(0, 3)).toEqual(['producer', 'postProducer', 'reviewer']);
   });
 
-  test('mid-loop error attaches accumulated state to the error', async () => {
+  test('mid-loop error attaches accumulated state to the error (typed partialState)', async () => {
     let producerCalls = 0;
 
     const producer: Stage = {
@@ -342,8 +354,8 @@ describe('revisionLoop', () => {
       canRun: () => true,
       execute: async (s) => {
         producerCalls++;
-        if (producerCalls === 2) throw new Error('coder crashed');
-        return { ...s, changeset: { files: ['a.al'] } as any };
+        if (producerCalls === 2) throw new AgentExecutionError('coder', 'coder crashed');
+        return { state: { ...s, changeset: { files: ['a.al'] } as any } };
       },
     };
 
@@ -351,8 +363,10 @@ describe('revisionLoop', () => {
       name: 'reviewer',
       canRun: () => true,
       execute: async (s) => ({
-        ...s,
-        codeReviews: [...(s.codeReviews ?? []), { verdict: 'revise' as const, feedback: 'fix it' }],
+        state: {
+          ...s,
+          codeReviews: [...(s.codeReviews ?? []), { verdict: 'revise' as const, feedback: 'fix it' }],
+        },
       }),
     };
 
@@ -368,12 +382,13 @@ describe('revisionLoop', () => {
       await loop.execute(freshState(), mockContext());
       throw new Error('should have thrown');
     } catch (err: any) {
+      expect(err).toBeInstanceOf(AgentExecutionError);
       expect(err.message).toBe('coder crashed');
-      // The accumulated state from iteration 1 should be attached
-      expect(err.lastState).toBeDefined();
-      expect(err.lastState.changeset).toBeDefined();
-      expect(err.lastState.codeReviews).toHaveLength(1);
-      expect(err.lastState.codeReviews[0].verdict).toBe('revise');
+      // The accumulated state from iteration 1 should be attached on the typed field
+      expect(err.partialState).toBeDefined();
+      expect(err.partialState.changeset).toBeDefined();
+      expect(err.partialState.codeReviews).toHaveLength(1);
+      expect(err.partialState.codeReviews[0].verdict).toBe('revise');
     }
   });
 
@@ -382,13 +397,13 @@ describe('revisionLoop', () => {
 
     const producer: Stage = {
       name: 'planner', canRun: () => true,
-      execute: async (s) => ({ ...s, devPlan: {} as any }),
+      execute: async (s) => ({ state: { ...s, devPlan: {} as any } }),
     };
     const reviewer: Stage = {
       name: 'plan-reviewer', canRun: () => true,
       execute: async (s) => {
         const verdict = (s.planReviews?.length ?? 0) === 0 ? 'revise' as const : 'approve' as const;
-        return { ...s, planReviews: [...(s.planReviews ?? []), { verdict, feedback: 'f' }] };
+        return { state: { ...s, planReviews: [...(s.planReviews ?? []), { verdict, feedback: 'f' }] } };
       },
     };
 
@@ -418,9 +433,9 @@ describe('revisionLoop', () => {
     const producer: Stage = {
       name: 'producer',
       canRun: () => true,
-      execute: async () => { producerCalls++; throw new Error('Container exited with code 137'); },
+      execute: async () => { producerCalls++; throw new AgentExecutionError('coder', 'Container exited with code 137'); },
     };
-    const reviewer: Stage = { name: 'reviewer', canRun: () => true, execute: async (s) => s };
+    const reviewer: Stage = { name: 'reviewer', canRun: () => true, execute: async (s) => ({ state: s }) };
 
     const loop = revisionLoop({
       name: 'coding',
@@ -438,7 +453,7 @@ describe('revisionLoop', () => {
       try {
         await loop.execute(state, mockContext());
       } catch (err: any) {
-        state = err.lastState ?? state;
+        state = err.partialState ?? state;
       }
     }
     expect(producerCalls).toBe(3); // budget spent across the three crashes
@@ -454,14 +469,16 @@ describe('revisionLoop', () => {
     const producer: Stage = {
       name: 'producer',
       canRun: () => true,
-      execute: async (s) => { producerCalls++; return { ...s, changeset: {} as any }; },
+      execute: async (s) => { producerCalls++; return { state: { ...s, changeset: {} as any } }; },
     };
     const reviewer: Stage = {
       name: 'reviewer',
       canRun: () => true,
       execute: async (s) => ({
-        ...s,
-        codeReviews: [...(s.codeReviews ?? []), { verdict: 'revise' as const, feedback: 'no' }],
+        state: {
+          ...s,
+          codeReviews: [...(s.codeReviews ?? []), { verdict: 'revise' as const, feedback: 'no' }],
+        },
       }),
     };
 
@@ -490,11 +507,11 @@ describe('revisionLoop', () => {
   });
 
   test('approval clears the persisted attempt budget', async () => {
-    const producer: Stage = { name: 'producer', canRun: () => true, execute: async (s) => s };
+    const producer: Stage = { name: 'producer', canRun: () => true, execute: async (s) => ({ state: s }) };
     const reviewer: Stage = {
       name: 'reviewer',
       canRun: () => true,
-      execute: async (s) => ({ ...s, codeReviews: [{ verdict: 'approve' as const, feedback: 'ok' }] }),
+      execute: async (s) => ({ state: { ...s, codeReviews: [{ verdict: 'approve' as const, feedback: 'ok' }] } }),
     };
 
     const loop = revisionLoop({
@@ -506,7 +523,7 @@ describe('revisionLoop', () => {
     });
 
     // Pretend a prior resume left the counter at 2.
-    const result = await loop.execute(
+    const { state: result } = await loop.execute(
       { ...freshState(), revisionAttempts: { coding: 2 } },
       mockContext(),
     );
@@ -517,15 +534,17 @@ describe('revisionLoop', () => {
     const producer: Stage = {
       name: 'producer',
       canRun: () => true,
-      execute: async (s) => ({ ...s, devPlan: {} as any }),
+      execute: async (s) => ({ state: { ...s, devPlan: {} as any } }),
     };
 
     const reviewer: Stage = {
       name: 'reviewer',
       canRun: () => true,
       execute: async (s) => ({
-        ...s,
-        planReviews: [{ verdict: 'approve' as const, feedback: 'good' }],
+        state: {
+          ...s,
+          planReviews: [{ verdict: 'approve' as const, feedback: 'good' }],
+        },
       }),
     };
 
@@ -538,7 +557,7 @@ describe('revisionLoop', () => {
       // No postProducer — should work fine
     });
 
-    const result = await loop.execute(freshState(), mockContext());
+    const { state: result } = await loop.execute(freshState(), mockContext());
     expect(result.planReviews?.at(-1)?.verdict).toBe('approve');
   });
 });

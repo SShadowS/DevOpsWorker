@@ -82,7 +82,7 @@ describe('testCaseActivation', () => {
       },
     });
 
-    const result = await stage.execute(state, mockContext());
+    const { state: result } = await stage.execute(state, mockContext());
 
     // Should have called PATCH for each test case
     expect(patchCalls).toHaveLength(2);
@@ -179,7 +179,7 @@ describe('testCaseActivation', () => {
       },
     });
 
-    const result = await stage.execute(state, mockContext());
+    const { state: result } = await stage.execute(state, mockContext());
 
     expect(result.testCaseActivation).toBeDefined();
     expect(result.testCaseActivation!.activatedAt).toBeTruthy();

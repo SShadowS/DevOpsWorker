@@ -1,10 +1,22 @@
-import type { StageTelemetry } from '../types/pipeline.types.ts';
+import type { StageTelemetry, PipelineState } from '../types/pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
 // Pipeline error hierarchy
 // ---------------------------------------------------------------------------
 
 export class PipelineError extends Error {
+  /**
+   * Accumulated pipeline state captured when the error was thrown, so the
+   * orchestrator can recover stage outputs from partial progress (e.g. a
+   * revision loop that produced a changeset before a later iteration failed).
+   *
+   * First-class + typed, replacing the old `(err as Error & { lastState }).lastState`
+   * monkey-patch. Set by `revisionLoop` on any mid-loop failure; read by the
+   * orchestrator's catch block. (`RevisionExhaustedError` carries its own
+   * `lastState` — set at construction — for the circuit-breaker path.)
+   */
+  partialState?: PipelineState;
+
   constructor(
     public readonly type: string,
     public readonly stage: string,

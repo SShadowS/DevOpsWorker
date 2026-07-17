@@ -7,7 +7,7 @@ function mk(name: string): Stage {
   return {
     name,
     canRun: (_s: PipelineState) => true,
-    execute: async (s: PipelineState, _c: PipelineContext) => s,
+    execute: async (s: PipelineState, _c: PipelineContext) => ({ state: s }),
   };
 }
 

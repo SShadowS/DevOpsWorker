@@ -57,7 +57,7 @@ const minimalRepo: RepoConfig = {
  *  how the private overlay re-adds the externalised BC env stage. The core itself
  *  no longer knows about env-provision. */
 function envInjectingOverlay(): PipelineConfig['overlay'] {
-  const stage: Stage = { name: 'env-provision', canRun: () => true, execute: async (s: PipelineState) => s };
+  const stage: Stage = { name: 'env-provision', canRun: () => true, execute: async (s: PipelineState) => ({ state: s }) };
   return {
     pipeline: ({ repo }) =>
       repo?.envProvision ? [{ op: 'insertAfter', anchor: 'checkpoint:plan-approved', stage }] : [],
@@ -85,7 +85,7 @@ describe('overlay pipeline injection', () => {
   const fakeStage = (name: string): Stage => ({
     name,
     canRun: () => true,
-    execute: async (s: PipelineState) => s,
+    execute: async (s: PipelineState) => ({ state: s }),
   });
 
   test('empty overlay leaves the pipeline unchanged (identity)', () => {

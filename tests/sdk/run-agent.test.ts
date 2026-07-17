@@ -922,7 +922,7 @@ describe('agentStage (integration)', () => {
       applyOutput: (s, output) => { captured = output; return s; },
     });
 
-    const result = await stage.execute(freshState(), testContext());
+    const { state: result } = await stage.execute(freshState(), testContext());
 
     expect(captured).toEqual({ value: 'hello' });
     expect(result.telemetry.totalCostUsd).toBe(0.15);
@@ -958,7 +958,7 @@ describe('agentStage (integration)', () => {
       applyOutput: (s, _output) => s,
     });
 
-    const result = await stage.execute(freshState(), testContext());
+    const { state: result } = await stage.execute(freshState(), testContext());
 
     expect(result.telemetry.stages[0]!.toolCalls).toEqual({ Read: 2, Bash: 1 });
   });
@@ -984,7 +984,7 @@ describe('agentStage (integration)', () => {
       },
     };
 
-    const result = await stage.execute(state, testContext());
+    const { state: result } = await stage.execute(state, testContext());
 
     expect(result.telemetry.totalCostUsd).toBeCloseTo(0.15);
     expect(result.telemetry.totalDurationMs).toBe(3000);

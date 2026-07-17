@@ -3,6 +3,7 @@ import type {
   PipelineState,
   PipelineContext,
   PipelineDefinition,
+  StageResult,
 } from '../types/pipeline.types.ts';
 import type { IStateStore } from './state-store.interface.ts';
 import { createInitialState } from './initial-state.ts';
@@ -105,18 +106,21 @@ export async function runPipeline(options: OrchestratorOptions): Promise<Pipelin
       },
     };
 
+    let result: StageResult;
     try {
-      state = await stage.execute(state, stageContext);
+      result = await stage.execute(state, stageContext);
     } catch (err) {
       context.logger?.stageError(err instanceof Error ? err : new Error(String(err)));
 
       // Recover accumulated state from revision loops (exhausted or mid-loop errors).
       // This preserves stage outputs (changeset, codeReviews, etc.) from successful
-      // iterations even when a later iteration fails.
+      // iterations even when a later iteration fails. Read from the typed error
+      // fields — RevisionExhaustedError.lastState (circuit breaker) or the base
+      // PipelineError.partialState (mid-loop failure) — never a monkey-patched prop.
       const lastState = (err instanceof RevisionExhaustedError)
         ? err.lastState
-        : (err instanceof Error && 'lastState' in err)
-          ? (err as Error & { lastState?: PipelineState }).lastState
+        : (err instanceof PipelineError)
+          ? err.partialState
           : undefined;
       if (lastState) {
         state = lastState;
@@ -166,6 +170,10 @@ export async function runPipeline(options: OrchestratorOptions): Promise<Pipelin
       stageActive = false;
     }
 
+    // Unwrap the stage result: carry the new state forward; the optional signal
+    // drives the in-loop control-flow decision below.
+    state = result.state;
+
     // Persist state after stage
     await stateStore.save(workItemId, state);
 
@@ -182,23 +190,32 @@ export async function runPipeline(options: OrchestratorOptions): Promise<Pipelin
       await onStageComplete(stage, state);
     }
 
-    // If checkpoint is waiting, stop here
-    if (state.checkpoint) {
-      context.logger?.log(`Checkpoint "${state.checkpoint.name}" — waiting for human action`);
-      console.log(`[orchestrator] Checkpoint "${state.checkpoint.name}" — waiting for human action`);
+    // Act on the stage's explicit control-flow signal. The equivalent state
+    // fields (state.checkpoint / state.revisionFeedback) are still set + persisted
+    // above for external observers (watcher, dashboard, resume path), but the
+    // orchestrator's decision comes from the typed signal, not from sniffing them.
+
+    // If the stage signalled a pause (checkpoint waiting), stop here.
+    if (result.signal?.kind === 'pause') {
+      const cpName = state.checkpoint?.name ?? stage.name;
+      context.logger?.log(`Checkpoint "${cpName}" — waiting for human action`);
+      console.log(`[orchestrator] Checkpoint "${cpName}" — waiting for human action`);
       return state;
     }
 
-    // If revision feedback was set by a checkpoint, rewind
-    if (state.revisionFeedback) {
-      const targetIndex = findStageIndex(stages, state.revisionFeedback.targetStage);
+    // If the stage signalled a rewind (revision requested), jump to the target.
+    if (result.signal?.kind === 'rewind') {
+      const targetStage = result.signal.targetStage;
+      const targetIndex = findStageIndex(stages, targetStage);
       if (targetIndex >= 0) {
-        console.log(`[orchestrator] Rewind to "${state.revisionFeedback.targetStage}" for revision`);
+        console.log(`[orchestrator] Rewind to "${targetStage}" for revision`);
+        // Clear the consumed revisionFeedback so a later resume doesn't re-trigger
+        // the startup rewind on it.
         state = { ...state, revisionFeedback: undefined };
         // Reset loop counter to rewind (note: i will be incremented, so set to target - 1)
         i = targetIndex - 1;
       } else {
-        console.warn(`[orchestrator] Revision target stage "${state.revisionFeedback.targetStage}" not found, ignoring rewind`);
+        console.warn(`[orchestrator] Revision target stage "${targetStage}" not found, ignoring rewind`);
         state = { ...state, revisionFeedback: undefined };
       }
     }

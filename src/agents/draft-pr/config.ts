@@ -1,6 +1,6 @@
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { PipelineConfig, PipelineState, PipelineContext, Stage } from '../../types/pipeline.types.ts';
+import type { PipelineConfig, PipelineState, PipelineContext, Stage, StageResult } from '../../types/pipeline.types.ts';
 import type { AgentConfig } from '../../types/agent.types.ts';
 import { DraftPullRequestSchema, type DraftPullRequest } from './schema.ts';
 import { agentStage } from '../../pipeline/stage.ts';
@@ -130,8 +130,9 @@ export function draftPRStage(config: PipelineConfig): Stage {
   return {
     name: inner.name,
     canRun: inner.canRun,
-    async execute(state: PipelineState, context: PipelineContext): Promise<PipelineState> {
-      const newState = await inner.execute(state, context);
+    async execute(state: PipelineState, context: PipelineContext): Promise<StageResult> {
+      const result = await inner.execute(state, context);
+      const newState = result.state;
 
       // Post CI pipeline link as a PR comment
       const ciRunId = state.changeset?.ciRunId;
@@ -147,7 +148,7 @@ export function draftPRStage(config: PipelineConfig): Stage {
         }
       }
 
-      return newState;
+      return { state: newState };
     },
   };
 }
