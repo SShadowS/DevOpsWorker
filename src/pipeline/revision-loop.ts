@@ -5,7 +5,7 @@ import type {
   RevisionLoopConfig,
   StageResult,
 } from '../types/pipeline.types.ts';
-import { PipelineError, RevisionExhaustedError } from '../sdk/errors.ts';
+import { ExternalServiceError, PipelineError, RevisionExhaustedError } from '../sdk/errors.ts';
 
 // ---------------------------------------------------------------------------
 // revisionLoop — generic review→revise loop with circuit breaker
@@ -77,7 +77,23 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
 
           // Run optional post-producer hook (e.g. server-side CI verification)
           if (config.postProducer) {
-            currentState = await config.postProducer(currentState, context);
+            try {
+              currentState = await config.postProducer(currentState, context);
+            } catch (err) {
+              // postProducer hooks (e.g. buildCIVerificationHook -> getBuildTimeline ->
+              // adoFetch) may throw plain Errors — AzureDevOpsError is NOT a PipelineError
+              // subclass. Left un-wrapped, the catch block below wouldn't recognize it as
+              // a PipelineError, so `partialState` (the incremented revision-budget state)
+              // would never attach and a resume would re-run an already-spent attempt.
+              // Wrap any non-PipelineError escaping the hook so it does.
+              throw err instanceof PipelineError
+                ? err
+                : new ExternalServiceError(
+                    config.name,
+                    'postProducer',
+                    err instanceof Error ? err.message : String(err),
+                  );
+            }
           }
 
           logger?.log(`Running reviewer "${config.reviewer.name}"`);

@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { revisionLoop } from '../../src/pipeline/revision-loop.ts';
-import { AgentExecutionError, RevisionExhaustedError } from '../../src/sdk/errors.ts';
+import { AgentExecutionError, PipelineError, RevisionExhaustedError } from '../../src/sdk/errors.ts';
+import { AzureDevOpsError } from '../../src/sdk/ado/http.ts';
 import type { Stage, PipelineState, PipelineContext, PipelineConfig } from '../../src/types/pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
@@ -390,6 +391,58 @@ describe('revisionLoop', () => {
       expect(err.partialState.codeReviews).toHaveLength(1);
       expect(err.partialState.codeReviews[0].verdict).toBe('revise');
     }
+  });
+
+  test('postProducer throwing a non-PipelineError (e.g. AzureDevOpsError from CI verification) still preserves the incremented revision budget', async () => {
+    // Regression test: the CI-verification postProducer hook (buildCIVerificationHook ->
+    // getBuildTimeline -> adoFetch) throws AzureDevOpsError, a PLAIN Error, not a
+    // PipelineError. If that error escapes the loop un-wrapped, the outer catch's
+    // `if (err instanceof PipelineError) err.partialState = currentState` never fires,
+    // so the orchestrator recovers no partialState and persists PRE-STAGE state whose
+    // revisionAttempts was never incremented. On resume the circuit breaker then sees
+    // priorAttempts=0 and re-runs the attempt — reopening the cost-runaway hole the
+    // persisted budget was built to close.
+    let producerCalls = 0;
+
+    const producer: Stage = {
+      name: 'producer',
+      canRun: () => true,
+      execute: async (s) => {
+        producerCalls++;
+        return { state: { ...s, changeset: { ciRunId: 100 } as any } };
+      },
+    };
+    const reviewer: Stage = { name: 'reviewer', canRun: () => true, execute: async (s) => ({ state: s }) };
+
+    const loop = revisionLoop({
+      name: 'coding',
+      producer,
+      reviewer,
+      maxAttempts: 3,
+      isApproved: (s) => s.codeReviews?.at(-1)?.verdict === 'approve',
+      postProducer: async () => {
+        throw new AzureDevOpsError(
+          'Azure DevOps API: 503 Service Unavailable — build/builds/100/timeline?api-version=7.1',
+        );
+      },
+    });
+
+    // Simulate the orchestrator's error-path persistence (orchestrator.ts ~120-160):
+    // it reads err.partialState (only ever set for PipelineError) and, if present,
+    // persists that instead of the pre-stage state.
+    let persistedState: PipelineState = freshState();
+    try {
+      await loop.execute(persistedState, mockContext());
+      throw new Error('should have thrown');
+    } catch (err: any) {
+      const lastState = err instanceof PipelineError ? err.partialState : undefined;
+      if (lastState) persistedState = lastState;
+    }
+
+    expect(producerCalls).toBe(1);
+    // The revision-budget increment from this attempt must survive the CI-verification
+    // failure — otherwise a resume sees priorAttempts=0 and the breaker re-runs forever.
+    expect(persistedState.revisionAttempts?.coding).toBe(1);
   });
 
   test('reports producer then reviewer markers per attempt, with correct loop/role/iteration', async () => {
