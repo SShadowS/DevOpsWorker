@@ -1,5 +1,6 @@
 import type postgres from 'postgres';
 import type { ILogSink, LogEntry } from '../pipeline/log-sink.interface.ts';
+import { rowToLogEntry } from './pg-log-sink.ts';
 
 /**
  * Log sink for PR reviews. Stores tool-input/transcript entries in stage_logs
@@ -43,7 +44,7 @@ export class PgPrReviewLogSink implements ILogSink {
           AND entity_type = 'pull_request'
         ORDER BY id
       `;
-      return rows as unknown as LogEntry[];
+      return rows.map(rowToLogEntry);
     } catch { return []; }
   }
 
