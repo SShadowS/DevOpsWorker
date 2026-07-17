@@ -150,11 +150,20 @@ export async function executeEnvShare(
  * shared `reprovisionEnv`.
  *
  * Note: on failure, `reprovisionEnv`'s escalation (error comment + need-input
- * tag) now posts using the per-item `config` (with the PAT just ensured onto
- * it) rather than the watcher's `pollingConfig`, which the original inline
- * dashboard arm used for that one call. organization/project are constant
- * across the deployment and the PAT is equal after `ensurePat`, so this is
- * behaviourally identical — see the Task 14 report for the full comparison.
+ * tag) posts using the per-item `config` (with the PAT just ensured onto it),
+ * not the watcher's `pollingConfig`. This is a deliberate correction, not a
+ * proven-equivalent refactor: the original dashboard arm escalated against
+ * `pollingConfig` while it already reprovisioned against the per-item
+ * `config` — an internal inconsistency in the old code. Converging both on
+ * the per-item `config` matches the poll path's precedent (`executeReprovision`
+ * in the old `watch.ts` always used its per-item `config`/`prConfig`) and is
+ * more correct: the escalation comment/tag now land on the work item's own
+ * ADO project rather than the watcher's default. `RepoConfig.azureDevOps.project`
+ * is a required field with no deployment-wide fallback (`src/types/pipeline.types.ts`),
+ * so this is only behaviorally different from the old dashboard arm when a
+ * repo lives in a different ADO project than the watcher's `pollingConfig` —
+ * in that case the new behavior (per-item project) is the one we want. See
+ * the Task 14 report for the full history.
  */
 export async function executeReprovisionEnvAction(
   workItemId: number,
