@@ -1,4 +1,3 @@
-import type { z } from 'zod';
 import type { AgentConfig } from './agent.types.ts';
 import type { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import type { PRReviewComment } from '../sdk/azure-devops-client.ts';

@@ -43,8 +43,6 @@ export async function fetchWorkItem(
   );
 
   const f = response.fields;
-  console.log(`[fetchWorkItem] System.Tags raw value: ${JSON.stringify(f['System.Tags'])}`);
-  console.log(`[fetchWorkItem] All field keys: ${Object.keys(f).join(', ')}`);
   const tagsRaw = (f['System.Tags'] as string | undefined) ?? '';
   const tags = tagsRaw ? tagsRaw.split(';').map(t => t.trim()).filter(Boolean) : [];
 
@@ -72,7 +70,6 @@ export async function checkWorkItemTag(
   config: PipelineConfig,
 ): Promise<boolean> {
   const workItem = await fetchWorkItem(workItemId, config);
-  console.log(`[tag-check] Raw tags for #${workItemId}: ${JSON.stringify(workItem.tags)}`);
   return workItem.tags?.some(t => t.toLowerCase() === tag.toLowerCase()) ?? false;
 }
 

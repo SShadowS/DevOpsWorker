@@ -1,5 +1,3 @@
-import type { RepoRegistry } from '../config/repo-config.ts';
-import type { CompanionDef } from '../config/companions.ts';
 import type { PipelineDefinition } from '../types/pipeline.types.ts';
 import { registerRepos } from '../config/repos.ts';
 import { registerCompanions } from '../config/companions.ts';
