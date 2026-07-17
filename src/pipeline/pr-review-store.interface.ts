@@ -18,10 +18,12 @@ export interface PRReviewRow {
   reviewBody: string | null;
   createdAt: string;
   actionId: number | null;
+  reviewRunId: string | null;
 }
 
 export interface IPRReviewStore {
   save(row: Omit<PRReviewRow, 'id'>): Promise<number>;
   listRecent(limit?: number): Promise<PRReviewRow[]>;
   findByActionId(actionId: number): Promise<PRReviewRow | null>;
+  findById(id: number): Promise<PRReviewRow | null>;
 }
