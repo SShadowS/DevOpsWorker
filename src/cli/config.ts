@@ -11,8 +11,10 @@ import { getCachedManifest } from '../overlay/index.ts';
 
 /**
  * Resolve an ADO config field with precedence: env var → overlay manifest's
- * `ado` defaults → generic fallback. Empty strings count as "unset" so an
- * explicitly-blank env var doesn't shadow a real manifest/fallback value.
+ * `ado` defaults → generic fallback, via nullish coalescing. Only `undefined`
+ * counts as "unset" — an env var or manifest value explicitly set to `''` is
+ * treated as a real value and wins, matching the plain `??` semantics used by
+ * sibling fields (`repositoryId`/`repositoryName`) elsewhere in this file.
  *
  * Pure by design — this is the unit-test seam for the resolution order,
  * independent of where the env value and manifest value come from.
@@ -22,9 +24,7 @@ export function resolveAdoField(
   manifestValue: string | undefined,
   fallback: string,
 ): string {
-  if (envValue) return envValue;
-  if (manifestValue) return manifestValue;
-  return fallback;
+  return envValue ?? manifestValue ?? fallback;
 }
 
 /**

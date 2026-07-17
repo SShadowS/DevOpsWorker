@@ -131,16 +131,16 @@ describe('resolveAdoField', () => {
     expect(resolveAdoField(undefined, 'manifest-org', 'default-org')).toBe('manifest-org');
   });
 
-  test('falls back to the manifest value when env is an empty string', () => {
-    expect(resolveAdoField('', 'manifest-org', 'default-org')).toBe('manifest-org');
+  test('treats an empty-string env value as set (does not fall through to manifest)', () => {
+    expect(resolveAdoField('', 'manifest-org', 'default-org')).toBe('');
   });
 
   test('falls back to the generic default when both env and manifest are undefined', () => {
     expect(resolveAdoField(undefined, undefined, 'default-org')).toBe('default-org');
   });
 
-  test('falls back to the generic default when manifest value is an empty string', () => {
-    expect(resolveAdoField(undefined, '', 'default-org')).toBe('default-org');
+  test('treats an empty-string manifest value as set (does not fall through to the default)', () => {
+    expect(resolveAdoField(undefined, '', 'default-org')).toBe('');
   });
 });
 
