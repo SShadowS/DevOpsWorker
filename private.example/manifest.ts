@@ -23,9 +23,6 @@ const manifest: OverlayManifest = {
   //   'YourDep': { url: 'https://dev.azure.com/your-org/.../_git/Your%20Dep', defaultBranch: 'main', readOnly: true },
   // },
 
-  // OVERRIDE: per-agent model selection (by agent name).
-  // models: { coder: 'claude-sonnet-4-6', planner: 'claude-opus-4-8' },
-
   // ADO defaults (when not using per-repo registration).
   // ado: { organization: 'your-org', project: 'Your Project' },
 

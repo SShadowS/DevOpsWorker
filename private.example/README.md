@@ -28,7 +28,7 @@ providers) see [`docs/extending.md`](../docs/extending.md).
 |------|-------|-------|
 | Repo registry | `manifest.repos` | ADD (merged into the empty core registry) |
 | Companion repos | `manifest.companions` | ADD (core ships only public `BC`) |
-| Model overrides | `manifest.models` | OVERRIDE by agent name |
+| Agent overrides | `manifest.agents[name].model` | OVERRIDE by agent name |
 | Pipeline stages | `manifest.pipeline(ctx)` | declarative name-anchored edits |
 | Env backend | `manifest.envProvider(ctx)` | provides BC env lifecycle |
 | Agent CLAUDE.md additions | `agents/<name>/CLAUDE.append.md` | APPEND to base |

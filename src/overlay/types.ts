@@ -53,7 +53,6 @@ export interface AgentConfigOverride {
  * Merge semantics per field are fixed (see the design doc):
  *   - `repos`, `companions`, `mcpServers` → ADD (merged into the core map)
  *   - `agents`, `ado`                     → OVERRIDE (named per-agent knobs)
- *   - `models`                            → DEPRECATED (use `agents[name].model`)
  *   - `pipeline`                          → declarative stage edits
  */
 export interface OverlayManifest {
@@ -67,9 +66,6 @@ export interface OverlayManifest {
   /** Per-agent typed knobs, keyed by AgentConfig.name. Prompt assets come from
    *  private/agents/<name>/, NOT this map. */
   agents?: Record<string, AgentConfigOverride>;
-  /** @deprecated DEAD field — consumed nowhere; NOT wired by agent overrides.
-   *  Use agents[name].model. Kept only so existing manifests type-check. */
-  models?: Record<string, string>;
   /** Azure DevOps org/project/area defaults. */
   ado?: AdoDefaults;
   /** Declarative pipeline topology edits, built from the live config/repo.

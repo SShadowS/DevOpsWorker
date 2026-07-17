@@ -16,7 +16,7 @@ import { exampleRepos } from '../../private.example/config/repos.ts';
 // Every declared field of OverlayManifest, listed once. Kept in sync with the
 // interface by the two-way exhaustiveness checks below.
 const MANIFEST_KEYS = [
-  'repos', 'companions', 'mcpServers', 'agents', 'models', 'ado', 'pipeline', 'envProvider',
+  'repos', 'companions', 'mcpServers', 'agents', 'ado', 'pipeline', 'envProvider',
 ] as const;
 type DeclaredKey = typeof MANIFEST_KEYS[number];
 
@@ -38,7 +38,6 @@ const fullManifest: OverlayManifest = {
   },
   mcpServers: { example: {} },
   agents: { coder: { model: 'claude-sonnet-4-6', maxTurns: 10 } },
-  models: { coder: 'claude-sonnet-4-6' }, // @deprecated — kept to verify backwards-compat type-check
   ado: {
     organization: 'your-org',
     orgUrl: 'https://dev.azure.com/your-org',
