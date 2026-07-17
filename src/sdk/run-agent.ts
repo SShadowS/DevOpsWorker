@@ -129,6 +129,52 @@ export function resolveMcpServers(
 }
 
 /**
+ * Validate that a manifest-declared MCP server entry has the shape of an
+ * `McpServerConfig` (a stdio server config: a string `command`, optional
+ * `args`/`env`/`type`). `OverlayManifest.mcpServers` is typed `Record<string,
+ * unknown>` at the contract boundary (kept loose so the overlay contract isn't
+ * coupled to the SDK's config shape) — this is where that `unknown` gets
+ * checked and narrowed, so it never leaks unvalidated into the resolved map.
+ * Throws a clear error naming the offending key rather than letting a
+ * malformed overlay entry surface as a cryptic mid-run SDK failure.
+ */
+function assertMcpServerConfig(name: string, value: unknown): McpServerConfig {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    typeof (value as { command?: unknown }).command !== 'string'
+  ) {
+    throw new Error(
+      `Overlay manifest.mcpServers["${name}"] is not a valid McpServerConfig — ` +
+        `expected an object with a string "command" field, got ${JSON.stringify(value)}.`,
+    );
+  }
+  return value as McpServerConfig;
+}
+
+/**
+ * Merge an overlay's `manifest.mcpServers` into an agent's own resolved MCP
+ * server map. ADD semantics per the `OverlayManifest` contract (see
+ * `src/overlay/types.ts`): overlay entries fill in servers the agent didn't
+ * already declare. **Agent-specific entries win on key collision** — an
+ * agent's own, carefully scoped server config must never be silently
+ * clobbered by an overlay entry that happens to share its name.
+ *
+ * Pure and independently testable from `runAgent` (see
+ * `tests/sdk/run-agent-mcpservers.test.ts`).
+ */
+export function mergeMcpServers(
+  agentServers: Record<string, McpServerConfig>,
+  manifestServers: Record<string, unknown> | undefined,
+): Record<string, McpServerConfig> {
+  const validatedManifestServers: Record<string, McpServerConfig> = {};
+  for (const [name, value] of Object.entries(manifestServers ?? {})) {
+    validatedManifestServers[name] = assertMcpServerConfig(name, value);
+  }
+  return { ...validatedManifestServers, ...agentServers };
+}
+
+/**
  * Resolve which agent a tool call belongs to. Nested sub-agent tool calls carry
  * a parent_tool_use_id matching the Task/Agent dispatch that spawned them; we map
  * that back to the sub-agent's name. Falls back to the default (orchestrator) name.
@@ -150,7 +196,8 @@ export async function runAgent<T extends z.ZodType>(
   context: PipelineContext,
 ): Promise<AgentResult<z.infer<T>>> {
   const prompt = config.buildPrompt(state, context);
-  const knobs = resolveAgentKnobs(config, await loadManifest(), context.config.models);
+  const manifest = await loadManifest();
+  const knobs = resolveAgentKnobs(config, manifest, context.config.models);
   const model = knobs.model;
   const cwd = config.cwd ?? process.cwd();
   const logger = context.logger;
@@ -188,8 +235,9 @@ export async function runAgent<T extends z.ZodType>(
     systemPrompt = buildSystemPrompt(config.name, knobs.sharedPromptFragments);
   }
 
-  // Resolve mcpServers (can be static or function-of-state)
-  const resolvedMcpServers = resolveMcpServers(config.mcpServers, state);
+  // Resolve mcpServers (can be static or function-of-state), then merge in any
+  // overlay-declared servers (manifest.mcpServers) — agent-specific entries win.
+  const resolvedMcpServers = mergeMcpServers(resolveMcpServers(config.mcpServers, state), manifest.mcpServers);
 
   // Log agent config and prompts
   logger?.logJson('AGENT CONFIG', {
