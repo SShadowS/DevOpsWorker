@@ -29,7 +29,7 @@ export class PgLogSink implements ILogSink {
       const rows = await this.sql`
         SELECT id, stage_name, entry_type, content, created_at::text
         FROM stage_logs
-        WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName}
+        WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName} AND entity_type = 'work_item'
         ORDER BY id
       `;
       return rows.map(rowToLogEntry);
@@ -50,7 +50,7 @@ export class PgLogSink implements ILogSink {
         ? await this.sql`
             SELECT id, stage_name, entry_type, content, created_at::text
             FROM stage_logs
-            WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName}
+            WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName} AND entity_type = 'work_item'
               AND id < ${beforeId}
             ORDER BY id DESC
             LIMIT ${fetchCount}
@@ -58,7 +58,7 @@ export class PgLogSink implements ILogSink {
         : await this.sql`
             SELECT id, stage_name, entry_type, content, created_at::text
             FROM stage_logs
-            WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName}
+            WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName} AND entity_type = 'work_item'
             ORDER BY id DESC
             LIMIT ${fetchCount}
           `;
@@ -72,7 +72,7 @@ export class PgLogSink implements ILogSink {
     try {
       const rows = await this.sql`
         SELECT stage_name FROM stage_logs
-        WHERE work_item_id = ${this.workItemId}
+        WHERE work_item_id = ${this.workItemId} AND entity_type = 'work_item'
         GROUP BY stage_name ORDER BY MIN(id)
       `;
       return rows.map((r: any) => r.stage_name);
@@ -86,7 +86,7 @@ export class PgLogSink implements ILogSink {
       const rows = await this.sql`
         SELECT id, stage_name, entry_type, content, created_at::text
         FROM stage_logs
-        WHERE work_item_id = ${this.workItemId} AND id > ${afterId}
+        WHERE work_item_id = ${this.workItemId} AND entity_type = 'work_item' AND id > ${afterId}
         ORDER BY id
         LIMIT ${limit}
       `;
@@ -101,7 +101,7 @@ export class PgLogSink implements ILogSink {
       const rows = await this.sql`
         SELECT COALESCE(MAX(id), 0) AS max_id
         FROM stage_logs
-        WHERE work_item_id = ${this.workItemId}
+        WHERE work_item_id = ${this.workItemId} AND entity_type = 'work_item'
       `;
       return Number((rows[0] as { max_id: number } | undefined)?.max_id ?? 0);
     } catch {
