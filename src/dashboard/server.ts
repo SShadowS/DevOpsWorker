@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { readAllSessions, readSession, readPRReviews } from './state-reader.ts';
+import { readAllSessions, readSession, readPRReviews, readPRReviewDetail } from './state-reader.ts';
 import { SessionPoller } from './session-poller.ts';
 import { validateAction } from './actions.ts';
 import type { PipelineAction } from './actions.ts';
@@ -270,6 +270,53 @@ export function startDashboard(options: DashboardOptions): void {
       // JSON API: PR reviews
       if (path === '/api/pr-reviews') {
         return Response.json(await readPRReviews(prReviewStore, actionStore));
+      }
+
+      // PR-review logs: list stages for one review run
+      const prLogStagesMatch = path.match(/^\/api\/pr-reviews\/(\d+)\/logs$/);
+      if (prLogStagesMatch && req.method === 'GET') {
+        const id = parseInt(prLogStagesMatch[1]!, 10);
+        const row = await prReviewStore.findById(id);
+        if (!row) return Response.json({ error: 'Not found' }, { status: 404 });
+        if (!row.reviewRunId) return Response.json([]); // legacy row: no scoped logs
+        const sink = prReviewLogSink(row.prId, row.reviewRunId);
+        return Response.json(await sink.readAllStages());
+      }
+
+      // PR-review logs: paged entries for a stage
+      const prLogEntriesMatch = path.match(/^\/api\/pr-reviews\/(\d+)\/logs\/(.+)$/);
+      if (prLogEntriesMatch && req.method === 'GET') {
+        const id = parseInt(prLogEntriesMatch[1]!, 10);
+        const stageName = decodeURIComponent(prLogEntriesMatch[2]!);
+        const row = await prReviewStore.findById(id);
+        const emptyPage = { entries: [], hasMoreBefore: false, oldestId: null, newestId: null };
+        if (!row || !row.reviewRunId) return Response.json(emptyPage);
+        const sink = prReviewLogSink(row.prId, row.reviewRunId);
+        const DEFAULT_LOG_LIMIT = 500;
+        const MAX_LOG_LIMIT = 1000;
+        const reqLimit = parseInt(url.searchParams.get('limit') ?? '', 10);
+        const limit = Number.isFinite(reqLimit) ? Math.min(Math.max(reqLimit, 1), MAX_LOG_LIMIT) : DEFAULT_LOG_LIMIT;
+        const beforeRaw = parseInt(url.searchParams.get('beforeId') ?? '', 10);
+        const beforeId = Number.isFinite(beforeRaw) ? beforeRaw : undefined;
+        if (sink.readStageLogPage) return Response.json(await sink.readStageLogPage(stageName, { limit, beforeId }));
+        const all = await sink.readStageLog(stageName);
+        const sliced = beforeId != null ? all.filter((e) => e.id < beforeId) : all;
+        const entries = sliced.slice(-limit);
+        return Response.json({
+          entries,
+          hasMoreBefore: sliced.length > entries.length,
+          oldestId: entries.length > 0 ? entries[0]!.id : null,
+          newestId: entries.length > 0 ? entries[entries.length - 1]!.id : null,
+        });
+      }
+
+      // PR-review single detail (includes reviewBody)
+      const prDetailMatch = path.match(/^\/api\/pr-reviews\/(\d+)$/);
+      if (prDetailMatch && req.method === 'GET') {
+        const id = parseInt(prDetailMatch[1]!, 10);
+        const detail = await readPRReviewDetail(prReviewStore, id);
+        if (!detail) return Response.json({ error: 'Not found' }, { status: 404 });
+        return Response.json(detail);
       }
 
       // Log API: list stages for a work item

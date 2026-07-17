@@ -121,6 +121,11 @@ export interface DashboardPRReview {
   pendingStatus?: 'queued' | 'reviewing';
 }
 
+export interface DashboardPRReviewDetail extends DashboardPRReview {
+  /** Full review body markdown — only returned by GET /api/pr-reviews/:id (kept out of the list DTO to avoid bulk overfetch). */
+  reviewBody: string | null;
+}
+
 export interface StageProgress {
   name: string;
   label: string;
