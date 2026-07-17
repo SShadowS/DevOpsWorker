@@ -49,10 +49,11 @@ export interface DashboardOptions {
   runnerStatus: IRunnerStatus;
   logSink: (workItemId: number) => ILogSink;
   prReviewStore: IPRReviewStore;
+  prReviewLogSink: (prId: number, reviewRunId: string) => ILogSink;
 }
 
 export function startDashboard(options: DashboardOptions): void {
-  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore } = options;
+  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink } = options;
 
   const logPoller = new LogPoller(logSink, stateStore, broadcastSSE);
 
