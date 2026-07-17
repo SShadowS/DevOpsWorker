@@ -1,6 +1,13 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, afterEach } from 'bun:test';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { OverlayManifest } from '../../src/overlay/types.ts';
 import { exampleRepos } from '../../private.example/config/repos.ts';
+import { mergeMcpServers } from '../../src/sdk/run-agent.ts';
+import type { McpServerConfig } from '../../src/types/agent.types.ts';
+import { loadConfig } from '../../src/cli/config.ts';
+import { loadManifest, resetManifestCache } from '../../src/overlay/loader.ts';
 
 // ---------------------------------------------------------------------------
 // OverlayManifest drift guard (open-source plan T4).
@@ -69,5 +76,74 @@ describe('OverlayManifest contract (drift guard)', () => {
 
   test('private.example/ provides a valid (typed) repos registry', () => {
     expect(Object.keys(exampleRepos).length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EFFECT guards (not just shape). Each test below drives a manifest field
+// through its REAL resolution path (no mocks) and asserts the resolved output
+// changed as a result. If a future change deletes the wiring for a field —
+// e.g. `mergeMcpServers` stops reading `manifest.mcpServers`, or `loadConfig`
+// stops consulting `getCachedManifest()` — the corresponding test here fails,
+// even though the field would still type-check fine in `fullManifest` above.
+//
+// These are deliberately thin: the full behavior (precedence, validation,
+// error messages) is already covered by tests/sdk/run-agent-mcpservers.test.ts
+// (Task 2) and tests/cli/config.test.ts (Task 3). This file only proves the
+// contract-level linkage — that a populated manifest field is not inert.
+// ---------------------------------------------------------------------------
+
+describe('extension points: advertised fields have EFFECT (drift guard)', () => {
+  test('a populated manifest.mcpServers entry actually reaches the merged MCP map', () => {
+    const manifestServers: OverlayManifest['mcpServers'] = {
+      custom: { command: 'custom-server' },
+    };
+    const agentServers: Record<string, McpServerConfig> = {
+      foo: { command: 'echo', type: 'stdio' },
+    };
+
+    const merged = mergeMcpServers(agentServers, manifestServers);
+
+    // Would fail if `mergeMcpServers` (or its call site in runAgent) stopped
+    // folding `manifest.mcpServers` into the agent's server map.
+    expect(merged).toHaveProperty('custom');
+    expect(merged.custom).toEqual({ command: 'custom-server' });
+  });
+
+  describe('a populated manifest.ado field reaches loadConfig() output', () => {
+    const overlayDirs: string[] = [];
+    const savedOrgEnv = process.env['AZURE_DEVOPS_ORG'];
+
+    afterEach(() => {
+      resetManifestCache();
+      if (savedOrgEnv === undefined) delete process.env['AZURE_DEVOPS_ORG'];
+      else process.env['AZURE_DEVOPS_ORG'] = savedOrgEnv;
+      while (overlayDirs.length) {
+        try {
+          rmSync(overlayDirs.pop()!, { recursive: true, force: true });
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
+    });
+
+    test('flows through the real loadManifest -> getCachedManifest -> loadConfig path', async () => {
+      // No env var in the way — the manifest value must be what wins.
+      delete process.env['AZURE_DEVOPS_ORG'];
+
+      const dir = mkdtempSync(join(tmpdir(), 'manifest-contract-ado-test-'));
+      overlayDirs.push(dir);
+      writeFileSync(
+        join(dir, 'manifest.ts'),
+        `export default { ado: { organization: 'contract-guard-org' } };`,
+      );
+
+      await loadManifest({ dir, force: true });
+      const config = loadConfig('/tmp/session');
+
+      // Would fail if `loadConfig` stopped reading `getCachedManifest()?.ado`,
+      // or if the manifest were no longer wired into `resolveAdoField`.
+      expect(config.azureDevOps.organization).toBe('contract-guard-org');
+    });
   });
 });
