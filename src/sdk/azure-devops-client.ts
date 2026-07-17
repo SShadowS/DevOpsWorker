@@ -6,11 +6,8 @@
 // hand-rolled XML parser. It's now split by resource under `./ado/`:
 //
 //   ado/http.ts          — shared AzureDevOpsError, adoFetch, buildPipelineRunUrl
-//   ado/work-items.ts    — work item CRUD, tags, comments
-//   ado/pull-requests.ts — PR status, review comments, posting comments
-//   ado/comments.ts      — rerun-command scanners (re-exported for discoverability;
-//                          implementations live in work-items.ts / pull-requests.ts,
-//                          see that file's header comment)
+//   ado/work-items.ts    — work item CRUD, tags, comments, rerun-command scanner
+//   ado/pull-requests.ts — PR status, review comments, posting, rerun-command scanner
 //   ado/test-results.ts  — test case failure resolution + steps-XML parsing
 //   ado/builds.ts        — build timeline / CI task errors
 //
