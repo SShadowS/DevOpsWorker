@@ -1,8 +1,7 @@
 ---
 name: devils-advocate-reviewer
 description: Adversarial red-team reviewer. Hunts failure modes across six categories — hidden assumptions, concurrency failures, bad-input robustness, downstream ripple, rollback/migration risk, happy-path-only reasoning. Use as a groupthink breaker before a plan advances.
-model: claude-sonnet-5
-allowed_tools: [Read, Glob, Grep]
+model: inherit
 ---
 
 # Devil's Advocate Reviewer Subagent (Plan)

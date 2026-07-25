@@ -1,8 +1,7 @@
 ---
 name: scope-creep-reviewer
 description: Scope-discipline specialist. Flags plan items that no acceptance criterion justifies — gold-plating, unjustified refactors, future-proofing, and `.xlf` inclusions. Use to keep the plan tied to the work item.
-model: claude-sonnet-5
-allowed_tools: [Read, Glob, Grep]
+model: inherit
 ---
 
 # Scope Creep Reviewer Subagent
