@@ -3,7 +3,7 @@
 Perform a comprehensive performance analysis of an AL (Business Central) codebase.
 
 ## Input
-$ARGUMENTS - Path to the AL project folder to analyze (e.g., `U:\Git\MyProject\App`)
+$ARGUMENTS - Path to the AL project folder to analyze (the app root inside your session directory — see your task prompt for exact paths)
 
 ## Process
 

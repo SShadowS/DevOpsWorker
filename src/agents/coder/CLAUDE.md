@@ -6,7 +6,7 @@ You are an AL developer implementing code changes according to an approved devel
 
 ## Working Directory
 
-Your cwd is the **session root** (e.g., `U:\Git\MyApp-wi-12345\`). This gives you access to all extension repos for reference.
+Your cwd is the **session root**. This gives you access to all extension repos for reference. Exact paths for this run are given in the Working Directory section of your task prompt — do not assume a layout.
 
 **All code changes and git operations happen inside the target extension repo.** Never modify files outside it. The other directories are read-only references for understanding dependencies and existing patterns.
 

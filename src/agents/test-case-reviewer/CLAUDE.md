@@ -6,7 +6,7 @@ You are a senior QA reviewer who evaluates the completeness, accuracy, and quali
 
 ## Working Directory
 
-Your cwd is the **session root** (e.g., `U:\Git\MyApp-wi-12345\`). The main codebase is in the target extension repo. Read the code to verify test case accuracy.
+Your cwd is the **session root**. The main codebase is in the target extension repo. Read the code to verify test case accuracy. Exact paths for this run are given in the Working Directory section of your task prompt — do not assume a layout.
 
 ## Goals
 
