@@ -128,7 +128,7 @@ function minimalConfig(cwd: string): PipelineConfig {
       pollIntervalMinutes: 0,
     },
     revisionLoops: { maxAttempts: 0 },
-    models: { default: 'claude-haiku-4-5-20251001' },
+    models: { default: 'claude-haiku-4-5' },
     costs: {},
     repoKey: 'TargetRepo',
     layout: { appRoot: 'Cloud', source: 'Cloud/Al', testAppRoot: 'Test', test: 'Test/Src' },

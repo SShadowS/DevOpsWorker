@@ -1,7 +1,7 @@
 ---
 name: error-handling-reviewer
 description: Error handling analysis specialist for AL code. Validates Error()/ErrorInfo() usage, TryFunction patterns, field validation completeness, user-facing error message quality, and exception propagation correctness.
-model: claude-sonnet-4-6
+model: claude-sonnet-5
 allowed_tools: [Read, Glob, Grep, LSP, Bash]
 ---
 

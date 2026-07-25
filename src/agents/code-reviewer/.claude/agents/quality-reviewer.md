@@ -1,7 +1,7 @@
 ---
 name: quality-reviewer
 description: Code quality analyst for AL code. Evaluates readability, naming conventions, maintainability, DRY adherence, complexity, and overall code craftsmanship. Provides structured quality assessments with actionable improvement suggestions.
-model: claude-sonnet-4-6
+model: claude-sonnet-5
 allowed_tools: [Read, Glob, Grep, LSP, Bash]
 ---
 

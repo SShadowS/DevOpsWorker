@@ -76,13 +76,13 @@ export function loadConfig(sessionPath: string): PipelineConfig {
     },
 
     models: {
-      default: 'claude-opus-4-8',
+      default: 'claude-opus-5',
       perAgent: {
-        // planner inherits the Opus 4.8 default — strong planning, cheap (Sonnet) coding.
-        'coder': 'claude-sonnet-4-6',
-        'draft-pr': 'claude-sonnet-4-6',
-        'test-cases': 'claude-sonnet-4-6',
-        'documenter': 'claude-sonnet-4-6',
+        // planner inherits the Opus 5 default — strong planning, cheap (Sonnet) coding.
+        'coder': 'claude-sonnet-5',
+        'draft-pr': 'claude-sonnet-5',
+        'test-cases': 'claude-sonnet-5',
+        'documenter': 'claude-sonnet-5',
       },
     },
 
@@ -170,13 +170,13 @@ export function buildConfigFromRepo(
     },
 
     models: {
-      default: env['DEFAULT_MODEL'] ?? 'claude-opus-4-8',
+      default: env['DEFAULT_MODEL'] ?? 'claude-opus-5',
       perAgent: {
-        // planner inherits the Opus 4.8 default — strong planning, cheap (Sonnet) coding.
-        'coder': 'claude-sonnet-4-6',
-        'draft-pr': 'claude-sonnet-4-6',
-        'test-cases': 'claude-sonnet-4-6',
-        'documenter': 'claude-sonnet-4-6',
+        // planner inherits the Opus 5 default — strong planning, cheap (Sonnet) coding.
+        'coder': 'claude-sonnet-5',
+        'draft-pr': 'claude-sonnet-5',
+        'test-cases': 'claude-sonnet-5',
+        'documenter': 'claude-sonnet-5',
       },
     },
 

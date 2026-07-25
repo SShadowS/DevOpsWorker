@@ -63,7 +63,7 @@ export function createDiagnosticConfig(options: {
     outputSchema: DiagnosticSchema,
     allowedTools,
     mcpServers: options.includeMcp ? options.mcpServers : undefined,
-    model: 'claude-haiku-4-5-20251001',
+    model: 'claude-haiku-4-5',
     maxTurns: 20,
     maxBudgetUsd: 0.50,
     cwd: options.cwd,

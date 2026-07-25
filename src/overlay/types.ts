@@ -34,7 +34,7 @@ export interface AdoDefaults {
  * merged, so the effective set is explicit and auditable.
  */
 export interface AgentConfigOverride {
-  /** Model id (e.g. 'claude-sonnet-4-6'). Wins over the perAgent/default chain. */
+  /** Model id (e.g. 'claude-sonnet-5'). Wins over the perAgent/default chain. */
   model?: string;
   /** REPLACE allowedTools wholesale. Omit to keep the public set. */
   allowedTools?: string[];

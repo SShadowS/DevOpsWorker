@@ -1,7 +1,7 @@
 ---
 name: performance-reviewer
 description: Performance analysis specialist for AL code. Detects database query inefficiencies, missing SetLoadFields, N+1 patterns, transaction issues, loop optimization opportunities, and other BC-specific performance concerns.
-model: claude-sonnet-4-6
+model: claude-sonnet-5
 allowed_tools: [Read, Glob, Grep, LSP, Bash]
 ---
 

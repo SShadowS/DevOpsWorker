@@ -79,7 +79,7 @@ export async function learnRules(args: string[]): Promise<void> {
           schema: z.toJSONSchema(ProposedRulesSchema),
         },
         allowedTools: ALLOWED_TOOLS,
-        model: 'claude-sonnet-4-6',
+        model: 'claude-sonnet-5',
         cwd: process.cwd(),
         maxTurns: 20,
         permissionMode: 'bypassPermissions',

@@ -13,7 +13,7 @@ const manifest: OverlayManifest = {
   // OVERRIDE: per-agent typed knobs (model, maxTurns, allowedTools, sharedPromptFragments).
   agents: {
     'pr-reviewer': {
-      model: 'claude-opus-4-8',
+      model: 'claude-opus-5',
       maxTurns: 120,
     },
   },
