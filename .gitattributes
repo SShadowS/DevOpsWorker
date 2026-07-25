@@ -1,3 +1,8 @@
+# Normalise line endings repo-wide: LF in the repository, platform-native
+# in the working tree. Without this, editors and shell tools (sed -i) silently
+# rewrite CRLF->LF and produce diffs with no content change.
+* text=auto
+
 # Force LF line endings for files that run inside Linux containers
 *.sh text eol=lf
 docker/** text eol=lf
