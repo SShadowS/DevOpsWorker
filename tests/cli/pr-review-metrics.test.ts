@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { categorizeCommand, summarizeRuns, diffSummaries, type RunMetrics } from '../../src/cli/pr-review-metrics.ts';
+import { categorizeCommand, summarizeRuns, diffSummaries, summarizeSubAgents, type RunMetrics } from '../../src/cli/pr-review-metrics.ts';
 
 describe('categorizeCommand', () => {
   test('classifies MCP-result parsing', () => {
@@ -64,5 +64,64 @@ describe('diffSummaries', () => {
     const d = diffSummaries(before, after);
     expect(d.toolDelta.Bash).toBe(-15);
     expect(d.turnsDelta).toBe(-12);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// summarizeSubAgents — per-named-sub-agent aggregation
+// ---------------------------------------------------------------------------
+
+function usage(turns: number, tokens: number, cost: number, toolCalls: Record<string, number> = {}) {
+  return {
+    turns,
+    tokens: { input: tokens, output: 0, cacheRead: 0, cacheCreation: 0 },
+    toolCalls,
+    apportionedCostUsd: cost,
+  };
+}
+
+describe('summarizeSubAgents', () => {
+  test('aggregates and ranks by total apportioned cost', () => {
+    const stats = summarizeSubAgents([
+      { 'security-reviewer': usage(4, 1000, 1.0, { Read: 3 }), 'style-reviewer': usage(1, 100, 0.1, { Read: 1 }) },
+      { 'security-reviewer': usage(6, 3000, 3.0, { Read: 2, Grep: 5 }) },
+    ]);
+
+    expect(stats.map(s => s.name)).toEqual(['security-reviewer', 'style-reviewer']);
+
+    const sec = stats[0]!;
+    expect(sec.runs).toBe(2);
+    expect(sec.totalTurns).toBe(10);
+    expect(sec.medianTurns).toBe(5);
+    expect(sec.totalTokens).toBe(4000);
+    expect(sec.totalCostUsd).toBeCloseTo(4.0, 5);
+    expect(sec.medianCostUsd).toBeCloseTo(2.0, 5);
+    expect(sec.toolCalls).toEqual({ Read: 5, Grep: 5 });
+  });
+
+  test('medians cover only the runs a sub-agent was dispatched in', () => {
+    // style-reviewer ran once out of three; its median must be its own value,
+    // not diluted toward zero by the runs it sat out.
+    const stats = summarizeSubAgents([
+      { 'security-reviewer': usage(2, 10, 0.5) },
+      { 'security-reviewer': usage(2, 10, 0.5) },
+      { 'security-reviewer': usage(2, 10, 0.5), 'style-reviewer': usage(9, 900, 0.2) },
+    ]);
+
+    const style = stats.find(s => s.name === 'style-reviewer')!;
+    expect(style.runs).toBe(1);
+    expect(style.medianTurns).toBe(9);
+    expect(style.medianCostUsd).toBeCloseTo(0.2, 5);
+  });
+
+  test('ignores runs with no sub-agent data', () => {
+    expect(summarizeSubAgents([null, undefined, {}])).toEqual([]);
+  });
+
+  test('treats a missing apportioned cost as zero', () => {
+    const stats = summarizeSubAgents([
+      { 'a': { turns: 1, tokens: { input: 1, output: 0, cacheRead: 0, cacheCreation: 0 }, toolCalls: {} } },
+    ]);
+    expect(stats[0]!.totalCostUsd).toBe(0);
   });
 });

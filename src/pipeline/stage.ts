@@ -78,6 +78,9 @@ export function agentStage<T extends z.ZodType>(
         ...(result.modelUsage && Object.keys(result.modelUsage).length > 0
           ? { modelUsage: result.modelUsage }
           : {}),
+        ...(result.subAgents && Object.keys(result.subAgents).length > 0
+          ? { subAgents: result.subAgents }
+          : {}),
         subtype: result.subtype,
       };
 

@@ -305,6 +305,9 @@ export interface StageTelemetry {
   tokens?: StageTokenUsage;
   /** Per-model cost/token split — separates an orchestrator from its sub-agents. */
   modelUsage?: Record<string, StageModelUsage>;
+  /** Per-named-sub-agent usage, keyed by subagent_type. Present only for
+   *  orchestrators that dispatched sub-agents. */
+  subAgents?: Record<string, SubAgentUsage>;
   /** SDK result subtype: 'success' | 'error_max_turns' | 'error_max_budget_usd' | 'error_max_structured_output_retries' | 'error_during_execution'. */
   subtype?: string;
 }
@@ -327,6 +330,38 @@ export interface StageModelUsage {
   output: number;
   cacheRead: number;
   cacheCreation: number;
+}
+
+/**
+ * Usage for one *named* sub-agent within an orchestrator's run.
+ *
+ * `StageModelUsage` splits by model, which cannot separate sub-agents that share
+ * one — the eight `code-reviewer` sub-agents all run on the same model, so a
+ * model-keyed split lumps them together. Attribution here is per dispatch: the
+ * SDK tags each assistant message with the `subagent_type` that produced it.
+ *
+ * `apportionedCostUsd` is DERIVED, not reported by the SDK: the model's total
+ * cost shared out by each sub-agent's token count. Treat it as an estimate — it
+ * assumes uniform per-token pricing within a model, which holds today but is not
+ * guaranteed. `tokens`, `turns` and `toolCalls` are measured.
+ */
+export interface SubAgentUsage {
+  /** The `subagent_type` dispatched, e.g. 'security-reviewer'. */
+  name: string;
+  turns: number;
+  tokens: StageTokenUsage;
+  toolCalls: Record<string, number>;
+  /** Model this sub-agent ran on, as reported on its assistant messages. */
+  model?: string;
+  /**
+   * DERIVED, not SDK-reported. The SDK bills one total per run and splits it only
+   * by model, so eight sub-agents sharing Sonnet share one number. This estimates
+   * each one's share of its model's cost by token count. Treat it as an
+   * attribution estimate for comparing sub-agents, not as a billed figure —
+   * per-token prices differ between input/output/cache, so a sub-agent that is
+   * output-heavy is under-counted relative to a cache-read-heavy one.
+   */
+  apportionedCostUsd?: number;
 }
 
 /** Prompt/output token breakdown for a single agent run. */

@@ -343,3 +343,151 @@ describe('consumeAgentStream modelUsage', () => {
     expect(out.modelUsage).toEqual({});
   });
 });
+
+// ---------------------------------------------------------------------------
+// subAgents — per-named-sub-agent attribution
+//
+// modelUsage answers "which model", not "which reviewer". Eight sub-agents
+// sharing claude-sonnet-5 collapse into one modelUsage entry, so the only way
+// to tell an expensive reviewer from a cheap one is to attribute each assistant
+// turn to the subagent_type that produced it.
+// ---------------------------------------------------------------------------
+
+function assistantTurn(
+  subagentType: string | undefined,
+  usage: { input: number; output: number; cacheRead?: number; cacheCreation?: number },
+  content: unknown[] = [],
+  model = 'claude-sonnet-5',
+) {
+  return {
+    type: 'assistant',
+    ...(subagentType ? { subagent_type: subagentType } : {}),
+    message: {
+      model,
+      content,
+      usage: {
+        input_tokens: usage.input,
+        output_tokens: usage.output,
+        cache_read_input_tokens: usage.cacheRead ?? 0,
+        cache_creation_input_tokens: usage.cacheCreation ?? 0,
+      },
+    },
+  } as never;
+}
+
+describe('consumeAgentStream subAgents', () => {
+  test('separates two named sub-agents sharing one model', async () => {
+    async function* stream() {
+      yield assistantTurn(undefined, { input: 5, output: 5 }, [], 'claude-opus-5');
+      yield assistantTurn('security-reviewer', { input: 100, output: 200, cacheRead: 1000 }, [
+        { type: 'tool_use', name: 'Read' },
+        { type: 'tool_use', name: 'Grep' },
+      ]);
+      yield assistantTurn('security-reviewer', { input: 50, output: 100 }, [
+        { type: 'tool_use', name: 'Read' },
+      ]);
+      yield assistantTurn('performance-reviewer', { input: 10, output: 20 }, [
+        { type: 'tool_use', name: 'LSP' },
+      ]);
+      yield {
+        type: 'result', subtype: 'success', total_cost_usd: 3, duration_ms: 1, num_turns: 4,
+        usage: { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        modelUsage: {
+          'claude-sonnet-5': {
+            inputTokens: 160, outputTokens: 320, cacheReadInputTokens: 1000,
+            cacheCreationInputTokens: 0, costUSD: 2.0,
+          },
+        },
+      } as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'code-reviewer' });
+
+    expect(Object.keys(out.subAgents).sort()).toEqual(['performance-reviewer', 'security-reviewer']);
+
+    const sec = out.subAgents['security-reviewer']!;
+    expect(sec.turns).toBe(2);
+    expect(sec.tokens).toEqual({ input: 150, output: 300, cacheRead: 1000, cacheCreation: 0 });
+    expect(sec.toolCalls).toEqual({ Read: 2, Grep: 1 });
+    expect(sec.model).toBe('claude-sonnet-5');
+
+    const perf = out.subAgents['performance-reviewer']!;
+    expect(perf.turns).toBe(1);
+    expect(perf.toolCalls).toEqual({ LSP: 1 });
+
+    // aggregate toolCalls still counts every call, sub-agent or not
+    expect(out.toolCalls).toEqual({ Read: 2, Grep: 1, LSP: 1 });
+  });
+
+  test('apportions each sub-agent a share of its model cost by tokens', async () => {
+    async function* stream() {
+      yield assistantTurn('a-reviewer', { input: 750, output: 0 });
+      yield assistantTurn('b-reviewer', { input: 250, output: 0 });
+      yield {
+        type: 'result', subtype: 'success', total_cost_usd: 5, duration_ms: 1, num_turns: 2,
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        modelUsage: {
+          'claude-sonnet-5': {
+            inputTokens: 2000, outputTokens: 0, cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0, costUSD: 4.0,
+          },
+        },
+      } as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'code-reviewer' });
+
+    // 750/2000 and 250/2000 of $4.00
+    expect(out.subAgents['a-reviewer']!.apportionedCostUsd).toBeCloseTo(1.5, 5);
+    expect(out.subAgents['b-reviewer']!.apportionedCostUsd).toBeCloseTo(0.5, 5);
+    // the unapportioned $2.00 is the orchestrator's own share, not redistributed
+    const attributed = Object.values(out.subAgents)
+      .reduce((a, s) => a + (s.apportionedCostUsd ?? 0), 0);
+    expect(attributed).toBeCloseTo(2.0, 5);
+  });
+
+  test('falls back to parent_tool_use_id when subagent_type is absent', async () => {
+    async function* stream() {
+      // dispatch: the Task tool_use whose id later identifies the sub-agent
+      yield {
+        type: 'assistant',
+        message: {
+          model: 'claude-opus-5',
+          content: [{ type: 'tool_use', id: 'tu_1', name: 'Task', input: { subagent_type: 'al-idiom-reviewer' } }],
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        },
+      } as never;
+      yield {
+        type: 'assistant',
+        parent_tool_use_id: 'tu_1',
+        message: {
+          model: 'claude-sonnet-5',
+          content: [{ type: 'tool_use', name: 'Read' }],
+          usage: { input_tokens: 40, output_tokens: 60, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        },
+      } as never;
+      yield {
+        type: 'result', subtype: 'success', total_cost_usd: 1, duration_ms: 1, num_turns: 2,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      } as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'code-reviewer' });
+
+    expect(Object.keys(out.subAgents)).toEqual(['al-idiom-reviewer']);
+    expect(out.subAgents['al-idiom-reviewer']!.tokens.output).toBe(60);
+    expect(out.subAgents['al-idiom-reviewer']!.toolCalls).toEqual({ Read: 1 });
+  });
+
+  test('is an empty object for an agent that dispatches nothing', async () => {
+    async function* stream() {
+      yield assistantTurn(undefined, { input: 1, output: 1 }, [{ type: 'tool_use', name: 'Bash' }], 'claude-sonnet-5');
+      yield {
+        type: 'result', subtype: 'success', total_cost_usd: 1, duration_ms: 1, num_turns: 1,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      } as never;
+    }
+    const out = await consumeAgentStream(stream(), { agentName: 'coder' });
+    expect(out.subAgents).toEqual({});
+  });
+});

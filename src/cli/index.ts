@@ -72,6 +72,11 @@ async function main() {
       await webhookServer(args.slice(1));
       break;
     }
+    case 'subagent-stats': {
+      const { subagentStats } = await import('./subagent-stats.ts');
+      await subagentStats(args.slice(1));
+      break;
+    }
     case 'review-pr': {
       const { reviewPR } = await import('./review-pr.ts');
       await reviewPR(args.slice(1));
@@ -92,6 +97,7 @@ Usage:
   pipeline learn-rules --pr <pr-id>                        Learn review patterns from PR comments
   pipeline webhook-server [--port <n>]                     Start webhook receiver
   pipeline review-pr     --pr-id <id> --repo-id <guid>    Review a pull request
+  pipeline subagent-stats [--limit <n>] [--repo <key>]     Per-sub-agent cost/turns across recent reviews
 
 Options:
   --work-item, -w   Azure DevOps work item ID (required for run/continue/status)
@@ -100,6 +106,9 @@ Options:
   --state-dir, -d   State directory (default: .pipeline/state)
   --interval        Polling interval in minutes (default: 15, watch only)
   --pr              Pull request ID (required for learn-rules)
+  --limit, -n       Reviews to scan (default: 50, subagent-stats only)
+  --repo, -r        Restrict to one repo key (subagent-stats only)
+  --json            Machine-readable output (subagent-stats only)
       `);
       process.exit(command ? 1 : 0);
   }

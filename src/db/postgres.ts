@@ -101,6 +101,12 @@ CREATE TABLE IF NOT EXISTS pr_reviews (
 CREATE INDEX IF NOT EXISTS idx_pr_reviews_created ON pr_reviews (created_at DESC);
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_body TEXT;
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_run_id TEXT;
+-- Per-named-sub-agent usage (turns/tokens/toolCalls/apportioned cost), keyed by
+-- subagent_type. tool_calls above is the run total and cannot say which reviewer
+-- spent it; this can.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS sub_agents JSONB;
+-- Per-model cost/token split, keyed by model id.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS model_usage JSONB;
 `;
 
 /**

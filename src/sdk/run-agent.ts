@@ -298,7 +298,7 @@ export async function runAgent<T extends z.ZodType>(
 
         const {
           resultMessage, sessionId, costUsd, durationMs, turns,
-          lastAssistantText, rateLimitHit, tokens, toolCalls, modelUsage,
+          lastAssistantText, rateLimitHit, tokens, toolCalls, modelUsage, subAgents,
         } = await consumeAgentStream(stream, { agentName, logger });
 
         if (!resultMessage) {
@@ -366,6 +366,7 @@ export async function runAgent<T extends z.ZodType>(
               toolCalls,
               tokens,
               modelUsage,
+              subAgents,
               subtype: resultMessage.subtype,
               model,
             };

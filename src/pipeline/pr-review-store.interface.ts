@@ -1,3 +1,5 @@
+import type { SubAgentUsage, StageModelUsage } from '../types/pipeline.types.ts';
+
 export interface PRReviewRow {
   id: number;
   prId: number;
@@ -13,6 +15,11 @@ export interface PRReviewRow {
   durationMs: number | null;
   turns: number | null;
   toolCalls: Record<string, number> | null;
+  /** Per-named-sub-agent usage keyed by subagent_type. Null for runs recorded
+   *  before this was captured, and for reviews that dispatched no sub-agents. */
+  subAgents: Record<string, SubAgentUsage> | null;
+  /** Per-model cost/token split keyed by model id. */
+  modelUsage: Record<string, StageModelUsage> | null;
   sessionId: string | null;
   error: string | null;
   reviewBody: string | null;

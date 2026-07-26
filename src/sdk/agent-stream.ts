@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { PipelineLogger } from './pipeline-logger.ts';
-import type { StageTokenUsage, StageModelUsage } from '../types/pipeline.types.ts';
+import type { StageTokenUsage, StageModelUsage, SubAgentUsage } from '../types/pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
 // agent-stream — extracted from runAgent's `for await (const message of
@@ -62,6 +62,9 @@ export interface ConsumedAgentStream {
    *  agent AND its sub-agents; this separates them whenever they run on different
    *  models. Empty when the SDK reports no `modelUsage`. */
   modelUsage: Record<string, StageModelUsage>;
+  /** Per-named-sub-agent usage, keyed by subagent_type. Empty when the agent
+   *  dispatched no sub-agents. */
+  subAgents: Record<string, SubAgentUsage>;
   /** The terminal SDK `result` message, or undefined if the stream ended
    *  without ever producing one (caller treats this as a transient failure). */
   resultMessage?: SDKResultMessage;
@@ -92,6 +95,8 @@ export async function consumeAgentStream(
   const tokens: StageTokenUsage = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
   const toolCalls: Record<string, number> = {};
   const modelUsage: Record<string, StageModelUsage> = {};
+  const subAgents: Record<string, SubAgentUsage> = {};
+  let currentSubAgent: string | undefined;
   const subAgentByToolUseId = new Map<string, string>();
   let resultMessage: SDKResultMessage | undefined;
 
@@ -117,6 +122,34 @@ export async function consumeAgentStream(
       process.stderr.write(`[${agentName}] Turn ${turnCounter}\n`);
       logger?.log(`Turn ${turnCounter}`);
 
+      // Attribute this turn to a named sub-agent when the SDK says one produced
+      // it. `subagent_type` is authoritative; `parent_tool_use_id` is the fallback
+      // for emitters that omit it, resolved through the dispatch map built below.
+      const subName = (message as { subagent_type?: string }).subagent_type
+        ?? (subAgentByToolUseId.get(
+              (message as { parent_tool_use_id?: string | null }).parent_tool_use_id ?? '',
+            ));
+      if (subName) {
+        const entry = subAgents[subName] ??= {
+          name: subName,
+          turns: 0,
+          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+          toolCalls: {},
+        };
+        entry.turns++;
+        entry.model ??= message.message?.model;
+        const u = message.message?.usage;
+        if (u) {
+          entry.tokens.input += u.input_tokens ?? 0;
+          entry.tokens.output += u.output_tokens ?? 0;
+          entry.tokens.cacheRead += u.cache_read_input_tokens ?? 0;
+          entry.tokens.cacheCreation += u.cache_creation_input_tokens ?? 0;
+        }
+        currentSubAgent = subName;
+      } else {
+        currentSubAgent = undefined;
+      }
+
       // Log assistant message content (text + tool calls)
       const content = (message as any).message?.content;
       if (Array.isArray(content)) {
@@ -129,6 +162,10 @@ export async function consumeAgentStream(
           if (block.type === 'tool_use') {
             const toolName = block.name ?? 'unknown';
             toolCalls[toolName] = (toolCalls[toolName] ?? 0) + 1;
+            if (currentSubAgent && subAgents[currentSubAgent]) {
+              const tc = subAgents[currentSubAgent]!.toolCalls;
+              tc[toolName] = (tc[toolName] ?? 0) + 1;
+            }
             // Map a Task/Agent dispatch tool_use id → the sub-agent it spawns.
             if ((toolName === 'Task' || toolName === 'Agent') && block.input && block.id) {
               const sub = (block.input as any).subagent_type
@@ -217,6 +254,21 @@ export async function consumeAgentStream(
         }
       }
 
+      // Estimate each sub-agent's share of its model's cost. The SDK never bills
+      // per sub-agent, so this is the only way to tell an expensive reviewer from
+      // a cheap one when eight of them share a model. Denominator is the model's
+      // *total* tokens, so the un-apportioned remainder is the orchestrator's own
+      // spend rather than being redistributed onto the sub-agents.
+      for (const entry of Object.values(subAgents)) {
+        const mu = entry.model ? modelUsage[entry.model] : undefined;
+        if (!mu) continue;
+        const modelTokens = mu.input + mu.output + mu.cacheRead + mu.cacheCreation;
+        if (modelTokens <= 0) continue;
+        const subTokens = entry.tokens.input + entry.tokens.output
+          + entry.tokens.cacheRead + entry.tokens.cacheCreation;
+        entry.apportionedCostUsd = mu.costUsd * (subTokens / modelTokens);
+      }
+
       // Print completion summary to console
       const summary = `[${agentName}] Complete — $${costUsd.toFixed(2)} | ${(durationMs / 1000).toFixed(0)}s | ${turns} turns`;
       process.stderr.write(`${summary}\n`);
@@ -226,7 +278,7 @@ export async function consumeAgentStream(
     }
   }
 
-  return { sessionId, costUsd, durationMs, turns, lastAssistantText, rateLimitHit, tokens, toolCalls, modelUsage, resultMessage };
+  return { sessionId, costUsd, durationMs, turns, lastAssistantText, rateLimitHit, tokens, toolCalls, modelUsage, subAgents, resultMessage };
 }
 
 // ---------------------------------------------------------------------------

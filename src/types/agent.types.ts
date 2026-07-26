@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { SdkPluginConfig, AgentDefinition as SdkAgentDefinition, HookEvent, HookCallbackMatcher } from '@anthropic-ai/claude-agent-sdk';
-import type { PipelineState, PipelineContext, StageTokenUsage, StageModelUsage } from './pipeline.types.ts';
+import type { PipelineState, PipelineContext, StageTokenUsage, StageModelUsage, SubAgentUsage } from './pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
 // MCP server config types (matching the Claude Agent SDK)
@@ -99,6 +99,8 @@ export interface AgentResult<T> {
   tokens: StageTokenUsage;
   /** Per-model cost/token split — separates this agent from any sub-agents it dispatched. */
   modelUsage?: Record<string, StageModelUsage>;
+  /** Per-named-sub-agent usage, keyed by subagent_type. */
+  subAgents?: Record<string, SubAgentUsage>;
   /** SDK result subtype (e.g. 'success', 'error_max_turns'). */
   subtype: string;
   /** The model the run actually used (resolved knobs — authoritative for telemetry). */

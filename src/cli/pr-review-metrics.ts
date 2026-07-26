@@ -66,3 +66,84 @@ export function diffSummaries(before: RunSummary, after: RunSummary): SummaryDif
     durationDelta: after.medianDurationMs - before.medianDurationMs,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Per-named-sub-agent aggregation
+//
+// `toolCalls`/`costUsd` above are run totals: for a reviewer that fans out to
+// eight sub-agents they say what the run spent, never which sub-agent spent it.
+// These aggregate the per-sub-agent attribution captured in `SubAgentUsage`
+// across many runs, so "which reviewer is expensive / slow / silent?" becomes
+// answerable.
+// ---------------------------------------------------------------------------
+
+export interface SubAgentStat {
+  name: string;
+  /** Runs in which this sub-agent was dispatched at all. */
+  runs: number;
+  totalTurns: number;
+  medianTurns: number;
+  totalTokens: number;
+  medianTokens: number;
+  /** Sum of the per-run apportioned cost estimates. See `SubAgentUsage`. */
+  totalCostUsd: number;
+  medianCostUsd: number;
+  toolCalls: Record<string, number>;
+}
+
+/** Minimal shape needed here — accepts `SubAgentUsage` unchanged. */
+export interface SubAgentRunUsage {
+  turns: number;
+  tokens: { input: number; output: number; cacheRead: number; cacheCreation: number };
+  toolCalls: Record<string, number>;
+  apportionedCostUsd?: number;
+}
+
+/**
+ * Aggregate per-sub-agent usage across runs, sorted by total apportioned cost
+ * (descending) so the biggest spender reads first.
+ *
+ * Sub-agents are counted only in the runs where they were dispatched: a reviewer
+ * that runs in 2 of 10 reviews reports `runs: 2` and medians over those 2, not a
+ * median diluted by eight zeroes. That keeps "expensive when it runs" distinct
+ * from "runs often", which are different problems with different fixes.
+ */
+export function summarizeSubAgents(
+  runs: Array<Record<string, SubAgentRunUsage> | null | undefined>,
+): SubAgentStat[] {
+  const byName = new Map<string, SubAgentRunUsage[]>();
+  for (const run of runs) {
+    if (!run) continue;
+    for (const [name, usage] of Object.entries(run)) {
+      const list = byName.get(name) ?? [];
+      list.push(usage);
+      byName.set(name, list);
+    }
+  }
+
+  const stats: SubAgentStat[] = [];
+  for (const [name, usages] of byName) {
+    const tokensOf = (u: SubAgentRunUsage) =>
+      u.tokens.input + u.tokens.output + u.tokens.cacheRead + u.tokens.cacheCreation;
+    const costs = usages.map(u => u.apportionedCostUsd ?? 0);
+    const toolCalls: Record<string, number> = {};
+    for (const u of usages) {
+      for (const [tool, n] of Object.entries(u.toolCalls)) {
+        toolCalls[tool] = (toolCalls[tool] ?? 0) + n;
+      }
+    }
+    stats.push({
+      name,
+      runs: usages.length,
+      totalTurns: usages.reduce((a, u) => a + u.turns, 0),
+      medianTurns: median(usages.map(u => u.turns)),
+      totalTokens: usages.reduce((a, u) => a + tokensOf(u), 0),
+      medianTokens: median(usages.map(tokensOf)),
+      totalCostUsd: costs.reduce((a, c) => a + c, 0),
+      medianCostUsd: median(costs),
+      toolCalls,
+    });
+  }
+
+  return stats.sort((a, b) => b.totalCostUsd - a.totalCostUsd);
+}
