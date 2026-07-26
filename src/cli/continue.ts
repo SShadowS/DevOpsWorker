@@ -6,7 +6,7 @@ import { loadConfigFromState } from './config.ts';
 import { buildPipelineContext } from './context.ts';
 import { formatTelemetrySummary } from '../formatters/devops-comment.ts';
 import { removeWorkItemTags, addWorkItemTags, postWorkItemComment, updateWorkItemFields } from '../sdk/azure-devops-client.ts';
-import { formatPlanComment, formatReadinessComment } from '../formatters/devops-comment.ts';
+import { formatPlanComment, formatReadinessComment, formatConvergenceEscalation } from '../formatters/devops-comment.ts';
 import type { PipelineState } from '../types/pipeline.types.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import { join, resolve } from 'node:path';
@@ -71,6 +71,7 @@ export async function cont(args: string[]): Promise<void> {
   const commentFormatters: Record<string, (wid: number, s: PipelineState) => string | null> = {
     analyzer: (wid, s) => s.readiness ? formatReadinessComment(wid, s.readiness) : null,
     planning: (wid, s) => s.devPlan ? formatPlanComment(wid, s.devPlan) : null,
+    coding: formatConvergenceEscalation,
   };
   const fieldUpdates: Record<string, Record<string, string>> = {
     analyzer:   { 'System.State': 'Active' },

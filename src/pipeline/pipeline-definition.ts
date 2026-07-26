@@ -42,6 +42,27 @@ export function codingIsApproved(state: PipelineState): boolean {
   return reviewerApproved && ciPassed && envValidated;
 }
 
+/**
+ * Findings the code reviewer reported in its most recent round.
+ *
+ * `state.codeReviews` is typed `ReviewVerdict[]` (the shared minimum; core must
+ * not import agent schemas), so read the count structurally. Returns undefined
+ * when no review has landed yet — the convergence trigger then has nothing to
+ * measure and simply does not fire.
+ */
+export function countCodeReviewIssues(state: PipelineState): number | undefined {
+  const last = state.codeReviews?.at(-1) as { issues?: unknown[] } | undefined;
+  return Array.isArray(last?.issues) ? last.issues.length : undefined;
+}
+
+/** Finding texts per code-review round, oldest first. */
+export function collectCodeReviewFindings(state: PipelineState): string[][] {
+  return (state.codeReviews ?? []).map((r) => {
+    const issues = (r as { issues?: Array<{ comment?: string }> }).issues ?? [];
+    return issues.map((i) => i.comment ?? '').filter(Boolean);
+  });
+}
+
 /** Build a postProducer hook that verifies CI results server-side. */
 export function buildCIVerificationHook(config: PipelineConfig) {
   return async (state: PipelineState, context: PipelineContext): Promise<PipelineState> => {
@@ -146,6 +167,20 @@ export function buildDefaultPipeline(config: PipelineConfig): PipelineDefinition
       isApproved: codingIsApproved,
       resetState: (state) => ({ ...state, codeReviews: [] }),
       postProducer: buildCIVerificationHook(config),
+      countIssues: countCodeReviewIssues,
+      collectFindingTexts: collectCodeReviewFindings,
+      // Only the coding loop for now: it is the one observed not converging, and
+      // the trigger is unproven. Planning and test-cases keep budget-exhaustion as
+      // their sole non-approval exit until this earns wider use.
+      convergence: {
+        window: 3,
+        question:
+          'The code review has run several rounds without the finding count going down, '
+          + 'so it is not converging on its own. Please look at the recurring findings above '
+          + 'and reply with a decision: which of them should actually be fixed, which are '
+          + 'wrong or out of scope, and anything the reviewers are missing. '
+          + 'Reply with `/fix <your answer>` to resume the coder with that direction.',
+      },
     }),
 
     // 6. Test Cases + Test Case Review (revision loop, max 3)

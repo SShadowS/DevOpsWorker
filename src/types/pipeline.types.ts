@@ -222,6 +222,28 @@ export interface PipelineState extends Partial<PipelineStateSlices> {
     reminderSentAt?: string;
   };
 
+  /**
+   * Issue counts per round, keyed by loop name. The convergence trigger's input.
+   * Reset when a human answers an escalation — their input is a new starting
+   * condition, and carrying the old plateau forward would re-escalate at once.
+   */
+  revisionIssueCounts?: Record<string, number[]>;
+
+  /**
+   * Set when a revision loop stopped because its findings plateaued rather than
+   * because it was approved or out of budget. Drives the escalation comment and
+   * is cleared on re-entry so the loop does not immediately pause again.
+   */
+  convergenceEscalation?: {
+    loop: string;
+    /** Issue count per round, oldest first. */
+    issueCounts: number[];
+    /** Findings that recurred across rounds — the ones iteration is not resolving. */
+    recurringFindings: string[];
+    question: string;
+    escalatedAt: string;
+  };
+
   // Human revision feedback (from /rerun-plan or /fix)
   revisionFeedback?: {
     source: 'work-item-comment' | 'pr-comment' | 'dashboard';
@@ -495,6 +517,42 @@ export interface RevisionLoopConfig {
   resetState?: (state: PipelineState) => PipelineState;
   /** Optional hook that runs after the producer and before the reviewer on each iteration. */
   postProducer?: (state: PipelineState, context: PipelineContext) => Promise<PipelineState>;
+  /**
+   * Total findings the reviewer reported this round, or undefined if it cannot be
+   * determined. Supplied per-loop because only the pipeline definition knows which
+   * state field holds a given loop's reviews — the loop itself stays generic.
+   *
+   * Feeds the convergence trigger below. Without it the loop only ever stops on
+   * approval or budget exhaustion.
+   */
+  countIssues?: (state: PipelineState) => number | undefined;
+  /**
+   * Finding texts per round, oldest first — used to name what keeps recurring in
+   * the escalation comment. Same reason as `countIssues`: only the definition
+   * knows where a loop's reviews live. Optional; omitting it just yields a less
+   * specific comment.
+   */
+  collectFindingTexts?: (state: PipelineState) => string[][];
+  /**
+   * Stop iterating when the issue count stops falling, instead of burning the
+   * remaining budget. Omit to disable.
+   *
+   * The count failing to decrease is the only measured signal that separated both
+   * observed non-convergence failures from the one success: a loop whose findings
+   * plateau is not converging, and further rounds spend money to confirm it.
+   * WI 63396 ran 8 rounds for $146 and 0 merges.
+   */
+  convergence?: {
+    /**
+     * Rounds of flat-or-rising issue count that trigger escalation. 3 means "by
+     * the third round with no decrease, stop". Counted raw, not severity-weighted
+     * — weight only if raw misfires (a round trading 3 minors for 1 critical is
+     * worse, not better, but that has not been observed to matter yet).
+     */
+    window: number;
+    /** Question posted to the work item when the loop escalates. */
+    question: string;
+  };
 }
 
 // ---------------------------------------------------------------------------

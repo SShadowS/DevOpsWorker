@@ -9,7 +9,7 @@ import { buildPipelineContext } from './context.ts';
 import type { PipelineConfig, PipelineState } from '../types/pipeline.types.ts';
 import type { RepoConfig } from '../config/repo-config.ts';
 import { getRepoConfig } from '../config/repos.ts';
-import { formatPlanComment, formatReadinessComment, formatTelemetrySummary } from '../formatters/devops-comment.ts';
+import { formatPlanComment, formatReadinessComment, formatTelemetrySummary, formatConvergenceEscalation } from '../formatters/devops-comment.ts';
 import { postWorkItemComment, addWorkItemTags, removeWorkItemTags, updateWorkItemFields } from '../sdk/azure-devops-client.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import { join, resolve } from 'node:path';
@@ -22,6 +22,9 @@ import { join, resolve } from 'node:path';
 const commentFormatters: Record<string, { fn: (wid: number, state: PipelineState) => string | null; format: 'html' | 'markdown' }> = {
   analyzer: { fn: (wid, s) => s.readiness ? formatReadinessComment(wid, s.readiness) : null, format: 'html' },
   planning: { fn: (wid, s) => s.devPlan ? formatPlanComment(wid, s.devPlan) : null, format: 'markdown' },
+  // Fires only when the loop escalated — the formatter returns null otherwise,
+  // so a normal `coding` completion posts nothing.
+  coding: { fn: formatConvergenceEscalation, format: 'markdown' },
 };
 
 // ---------------------------------------------------------------------------

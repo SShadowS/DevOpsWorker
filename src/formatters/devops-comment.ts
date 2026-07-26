@@ -275,3 +275,48 @@ export function formatTelemetrySummary(telemetry: TelemetryData): string {
 
   return lines.join('\n');
 }
+
+/**
+ * Escalation posted when a revision loop stops because its findings plateaued.
+ *
+ * The human needs three things to answer usefully: that iteration stalled rather
+ * than failed, which findings keep coming back, and what specifically to reply.
+ * Returns null when the state carries no escalation, so it can sit in the
+ * stage-keyed formatter map and stay silent on every normal completion.
+ */
+export function formatConvergenceEscalation(
+  workItemId: number,
+  state: PipelineState,
+): string | null {
+  const esc = state.convergenceEscalation;
+  if (!esc) return null;
+
+  const L: string[] = [];
+  L.push(`## ⚖️ Review not converging — input needed (Work Item #${workItemId})`, '');
+  L.push(
+    `The **${esc.loop}** loop ran ${esc.issueCounts.length} review rounds and the finding count `
+      + `did not go down: **${esc.issueCounts.join(' → ')}**.`,
+    '',
+  );
+  L.push(
+    `Iterating further would spend budget without evidence it converges, so the pipeline `
+      + `paused here instead of running out its remaining attempts.`,
+    '',
+  );
+
+  if (esc.recurringFindings.length > 0) {
+    L.push(`### Findings raised in more than one round`, '');
+    for (const f of esc.recurringFindings) L.push(`- ${f}`);
+    L.push('');
+  } else {
+    L.push(
+      `_No finding repeated verbatim across rounds — the reviewers are raising **different** `
+        + `objections each round, which is its own signal: the target may be underspecified._`,
+      '',
+    );
+  }
+
+  L.push(`### What to do`, '');
+  L.push(esc.question, '');
+  return L.join('\n');
+}

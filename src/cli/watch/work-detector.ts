@@ -83,11 +83,26 @@ export interface WorkDetectionInputs {
 /** Checkpoints whose paused items are scanned for /rerun-plan | /fix | /fix-test. */
 export const SCANNABLE_CHECKPOINTS = new Set(['plan-approved', 'pr-published']);
 
+/**
+ * Convergence escalations pause under a synthetic checkpoint named
+ * `convergence:<loop>` rather than a configured checkpoint, so an exact-match
+ * allowlist would never scan them and the human's `/fix` reply would sit
+ * unnoticed — the escalation would be a dead end that merely stopped the run.
+ */
+const CONVERGENCE_CHECKPOINT_PREFIX = 'convergence:';
+
+/** True when a checkpoint name is a revision-loop convergence escalation. */
+export function isConvergenceCheckpoint(name: string): boolean {
+  return name.startsWith(CONVERGENCE_CHECKPOINT_PREFIX);
+}
+
 /** True when an item is paused at a scannable checkpoint or sitting in error state. */
 export function isCheckpointScannable(s: PipelineState): boolean {
   if (s.completedAt) return false;
   if (s.error) return true;
-  return !!(s.checkpoint && SCANNABLE_CHECKPOINTS.has(s.checkpoint.name));
+  if (!s.checkpoint) return false;
+  return SCANNABLE_CHECKPOINTS.has(s.checkpoint.name)
+    || isConvergenceCheckpoint(s.checkpoint.name);
 }
 
 /** True when an item paused at a PR checkpoint (with a PR, no error) can auto-continue. */
