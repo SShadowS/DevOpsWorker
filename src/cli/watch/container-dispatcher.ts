@@ -74,6 +74,12 @@ export function getContainerEnv(): Record<string, string> {
     // AL Object ID Ninja backend app pool; name marks commits as AI-made.
     GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',
     GIT_USER_EMAIL: process.env['GIT_USER_EMAIL'] ?? '',
+    // Operational policy read by loadConfig()/buildConfigFromRepo() INSIDE the
+    // container. This list is an allowlist: a variable the config layer reads but
+    // that is not forwarded here silently falls back to its default, with no error
+    // and nothing in the logs. Add new config env vars here when you add them.
+    DEFAULT_MODEL: process.env['DEFAULT_MODEL'] ?? '',
+    REVISION_MAX_ATTEMPTS: process.env['REVISION_MAX_ATTEMPTS'] ?? '',
   };
 }
 
@@ -82,18 +88,15 @@ export function getContainerEnv(): Record<string, string> {
 export function getPrReviewContainerEnv(): Record<string, string> {
   const prKey = process.env['PR_REVIEW_ANTHROPIC_API_KEY'];
   if (!prKey) return getContainerEnv();
+  // Spread the base set so a variable added there is never silently missing here —
+  // this pair previously drifted, which is the same silent-staleness failure the
+  // allowlist comment above warns about.
   return {
-    AZURE_DEVOPS_PAT: process.env['AZURE_DEVOPS_PAT'] ?? '',
+    ...getContainerEnv(),
+    // Only the two credential fields differ; everything else — including git
+    // identity and operational policy — comes from the base set.
     CLAUDE_CODE_OAUTH_TOKEN: '',
     ANTHROPIC_API_KEY: prKey,
-    ENV_API_TOKEN: process.env['ENV_API_TOKEN'] ?? '',
-    DATABASE_URL: process.env['DATABASE_URL'] ?? '',
-    DISCORD_WEBHOOK_URL: process.env['DISCORD_WEBHOOK_URL'] ?? '',
-    PR_REVIEW_NO_POST: process.env['PR_REVIEW_NO_POST'] ?? '',
-    // Git identity inside pipeline containers. Email must be authorized in the
-    // AL Object ID Ninja backend app pool; name marks commits as AI-made.
-    GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',
-    GIT_USER_EMAIL: process.env['GIT_USER_EMAIL'] ?? '',
   };
 }
 

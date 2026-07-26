@@ -314,3 +314,53 @@ describe('resolveRepoForWorkItem', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Container env allowlist
+//
+// The spawned-container env is an allowlist, not a pass-through. A config var
+// the container reads but that is not forwarded silently falls back to its
+// default — observed in production when a run ignored REVISION_MAX_ATTEMPTS
+// entirely because it was never in this list.
+// ---------------------------------------------------------------------------
+
+describe('container env allowlist', () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  test('forwards operational policy vars the container config layer reads', () => {
+    process.env['DEFAULT_MODEL'] = 'claude-opus-5';
+    process.env['REVISION_MAX_ATTEMPTS'] = '2';
+
+    const env = getContainerEnv();
+    expect(env['DEFAULT_MODEL']).toBe('claude-opus-5');
+    expect(env['REVISION_MAX_ATTEMPTS']).toBe('2');
+  });
+
+  test('pr-review env is a superset of the base env, differing only in credentials', () => {
+    process.env['PR_REVIEW_ANTHROPIC_API_KEY'] = 'pr-key';
+    process.env['REVISION_MAX_ATTEMPTS'] = '3';
+    process.env['GIT_USER_NAME'] = 'someone';
+
+    const base = getContainerEnv();
+    const pr = getPrReviewContainerEnv();
+
+    // every base key is present — this is what drifted before
+    for (const key of Object.keys(base)) {
+      expect(Object.keys(pr)).toContain(key);
+    }
+    expect(pr['REVISION_MAX_ATTEMPTS']).toBe('3');
+    expect(pr['GIT_USER_NAME']).toBe('someone');
+
+    // only the credential fields differ
+    expect(pr['ANTHROPIC_API_KEY']).toBe('pr-key');
+    expect(pr['CLAUDE_CODE_OAUTH_TOKEN']).toBe('');
+  });
+
+  test('falls back to the base env when no PR-review key is set', () => {
+    delete process.env['PR_REVIEW_ANTHROPIC_API_KEY'];
+    expect(getPrReviewContainerEnv()).toEqual(getContainerEnv());
+  });
+});

@@ -233,6 +233,78 @@ describe('loadConfigFromState', () => {
     expect(loaded.azureDevOps.organization).toBe('your-org');
   });
 
+  // A resumed work item must keep the coordinates it started with, but must NOT
+  // keep operational policy frozen — otherwise a model or budget change deployed
+  // after the item first ran silently never reaches it. Observed in production:
+  // a run resumed a day later still used the models persisted at its first start.
+  test('takes operational policy from the current deployment, not the persisted copy', async () => {
+    const { dir, store } = setupTempDir();
+
+    const stale: PipelineConfig = {
+      azureDevOps: {
+        organization: 'persisted-org', orgUrl: 'https://dev.azure.com/persisted-org',
+        project: 'Persisted', repositoryId: 'r', repositoryName: 'R',
+        ciPipelineId: 1, cdPipelineId: 2, areaPath: 'T', iterationPath: 'T', pat: 'old-pat',
+      },
+      paths: { sessionRoot: '/tmp', targetRepo: '/tmp/doc', stateDir: dir },
+      checkpoints: {
+        planApproval: { tag: 'stale-tag', rerunCommand: '/r', timeoutHours: 1 },
+        prPublished: { fixCommand: '/f', timeoutHours: 1 },
+        pollIntervalMinutes: 1,
+      },
+      revisionLoops: { maxAttempts: 99 },
+      models: { default: 'stale-model', perAgent: { coder: 'stale-coder-model' } },
+      costs: {},
+      repoKey: 'DocumentOutput',
+      layout: { appRoot: 'Cloud', source: 'Cloud/Al', testAppRoot: 'Test', test: 'Test/Src' },
+    };
+
+    store.saveConfig(7, stale);
+    setEnv('AZURE_DEVOPS_PAT', '');
+
+    const loaded = await loadConfigFromState(store, 7);
+
+    // Run-scoped identity survives — this is why config is persisted at all.
+    expect(loaded.azureDevOps.organization).toBe('persisted-org');
+    expect(loaded.repoKey).toBe('DocumentOutput');
+    expect(loaded.paths.targetRepo).toBe('/tmp/doc');
+
+    // Operational policy is refreshed from the current deployment.
+    expect(loaded.models.default).not.toBe('stale-model');
+    expect(loaded.models.perAgent?.['coder']).not.toBe('stale-coder-model');
+    expect(loaded.revisionLoops.maxAttempts).not.toBe(99);
+  });
+
+  test('honours REVISION_MAX_ATTEMPTS when refreshing a resumed run', async () => {
+    const { dir, store } = setupTempDir();
+
+    const stale: PipelineConfig = {
+      azureDevOps: {
+        organization: 'o', orgUrl: 'https://o', project: 'P', repositoryId: 'r',
+        repositoryName: 'R', ciPipelineId: 1, cdPipelineId: 2, areaPath: 'T',
+        iterationPath: 'T', pat: 'p',
+      },
+      paths: { sessionRoot: '/tmp', targetRepo: '/tmp/doc', stateDir: dir },
+      checkpoints: {
+        planApproval: { tag: 't', rerunCommand: '/r', timeoutHours: 1 },
+        prPublished: { fixCommand: '/f', timeoutHours: 1 },
+        pollIntervalMinutes: 1,
+      },
+      revisionLoops: { maxAttempts: 5 },
+      models: { default: 'x' },
+      costs: {},
+      repoKey: 'DocumentOutput',
+      layout: { appRoot: 'Cloud', source: 'Cloud/Al', testAppRoot: 'Test', test: 'Test/Src' },
+    };
+
+    store.saveConfig(8, stale);
+    setEnv('AZURE_DEVOPS_PAT', '');
+    setEnv('REVISION_MAX_ATTEMPTS', '2');
+
+    const loaded = await loadConfigFromState(store, 8);
+    expect(loaded.revisionLoops.maxAttempts).toBe(2);
+  });
+
   test('overrides PAT from env', async () => {
     const { dir, store } = setupTempDir();
 

@@ -72,7 +72,7 @@ export function loadConfig(sessionPath: string): PipelineConfig {
     },
 
     revisionLoops: {
-      maxAttempts: 5,
+      maxAttempts: Number(process.env['REVISION_MAX_ATTEMPTS']) || 5,
     },
 
     models: {
@@ -168,11 +168,13 @@ export function buildConfigFromRepo(
     revisionLoops: {
       // Overridable so a run can be capped without a code change — useful when
       // measuring a loop's early behaviour without paying for the full budget.
-      maxAttempts: Number(env['REVISION_MAX_ATTEMPTS'] ?? 5),
+      maxAttempts: Number(env['REVISION_MAX_ATTEMPTS']) || 5,
     },
 
     models: {
-      default: env['DEFAULT_MODEL'] ?? 'claude-opus-5',
+      // `||` not `??`: the container env forwards unset vars as '', and an empty
+      // string is not nullish — `??` would hand an empty model id to the SDK.
+      default: env['DEFAULT_MODEL'] || 'claude-opus-5',
       perAgent: {
         // planner inherits the Opus 5 default — strong planning, cheap (Sonnet) coding.
         'coder': 'claude-sonnet-5',
@@ -204,16 +206,33 @@ export function buildConfigFromRepo(
 }
 
 /**
- * Load a persisted PipelineConfig from the state directory.
- * Falls back to default config if not found.
- * Overrides the PAT from env if AZURE_DEVOPS_PAT is set.
+ * Load a persisted PipelineConfig for a resumed work item.
+ *
+ * Two kinds of setting live in PipelineConfig, and they need opposite treatment:
+ *
+ * - **Run-scoped identity** — repo coordinates, paths, layout, companions. These
+ *   must stay exactly as captured when the item first started; a run that changed
+ *   target repo or session path halfway would be incoherent. This is why config is
+ *   persisted at all.
+ * - **Operational policy** — models, revision budgets, cost caps, checkpoint
+ *   settings. These belong to the *deployment*, not to the run, and must be taken
+ *   fresh every time.
+ *
+ * Returning the persisted config wholesale froze the second kind too. A work item
+ * resumed after a deployment silently ran the policy captured at its first start:
+ * observed in production when a run resumed a day after a model bump still reported
+ * the previous models, with no error and nothing in the logs to indicate why.
+ *
+ * Falls back to defaults when nothing is persisted. Overrides the PAT from env so
+ * the stored copy is never the only source of a secret.
  */
 export async function loadConfigFromState(stateStore: IStateStore, workItemId: number): Promise<PipelineConfig> {
   const persisted = await stateStore.loadConfig(workItemId);
+  const current = loadConfig(process.env['PIPELINE_SESSION'] ?? '.');
 
   if (!persisted) {
     console.warn('  ⚠️  No persisted config found, using defaults');
-    return loadConfig(process.env['PIPELINE_SESSION'] ?? '.');
+    return current;
   }
 
   // Override PAT from env if set (avoids storing secrets on disk being the only source)
@@ -222,5 +241,11 @@ export async function loadConfigFromState(stateStore: IStateStore, workItemId: n
     persisted.azureDevOps.pat = envPat;
   }
 
-  return persisted;
+  return {
+    ...persisted,
+    models: current.models,
+    revisionLoops: current.revisionLoops,
+    costs: current.costs,
+    checkpoints: current.checkpoints,
+  };
 }
