@@ -5,6 +5,9 @@ import {
   isPipelineComment,
   truncateFinding,
   blockingFindings,
+  formatStalledLoopComment,
+  pipelineErrorComment,
+  leadSentence,
 } from '../../src/formatters/devops-comment.ts';
 import type { PipelineState } from '../../src/types/pipeline.types.ts';
 
@@ -226,5 +229,110 @@ describe('comment length discipline', () => {
     expect(out).not.toContain('Blocking after the last round');
     // but the section still exists — the trend alone is worth reporting
     expect(out).toContain('Why it is stuck');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Markdown edition — headings, collapsibles, grouping, numbering
+// ---------------------------------------------------------------------------
+
+describe('formatStalledLoopComment (markdown)', () => {
+  const state = stateWithReviews([
+    [{ severity: 'critical', comment: 'A. '.repeat(200) }],
+    [
+      { severity: 'critical', comment: 'First claim. Then a long justification that follows it.', filePath: 'Cloud/Al/Table/Table 1 X.al' },
+      { severity: 'major', comment: 'Second claim. More detail here.', filePath: 'Cloud/Al/Table/Table 1 X.al' },
+      { severity: 'major', comment: 'Third claim. Detail.', filePath: 'Test/Src/Y.Codeunit.al' },
+      { severity: 'minor', comment: 'a nit', filePath: 'Cloud/Al/Table/Table 1 X.al' },
+    ],
+  ]);
+
+  const md = () => formatStalledLoopComment(
+    63396, 'coding', 'Revision loop "coding" exhausted 2 attempts without approval', state,
+  )!;
+
+  test('numbers run 1..N in display order, with no gaps across file groups', () => {
+    const nums = [...md().matchAll(/<b>(\d+)\.<\/b>/g)].map(m => Number(m[1]));
+    expect(nums).toEqual([1, 2, 3]);
+  });
+
+  test('groups findings by file basename, not the full path', () => {
+    const out = md();
+    expect(out).toContain('**`Table 1 X.al`**');
+    expect(out).toContain('**`Y.Codeunit.al`**');
+    expect(out).not.toContain('Cloud/Al/Table/Table 1 X.al');
+  });
+
+  test('carries the FULL finding text inside the collapsible, not a truncation', () => {
+    const out = md();
+    expect(out).toContain('First claim. Then a long justification that follows it.');
+    expect(out).not.toContain('…</summary>');
+  });
+
+  test('the summary line is the opening sentence', () => {
+    expect(md()).toContain('<b>critical</b> — First claim.');
+  });
+
+  test('minor findings are counted out, not listed', () => {
+    const out = md();
+    expect(out).toContain('Blocking findings — 3 of 4');
+    expect(out).toContain('1 further minor/suggestion finding(s) omitted');
+    expect(out).not.toContain('a nit');
+  });
+
+  test('gives a copyable reply template referencing the numbers', () => {
+    expect(md()).toContain('/fix fix 1, 3; drop 2');
+  });
+
+  test('says plainly that resuming without an answer changes nothing', () => {
+    expect(md()).toContain('retries against the same reviewers with the same inputs');
+  });
+
+  test('null when the state shows no stalled loop', () => {
+    expect(formatStalledLoopComment(1, 'coder', 'boom', stateWithReviews([]))).toBeNull();
+  });
+
+  // The reply template puts `/fix ...` at the START of a line inside a fenced
+  // block — precisely the shape findRerunCommandInComments matches. If this were
+  // not recognised as bot output, the pipeline would read its own example back
+  // as the human's answer.
+  test('is recognised as pipeline output despite quoting /fix at line start', () => {
+    const out = md();
+    expect(out).toMatch(/\n\/fix /);
+    expect(isPipelineComment(out)).toBe(true);
+  });
+});
+
+describe('pipelineErrorComment', () => {
+  test('a stalled loop gets markdown', () => {
+    const r = pipelineErrorComment(
+      1, 'coding', new Error('exhausted'),
+      stateWithReviews([[{ severity: 'critical', comment: 'x' }]]),
+    );
+    expect(r.format).toBe('markdown');
+    expect(r.text).toContain('a decision is needed');
+  });
+
+  test('a crashed container keeps the plain HTML comment', () => {
+    const r = pipelineErrorComment(1, 'coder', new Error('container exited 137'));
+    expect(r.format).toBe('html');
+    expect(r.text).toContain('🚨 Pipeline Error');
+    expect(r.text).not.toContain('a decision is needed');
+  });
+});
+
+describe('leadSentence', () => {
+  test('stops at the first sentence', () => {
+    expect(leadSentence('One. Two. Three.')).toBe('One.');
+  });
+
+  test('falls back to a length-trim when there is no sentence break', () => {
+    const out = leadSentence('word '.repeat(80), 40);
+    expect(out.endsWith('…')).toBe(true);
+  });
+
+  test('a decimal point does not end the sentence', () => {
+    // `. ` requires whitespace, so "6175284." mid-token is not a break
+    expect(leadSentence('Version 1.2 is affected. Next.')).toBe('Version 1.2 is affected.');
   });
 });

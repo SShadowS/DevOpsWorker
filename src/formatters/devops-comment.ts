@@ -447,6 +447,9 @@ const PIPELINE_COMMENT_SIGNATURES = [
   'Review not converging',
   'Why it is stuck',
   'What you need to decide',
+  'stopped — a decision is needed',
+  'Blocking findings',
+  'What to decide',
 ];
 
 export function isPipelineComment(htmlText: string): boolean {
@@ -539,4 +542,185 @@ export function formatConvergenceEscalation(
   L.push(`### What to do`, '');
   L.push(esc.question, '');
   return L.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Stalled-loop comment, Markdown edition
+//
+// The HTML version was readable but three things fought the reader:
+//   - every finding truncated to ~320 chars, so the detail needed to judge one
+//     was exactly the part cut off;
+//   - the same file repeated on 6 of 8 lines (WI 63396), burying the difference
+//     between them in identical prefixes;
+//   - nothing to point at. "Which are wrong?" is unanswerable when the reply has
+//     to re-describe the finding in prose.
+//
+// Markdown fixes all three: real heading hierarchy, <details> to carry the FULL
+// text without spending vertical space, grouping by file, and stable numbers the
+// human can name in a one-line reply.
+// ---------------------------------------------------------------------------
+
+const SEVERITY_ICON: Record<string, string> = {
+  critical: '🔴',
+  major: '🟠',
+  minor: '🟡',
+  suggestion: '⚪',
+};
+
+/**
+ * First sentence, for the collapsed summary line. Findings open with their claim
+ * and then justify it, so the opening sentence is reliably the part worth
+ * scanning — and unlike a character cut it never ends mid-thought.
+ */
+export function leadSentence(text: string, limit = 160): string {
+  const stop = text.search(/\.\s/);
+  const first = stop > 0 ? text.slice(0, stop + 1) : text;
+  return first.length <= limit ? first : truncateFinding(first, limit);
+}
+
+/** `Cloud/Al/Table/Table 6175284 X.al` → `Table 6175284 X.al` */
+function baseName(path: string): string {
+  return path.split(/[\/]/).pop() ?? path;
+}
+
+/**
+ * The stalled-loop report as Markdown, or null when the state shows no stalled
+ * loop (the caller then falls back to the plain HTML error comment).
+ */
+export function formatStalledLoopComment(
+  workItemId: number,
+  stageName: string,
+  errorMessage: string,
+  state: PipelineState | undefined,
+): string | null {
+  const s = summarizeStalledLoop(state, stageName);
+  if (!s) return null;
+
+  const blocking = blockingFindings(s.latest);
+  const L: string[] = [];
+
+  L.push(`## ⚖️ \`${stageName}\` stopped — a decision is needed (Work Item #${workItemId})`, '');
+  L.push(errorMessage.trim(), '');
+
+  // --- the trend, in one line -------------------------------------------
+  if (s.issueCounts.length > 0) {
+    const trend = s.issueCounts.join(' → ');
+    L.push(
+      trendIsFlat(s.issueCounts)
+        ? `**Findings per round:** \`${trend}\` — not going down. The reviewers are not converging on this change.`
+        : `**Findings per round:** \`${trend}\` — falling, but the attempt budget ran out first.`,
+      '',
+    );
+  }
+
+  if (s.recurring.length > 0) {
+    L.push(`**Raised in more than one round** — iteration is not resolving these:`, '');
+    for (const f of s.recurring) L.push(`- ${leadSentence(f)}`);
+    L.push('');
+  } else if (s.issueCounts.length > 1) {
+    L.push(
+      `**No finding repeated across rounds.** The reviewers raised *different* objections `
+        + `each time, which usually means the target is underspecified rather than the code `
+        + `being wrong.`,
+      '',
+    );
+  }
+
+  // --- the findings, numbered and grouped by file ------------------------
+  if (blocking.length > 0) {
+    L.push(
+      `### Blocking findings — ${blocking.length} of ${s.latest.length}`,
+      '',
+      `Numbered so you can answer by number. Expand any one for the full text.`,
+      '',
+    );
+
+    // Group by file: on WI 63396 six of eight findings shared one path, and
+    // repeating it on every line hid what actually differed between them.
+    const groups = new Map<string, typeof blocking>();
+    for (const f of blocking) {
+      const key = f.filePath ? baseName(f.filePath) : '(no file)';
+      groups.set(key, [...(groups.get(key) ?? []), f]);
+    }
+
+    // Number AFTER grouping, so the list reads 1..N top to bottom. Numbering by
+    // pre-group index left visible gaps (1, 2, 3, 5 …) that read as a bug.
+    let n = 0;
+    for (const [file, items] of groups) {
+      L.push(`**\`${file}\`**`, '');
+      for (const it of items) {
+        const icon = SEVERITY_ICON[it.severity] ?? '•';
+        L.push(
+          `<details><summary><b>${++n}.</b> ${icon} <b>${it.severity}</b> — ${esc(leadSentence(it.comment))}</summary>`,
+          '',
+          it.comment,
+          '',
+          `</details>`,
+          '',
+        );
+      }
+    }
+  }
+
+  const nonBlocking = s.latest.length - blocking.length;
+  if (nonBlocking > 0) {
+    L.push(`_${nonBlocking} further minor/suggestion finding(s) omitted — they do not gate the verdict._`, '');
+  }
+
+  if (s.revisionInstructions) {
+    L.push(
+      `<details><summary><b>What the reviewer last asked for</b></summary>`,
+      '',
+      s.revisionInstructions,
+      '',
+      `</details>`,
+      '',
+    );
+  }
+
+  // --- the ask ------------------------------------------------------------
+  const example = blocking.length >= 3 ? '1, 3' : blocking.length >= 1 ? '1' : 'none';
+  const dropExample = blocking.length >= 2 ? '2' : 'none';
+  L.push(`### What to decide`, '');
+  L.push(
+    `Reply in one comment. Naming the numbers is enough — you do not need to restate the findings.`,
+    '',
+    '```',
+    `/fix fix ${example}; drop ${dropExample} (out of scope); the reviewers are missing <...>`,
+    '```',
+    '',
+  );
+  L.push(
+    `- Which findings are **real and worth fixing**?`,
+    `- Which are **wrong or out of scope**, so the coder stops trying to satisfy them?`,
+    `- Anything the reviewers are **missing or misreading** about the intent?`,
+    '',
+  );
+  L.push(
+    `Resuming without an answer (dashboard **Continue**, or `
+      + `\`bun run pipeline -- continue --work-item ${workItemId}\`) retries against the same `
+      + `reviewers with the same inputs.`,
+    '',
+  );
+  return L.join('\n');
+}
+
+/**
+ * The comment to post for a pipeline error, and the format to post it in.
+ *
+ * A stalled revision loop gets the Markdown report — it needs headings,
+ * collapsibles and numbering that HTML comments render poorly. Everything else
+ * keeps the plain HTML error comment: a crashed container has no findings to
+ * lay out, and the richer frame would only add ceremony.
+ */
+export function pipelineErrorComment(
+  workItemId: number,
+  stageName: string,
+  error: Error,
+  state?: PipelineState,
+): { text: string; format: 'html' | 'markdown' } {
+  const stalled = formatStalledLoopComment(workItemId, stageName, error.message, state);
+  return stalled
+    ? { text: stalled, format: 'markdown' }
+    : { text: formatErrorComment(workItemId, stageName, error, state), format: 'html' };
 }
