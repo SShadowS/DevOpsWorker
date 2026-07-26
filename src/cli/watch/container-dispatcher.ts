@@ -1,5 +1,5 @@
 import type { IStateStore } from '../../pipeline/state-store.interface.ts';
-import type { PipelineConfig } from '../../types/pipeline.types.ts';
+import type { PipelineConfig, PipelineState } from '../../types/pipeline.types.ts';
 import type { RepoConfig } from '../../config/repo-config.ts';
 import { fetchWorkItem, getPullRequestStatus, postWorkItemComment, addWorkItemTags, removeWorkItemTags } from '../../sdk/azure-devops-client.ts';
 import { findRepoByAreaPath } from '../../config/repos.ts';
@@ -101,6 +101,74 @@ export function getPrReviewContainerEnv(): Record<string, string> {
 // Container outcome handling
 // ---------------------------------------------------------------------------
 
+/** What a finished container actually did, once state is taken into account. */
+export type ContainerOutcome =
+  | { kind: 'completed' }
+  | { kind: 'checkpoint'; name: string }
+  | { kind: 'clean-exit' }
+  | {
+      kind: 'error';
+      type: string;
+      stage: string;
+      message: string;
+      /** True when the error came from the exit code alone and must be written to state. */
+      persistError: boolean;
+    };
+
+/**
+ * Decide what a container run means from its exit code plus the state it left
+ * behind. Persisted state — not the exit code — is the source of truth about
+ * whether pipeline work succeeded.
+ *
+ * The exit code of `docker run` conflates two very different things: the exit
+ * code of the process inside the container, and docker's OWN failure codes.
+ * 125 in particular is docker-CLI-level and is never produced by the pipeline
+ * process — it shows up both when the run never started (missing image, bad
+ * mount) and when the CLI loses its wait-stream to the daemon mid-run
+ * ("error waiting for container: unexpected EOF"). In the latter case the
+ * pipeline had already finished its work and persisted a checkpoint, so
+ * escalating on the exit code alone fabricates an error over a healthy pause:
+ * it overwrites clean state, posts an error comment, pings Discord, and strips
+ * the `analyse` tag.
+ *
+ * A genuine docker-run failure leaves no fresh checkpoint or completion (the
+ * container never ran), so it still classifies as an error.
+ */
+export function classifyContainerOutcome(
+  exitCode: number,
+  state: PipelineState | null | undefined,
+): ContainerOutcome {
+  if (exitCode !== 0) {
+    // A pipeline-reported error always wins — it carries the real stage and
+    // message, and it outranks a checkpoint left over from an earlier pause.
+    const stateError = state?.error;
+    if (stateError) {
+      return {
+        kind: 'error',
+        type: stateError.type ?? 'container-error',
+        stage: stateError.stage ?? 'container',
+        message: stateError.message,
+        persistError: false,
+      };
+    }
+    // No error and no evidence of finished work — a real container failure.
+    if (!state?.completedAt && !state?.checkpoint) {
+      return {
+        kind: 'error',
+        type: 'container-error',
+        stage: 'container',
+        message: `Container exited with code ${exitCode}`,
+        // Only persistable when there is a state row to write it to.
+        persistError: Boolean(state),
+      };
+    }
+  }
+
+  if (state?.completedAt) return { kind: 'completed' };
+  if (state?.checkpoint) return { kind: 'checkpoint', name: state.checkpoint.name };
+  return { kind: 'clean-exit' };
+}
+
 export async function handleContainerOutcome(
   workItemId: number,
   exitCode: number,
@@ -108,76 +176,77 @@ export async function handleContainerOutcome(
   pollingConfig: PipelineConfig,
   watchConfig: WatchConfig,
 ): Promise<void> {
-  if (exitCode === 0) {
-    // Container exited successfully — clean up stale need-input tag if present
+  const state = await stateStore.load(workItemId);
+  const outcome = classifyContainerOutcome(exitCode, state);
+
+  if (exitCode !== 0 && outcome.kind !== 'error') {
+    logWI(
+      workItemId,
+      `Container exited with code ${exitCode}, but state shows ${outcome.kind} — ` +
+        `treating as success (docker-level failure, not a pipeline failure)`,
+    );
+  }
+
+  if (outcome.kind !== 'error') {
+    // Container did its job — clean up stale need-input tag if present
     await removeWorkItemTags(workItemId, ['need-input'], pollingConfig).catch(() => {});
 
-    // Check state for checkpoint vs completed
-    const state = await stateStore.load(workItemId);
-    if (state?.completedAt) {
+    if (outcome.kind === 'completed') {
       logWI(workItemId, 'Pipeline completed successfully');
       await removeWorkspaceVolume(workItemId);
-    } else if (state?.checkpoint) {
-      logWI(workItemId, `Pipeline paused at checkpoint: ${state.checkpoint.name}`);
+    } else if (outcome.kind === 'checkpoint') {
+      logWI(workItemId, `Pipeline paused at checkpoint: ${outcome.name}`);
     } else {
       logWI(workItemId, 'Container exited successfully (no checkpoint, no completion)');
     }
-  } else {
-    logWI(workItemId, `Container exited with code ${exitCode}`);
-    // Error handling: post error comment and tag work item
-    // Check state file for rich error details (e.g., analyzer needs-input questions)
-    try {
-      const state = await stateStore.load(workItemId);
-      const stateError = state?.error;
-      const errorForComment = stateError?.message
-        ? new Error(stateError.message)
-        : new Error(`Container exited with code ${exitCode}`);
-      const stage = stateError?.stage ?? 'container';
+    return;
+  }
 
-      // Persist error to state if not already set — prevents findOrphanedSessions
-      // from treating this as a resumable mid-stage crash on next watcher restart
-      if (state && !stateError) {
-        state.error = {
-          type: 'ContainerError',
-          stage,
-          message: `Container exited with code ${exitCode}`,
-          timestamp: new Date().toISOString(),
-        };
-        await stateStore.save(workItemId, state);
-      }
-
-      const comment = formatErrorComment(
-        workItemId,
-        stage,
-        errorForComment,
-      );
-      await postWorkItemComment(workItemId, comment, pollingConfig);
-      logWI(workItemId, 'Posted error comment to work item');
-
-      const errorType = stateError?.type ?? 'container-error';
-      await notifyPipelineError(
-        { type: errorType, stage, message: errorForComment.message },
-        {
-          source: 'pipeline-container',
-          url: workItemUrl(workItemId, pollingConfig),
-          fields: [
-            { name: 'Work item', value: `#${workItemId}`, inline: true },
-            { name: 'Stage', value: stage, inline: true },
-            { name: 'Exit code', value: String(exitCode), inline: true },
-          ],
-        },
-      );
-    } catch (err) {
-      logWI(workItemId, `Warning: failed to post error comment: ${err}`);
+  logWI(workItemId, `Container exited with code ${exitCode}`);
+  // Error handling: post error comment and tag work item
+  try {
+    // Persist error to state if not already set — prevents findOrphanedSessions
+    // from treating this as a resumable mid-stage crash on next watcher restart
+    if (state && outcome.persistError) {
+      state.error = {
+        type: 'ContainerError',
+        stage: outcome.stage,
+        message: outcome.message,
+        timestamp: new Date().toISOString(),
+      };
+      await stateStore.save(workItemId, state);
     }
 
-    try {
-      await addWorkItemTags(workItemId, ['need-input'], pollingConfig);
-      await removeWorkItemTags(workItemId, ['analyse'], pollingConfig);
-      logWI(workItemId, 'Tagged "need-input", removed "analyse" for error escalation');
-    } catch (err) {
-      logWI(workItemId, `Warning: failed to update tags: ${err}`);
-    }
+    const comment = formatErrorComment(
+      workItemId,
+      outcome.stage,
+      new Error(outcome.message),
+    );
+    await postWorkItemComment(workItemId, comment, pollingConfig);
+    logWI(workItemId, 'Posted error comment to work item');
+
+    await notifyPipelineError(
+      { type: outcome.type, stage: outcome.stage, message: outcome.message },
+      {
+        source: 'pipeline-container',
+        url: workItemUrl(workItemId, pollingConfig),
+        fields: [
+          { name: 'Work item', value: `#${workItemId}`, inline: true },
+          { name: 'Stage', value: outcome.stage, inline: true },
+          { name: 'Exit code', value: String(exitCode), inline: true },
+        ],
+      },
+    );
+  } catch (err) {
+    logWI(workItemId, `Warning: failed to post error comment: ${err}`);
+  }
+
+  try {
+    await addWorkItemTags(workItemId, ['need-input'], pollingConfig);
+    await removeWorkItemTags(workItemId, ['analyse'], pollingConfig);
+    logWI(workItemId, 'Tagged "need-input", removed "analyse" for error escalation');
+  } catch (err) {
+    logWI(workItemId, `Warning: failed to update tags: ${err}`);
   }
 }
 

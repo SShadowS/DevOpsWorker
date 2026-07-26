@@ -1,12 +1,13 @@
 import { describe, test, expect, beforeAll, beforeEach, afterEach } from 'bun:test';
 import {
+  classifyContainerOutcome,
   getContainerEnv,
   getPrReviewContainerEnv,
   resolveRepoForWorkItem,
 } from '../../../src/cli/watch/container-dispatcher.ts';
 import { registerRepos } from '../../../src/config/repos.ts';
 import type { RepoConfig } from '../../../src/config/repo-config.ts';
-import type { PipelineConfig } from '../../../src/types/pipeline.types.ts';
+import type { PipelineConfig, PipelineState } from '../../../src/types/pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -167,6 +168,110 @@ describe('getPrReviewContainerEnv', () => {
     delete process.env['PR_REVIEW_NO_POST'];
     const env = getPrReviewContainerEnv();
     expect(env['PR_REVIEW_NO_POST'] ?? '').toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyContainerOutcome — exit code + persisted state → what actually happened
+// ---------------------------------------------------------------------------
+
+function stateWith(partial: Partial<PipelineState>): PipelineState {
+  return { currentStage: 'checkpoint:plan-approved', ...partial } as PipelineState;
+}
+
+const checkpointState = stateWith({
+  checkpoint: { name: 'plan-approved', enteredAt: '2026-07-25T20:57:00Z' },
+});
+
+const completedState = stateWith({ completedAt: '2026-07-25T20:57:00Z' });
+
+const erroredState = stateWith({
+  error: {
+    type: 'AgentExecutionError',
+    stage: 'coder',
+    message: 'agent blew up',
+    timestamp: '2026-07-25T20:57:00Z',
+  },
+});
+
+describe('classifyContainerOutcome', () => {
+  test('exit 0 with a checkpoint is a checkpoint pause', () => {
+    expect(classifyContainerOutcome(0, checkpointState)).toEqual({
+      kind: 'checkpoint',
+      name: 'plan-approved',
+    });
+  });
+
+  test('exit 0 with completedAt is a completion', () => {
+    expect(classifyContainerOutcome(0, completedState)).toEqual({ kind: 'completed' });
+  });
+
+  test('exit 0 with neither is a clean exit', () => {
+    expect(classifyContainerOutcome(0, stateWith({}))).toEqual({ kind: 'clean-exit' });
+  });
+
+  test('exit 0 with no state at all is a clean exit', () => {
+    expect(classifyContainerOutcome(0, null)).toEqual({ kind: 'clean-exit' });
+  });
+
+  // The 125 regression: docker's CLI lost its wait-stream to the daemon
+  // ("error waiting for container: unexpected EOF") AFTER the pipeline had
+  // already paused at a checkpoint. State is the source of truth, not the
+  // exit code — 125 is a docker-CLI code, never a pipeline process code.
+  test('nonzero exit with a checkpoint and no error is still a checkpoint pause', () => {
+    expect(classifyContainerOutcome(125, checkpointState)).toEqual({
+      kind: 'checkpoint',
+      name: 'plan-approved',
+    });
+  });
+
+  test('nonzero exit with completedAt and no error is still a completion', () => {
+    expect(classifyContainerOutcome(125, completedState)).toEqual({ kind: 'completed' });
+  });
+
+  test('nonzero exit with an error in state reports that error, not the exit code', () => {
+    expect(classifyContainerOutcome(1, erroredState)).toEqual({
+      kind: 'error',
+      type: 'AgentExecutionError',
+      stage: 'coder',
+      message: 'agent blew up',
+      persistError: false,
+    });
+  });
+
+  test('a persisted error wins over a stale checkpoint on a nonzero exit', () => {
+    const both = stateWith({
+      checkpoint: { name: 'plan-approved', enteredAt: '2026-07-25T20:00:00Z' },
+      error: {
+        type: 'AgentExecutionError',
+        stage: 'coder',
+        message: 'crashed after the checkpoint',
+        timestamp: '2026-07-25T20:57:00Z',
+      },
+    });
+    expect(classifyContainerOutcome(1, both)).toMatchObject({ kind: 'error', stage: 'coder' });
+  });
+
+  test('nonzero exit with no checkpoint, no completion and no error is a container error', () => {
+    expect(classifyContainerOutcome(125, stateWith({}))).toEqual({
+      kind: 'error',
+      type: 'container-error',
+      stage: 'container',
+      message: 'Container exited with code 125',
+      persistError: true,
+    });
+  });
+
+  // Genuine docker-run failure (missing image, bad mount): the container never
+  // ran, so no state row exists — this must still escalate.
+  test('nonzero exit with no state at all is a container error', () => {
+    expect(classifyContainerOutcome(125, null)).toEqual({
+      kind: 'error',
+      type: 'container-error',
+      stage: 'container',
+      message: 'Container exited with code 125',
+      persistError: false,
+    });
   });
 });
 
