@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { PipelineLogger } from './pipeline-logger.ts';
-import type { StageTokenUsage } from '../types/pipeline.types.ts';
+import type { StageTokenUsage, StageModelUsage } from '../types/pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
 // agent-stream — extracted from runAgent's `for await (const message of
@@ -58,6 +58,10 @@ export interface ConsumedAgentStream {
   rateLimitHit: boolean;
   tokens: StageTokenUsage;
   toolCalls: Record<string, number>;
+  /** Per-model cost/token split. `costUsd` above is a single total covering this
+   *  agent AND its sub-agents; this separates them whenever they run on different
+   *  models. Empty when the SDK reports no `modelUsage`. */
+  modelUsage: Record<string, StageModelUsage>;
   /** The terminal SDK `result` message, or undefined if the stream ended
    *  without ever producing one (caller treats this as a transient failure). */
   resultMessage?: SDKResultMessage;
@@ -87,6 +91,7 @@ export async function consumeAgentStream(
   let rateLimitHit = false;
   const tokens: StageTokenUsage = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
   const toolCalls: Record<string, number> = {};
+  const modelUsage: Record<string, StageModelUsage> = {};
   const subAgentByToolUseId = new Map<string, string>();
   let resultMessage: SDKResultMessage | undefined;
 
@@ -190,6 +195,28 @@ export async function consumeAgentStream(
         tokens.cacheCreation = usage.cache_creation_input_tokens ?? 0;
       }
 
+      // `total_cost_usd` covers this agent AND every sub-agent it dispatched, while
+      // `usage` above reports only this agent's own tokens — so the two do not
+      // reconcile for an orchestrator, and neither answers "was the spend here or in
+      // the fan-out?". `modelUsage` is keyed by model, so when the orchestrator and
+      // its sub-agents run on different models the split falls out directly.
+      const rawModelUsage = (message as { modelUsage?: Record<string, {
+        inputTokens?: number; outputTokens?: number;
+        cacheReadInputTokens?: number; cacheCreationInputTokens?: number;
+        costUSD?: number;
+      }> }).modelUsage;
+      if (rawModelUsage) {
+        for (const [model, mu] of Object.entries(rawModelUsage)) {
+          modelUsage[model] = {
+            costUsd: mu.costUSD ?? 0,
+            input: mu.inputTokens ?? 0,
+            output: mu.outputTokens ?? 0,
+            cacheRead: mu.cacheReadInputTokens ?? 0,
+            cacheCreation: mu.cacheCreationInputTokens ?? 0,
+          };
+        }
+      }
+
       // Print completion summary to console
       const summary = `[${agentName}] Complete — $${costUsd.toFixed(2)} | ${(durationMs / 1000).toFixed(0)}s | ${turns} turns`;
       process.stderr.write(`${summary}\n`);
@@ -199,7 +226,7 @@ export async function consumeAgentStream(
     }
   }
 
-  return { sessionId, costUsd, durationMs, turns, lastAssistantText, rateLimitHit, tokens, toolCalls, resultMessage };
+  return { sessionId, costUsd, durationMs, turns, lastAssistantText, rateLimitHit, tokens, toolCalls, modelUsage, resultMessage };
 }
 
 // ---------------------------------------------------------------------------

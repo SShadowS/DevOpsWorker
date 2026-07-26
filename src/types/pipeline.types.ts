@@ -303,8 +303,30 @@ export interface StageTelemetry {
   toolCalls?: Record<string, number>;
   /** Token usage from the SDK result. Optional — absent on telemetry recorded before this was captured. */
   tokens?: StageTokenUsage;
+  /** Per-model cost/token split — separates an orchestrator from its sub-agents. */
+  modelUsage?: Record<string, StageModelUsage>;
   /** SDK result subtype: 'success' | 'error_max_turns' | 'error_max_budget_usd' | 'error_max_structured_output_retries' | 'error_during_execution'. */
   subtype?: string;
+}
+
+/**
+ * Per-model cost and token usage within one agent run.
+ *
+ * An orchestrator's `costUsd` is a single total covering itself AND every
+ * sub-agent it dispatches, so it cannot answer "was the cost the orchestrator or
+ * the fan-out?". When the orchestrator and its sub-agents run on different models
+ * — which is the normal configuration — this map splits them: the SDK reports
+ * usage keyed by model id, so a `code-reviewer` on Opus with eight sub-agents on
+ * Sonnet yields one entry each.
+ *
+ * Keyed by the raw model id the SDK reports.
+ */
+export interface StageModelUsage {
+  costUsd: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
 }
 
 /** Prompt/output token breakdown for a single agent run. */

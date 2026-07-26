@@ -283,3 +283,63 @@ describe('resolveActiveAgent (re-export sanity)', () => {
     expect(resolveActiveAgent(undefined, new Map(), 'pr-reviewer')).toBe('pr-reviewer');
   });
 });
+
+// ---------------------------------------------------------------------------
+// modelUsage — per-model cost split
+//
+// An orchestrator's total_cost_usd covers itself AND every sub-agent it
+// dispatches, while `usage` reports only its own tokens — so neither answers
+// "was the spend in the orchestrator or the fan-out?". modelUsage is keyed by
+// model, which separates them whenever they run on different models.
+// ---------------------------------------------------------------------------
+
+describe('consumeAgentStream modelUsage', () => {
+  test('splits orchestrator and sub-agent spend by model', async () => {
+    async function* stream() {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        total_cost_usd: 13.12,
+        duration_ms: 1000,
+        num_turns: 18,
+        usage: {
+          input_tokens: 13, output_tokens: 49862,
+          cache_read_input_tokens: 478034, cache_creation_input_tokens: 217769,
+        },
+        modelUsage: {
+          'claude-opus-5': {
+            inputTokens: 13, outputTokens: 49862,
+            cacheReadInputTokens: 478034, cacheCreationInputTokens: 217769,
+            costUSD: 2.85,
+          },
+          'claude-sonnet-5': {
+            inputTokens: 900, outputTokens: 120000,
+            cacheReadInputTokens: 50000, cacheCreationInputTokens: 30000,
+            costUSD: 10.27,
+          },
+        },
+      } as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'code-reviewer' });
+
+    expect(out.costUsd).toBe(13.12);
+    expect(Object.keys(out.modelUsage).sort()).toEqual(['claude-opus-5', 'claude-sonnet-5']);
+    expect(out.modelUsage['claude-opus-5']!.costUsd).toBe(2.85);
+    expect(out.modelUsage['claude-sonnet-5']!.costUsd).toBe(10.27);
+    // the split accounts for the total the single costUsd figure could not explain
+    const summed = Object.values(out.modelUsage).reduce((a, m) => a + m.costUsd, 0);
+    expect(summed).toBeCloseTo(out.costUsd, 2);
+  });
+
+  test('is an empty object when the SDK reports no modelUsage', async () => {
+    async function* stream() {
+      yield {
+        type: 'result', subtype: 'success', total_cost_usd: 1, duration_ms: 1, num_turns: 1,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      } as never;
+    }
+    const out = await consumeAgentStream(stream(), { agentName: 'coder' });
+    expect(out.modelUsage).toEqual({});
+  });
+});

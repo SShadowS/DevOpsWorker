@@ -74,6 +74,10 @@ export function agentStage<T extends z.ZodType>(
         timestamp: new Date().toISOString(),
         toolCalls: result.toolCalls,
         tokens: result.tokens,
+        // Omit when empty so entries for agents that dispatch nothing stay compact.
+        ...(result.modelUsage && Object.keys(result.modelUsage).length > 0
+          ? { modelUsage: result.modelUsage }
+          : {}),
         subtype: result.subtype,
       };
 
