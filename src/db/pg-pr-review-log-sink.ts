@@ -38,7 +38,7 @@ export class PgPrReviewLogSink implements ILogSink {
   async readStageLog(stageName: string): Promise<LogEntry[]> {
     try {
       const rows = await this.sql`
-        SELECT id, stage_name, entry_type, content, created_at::text
+        SELECT id, stage_name, agent_name, entry_type, content, created_at::text
         FROM stage_logs
         WHERE work_item_id = ${this.prId} AND stage_name = ${stageName}
           AND entity_type = 'pull_request' AND review_run_id = ${this.reviewRunId}
@@ -69,7 +69,7 @@ export class PgPrReviewLogSink implements ILogSink {
       const fetchCount = limit + 1;
       const rows = beforeId != null
         ? await this.sql`
-            SELECT id, stage_name, entry_type, content, created_at::text
+            SELECT id, stage_name, agent_name, entry_type, content, created_at::text
             FROM stage_logs
             WHERE work_item_id = ${this.prId} AND stage_name = ${stageName}
               AND entity_type = 'pull_request' AND review_run_id = ${this.reviewRunId}
@@ -78,7 +78,7 @@ export class PgPrReviewLogSink implements ILogSink {
             LIMIT ${fetchCount}
           `
         : await this.sql`
-            SELECT id, stage_name, entry_type, content, created_at::text
+            SELECT id, stage_name, agent_name, entry_type, content, created_at::text
             FROM stage_logs
             WHERE work_item_id = ${this.prId} AND stage_name = ${stageName}
               AND entity_type = 'pull_request' AND review_run_id = ${this.reviewRunId}

@@ -65,6 +65,9 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
           revisionAttempts: { ...currentState.revisionAttempts, [config.name]: attempt },
         };
 
+        // The loop's own bookkeeping is not an agent's output; agentStage
+        // re-claims attribution when the producer/reviewer actually runs.
+        logger?.setAgentName('');
         logger?.log(`Iteration ${attempt}/${config.maxAttempts} — running producer "${config.producer.name}"`);
 
         try {
@@ -96,6 +99,7 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
             }
           }
 
+          logger?.setAgentName('');
           logger?.log(`Running reviewer "${config.reviewer.name}"`);
 
           // Report + run reviewer (snapshot now includes producer/postProducer output)
@@ -118,6 +122,7 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
 
         // Check if approved
         if (config.isApproved(currentState)) {
+          logger?.setAgentName('');
           logger?.log(`Reviewer approved on attempt ${attempt}`);
           // Clear the budget so a later rewind to this loop starts fresh.
           return {
@@ -129,6 +134,7 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
         }
 
         // Not approved — loop continues (reviewer's feedback is already in state)
+        logger?.setAgentName('');
         logger?.log(`Revision ${attempt}/${config.maxAttempts} — reviewer requested changes`);
         console.log(
           `[${config.name}] Revision ${attempt}/${config.maxAttempts} — reviewer requested changes`,

@@ -1,6 +1,13 @@
 export interface LogEntry {
   id: number;
   stageName: string;
+  /**
+   * Agent that produced this entry, when known. Distinguishes a revision loop's
+   * producer from its reviewer — both write under the loop's stage name.
+   * Null on rows written outside any agent, and on rows recorded before
+   * attribution was wired.
+   */
+  agentName: string | null;
   entryType: string;
   content: string;
   createdAt: string;
@@ -26,6 +33,11 @@ export interface ReadStageLogPageOptions {
 
 export interface ILogSink {
   write(stageName: string, entryType: string, content: string): void;
+  /**
+   * Attribute subsequent writes to a named agent. Optional — sinks that cannot
+   * record the axis simply omit it, and `PipelineLogger.setAgentName` no-ops.
+   */
+  setAgentName?(name: string): void;
   readStageLog(stageName: string): Promise<LogEntry[]> | LogEntry[];
   readAllStages(): Promise<string[]> | string[];
   /**

@@ -1076,6 +1076,21 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   text-align: right;
 }
 
+/* Which agent wrote the line. Present only inside a revision loop, where the
+   producer and the reviewer share one stage name — elsewhere the stage already
+   names the agent and the chip would be noise. */
+.log-entry__agent {
+  color: var(--accent, #7aa2f7);
+  background: rgba(122, 162, 247, 0.1);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 16px;
+  align-self: flex-start;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .log-entry__content {
   margin: 0;
   white-space: pre-wrap;

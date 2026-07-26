@@ -105,6 +105,12 @@ export function LogViewer() {
           {entries.map((entry) => (
             <div key={entry.id} class={`log-entry ${entryClass(entry.entryType)}`}>
               <span class="log-entry__time">{formatTimestamp(entry, firstTimestamp)}</span>
+              {/* A revision loop's producer and reviewer both log under the loop's
+                  stage name, so the stage alone can't tell you who wrote a line.
+                  For a plain stage the two names match and the chip is noise. */}
+              {entry.agentName && entry.agentName !== viewer.selectedStage && (
+                <span class="log-entry__agent">{entry.agentName}</span>
+              )}
               <pre class="log-entry__content">{entry.content}</pre>
             </div>
           ))}

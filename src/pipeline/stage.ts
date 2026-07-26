@@ -40,6 +40,12 @@ export function agentStage<T extends z.ZodType>(
     async execute(state: PipelineState, context: PipelineContext): Promise<StageResult> {
       const startedAt = new Date().toISOString();
 
+      // Claim log attribution. Inside a revision loop the producer and reviewer
+      // share one stage name, so without this the reviewer's output is
+      // indistinguishable from the coder's — the reviewer reads as having no
+      // traffic when queried by its own name.
+      context.logger?.setAgentName(config.agent.name);
+
       let result;
       try {
         result = await runAgent(config.agent, state, context);

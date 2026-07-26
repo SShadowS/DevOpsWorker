@@ -7,17 +7,38 @@ import type {
 } from '../pipeline/log-sink.interface.ts';
 
 export class PgLogSink implements ILogSink {
+  /**
+   * Which agent produced the rows being written right now.
+   *
+   * `stage_name` alone cannot say: a revision loop runs its producer and its
+   * reviewer inside one top-level stage, so the coder's output and the
+   * code-reviewer's output both land under `coding`. That made the reviewer look
+   * like it had no traffic at all when queried by its own name. The stage name is
+   * not wrong — `coding` really is the stage — it is just the wrong axis for the
+   * question "what did the reviewer do?".
+   *
+   * Null until someone sets it, so rows written outside any agent (orchestrator
+   * bookkeeping) stay honestly unattributed rather than being credited to
+   * whichever agent happened to run last.
+   */
+  private agentName: string | null = null;
+
   constructor(
     private readonly sql: postgres.Sql,
     private readonly workItemId: number,
   ) {}
 
+  /** Switch the agent attribution applied to subsequent writes. */
+  setAgentName(name: string): void {
+    this.agentName = name || null;
+  }
+
   write(stageName: string, entryType: string, content: string): void {
     // Fire-and-forget — logging must never crash the pipeline
     try {
       this.sql`
-        INSERT INTO stage_logs (work_item_id, stage_name, entry_type, content)
-        VALUES (${this.workItemId}, ${stageName}, ${entryType}, ${content})
+        INSERT INTO stage_logs (work_item_id, stage_name, entry_type, content, agent_name)
+        VALUES (${this.workItemId}, ${stageName}, ${entryType}, ${content}, ${this.agentName})
       `.catch(() => {});
     } catch {
       // Swallow synchronous errors (e.g. sql is not a tagged-template function)
@@ -27,7 +48,7 @@ export class PgLogSink implements ILogSink {
   async readStageLog(stageName: string): Promise<LogEntry[]> {
     try {
       const rows = await this.sql`
-        SELECT id, stage_name, entry_type, content, created_at::text
+        SELECT id, stage_name, agent_name, entry_type, content, created_at::text
         FROM stage_logs
         WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName} AND entity_type = 'work_item'
         ORDER BY id
@@ -48,7 +69,7 @@ export class PgLogSink implements ILogSink {
       const fetchCount = limit + 1;
       const rows = beforeId != null
         ? await this.sql`
-            SELECT id, stage_name, entry_type, content, created_at::text
+            SELECT id, stage_name, agent_name, entry_type, content, created_at::text
             FROM stage_logs
             WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName} AND entity_type = 'work_item'
               AND id < ${beforeId}
@@ -56,7 +77,7 @@ export class PgLogSink implements ILogSink {
             LIMIT ${fetchCount}
           `
         : await this.sql`
-            SELECT id, stage_name, entry_type, content, created_at::text
+            SELECT id, stage_name, agent_name, entry_type, content, created_at::text
             FROM stage_logs
             WHERE work_item_id = ${this.workItemId} AND stage_name = ${stageName} AND entity_type = 'work_item'
             ORDER BY id DESC
@@ -84,7 +105,7 @@ export class PgLogSink implements ILogSink {
   async readNewEntries(afterId: number, limit = 500): Promise<LogEntry[]> {
     try {
       const rows = await this.sql`
-        SELECT id, stage_name, entry_type, content, created_at::text
+        SELECT id, stage_name, agent_name, entry_type, content, created_at::text
         FROM stage_logs
         WHERE work_item_id = ${this.workItemId} AND entity_type = 'work_item' AND id > ${afterId}
         ORDER BY id
@@ -115,6 +136,7 @@ export function rowToLogEntry(r: any): LogEntry {
   return {
     id: r.id,
     stageName: r.stage_name,
+    agentName: r.agent_name ?? null,
     entryType: r.entry_type,
     content: r.content,
     createdAt: r.created_at,

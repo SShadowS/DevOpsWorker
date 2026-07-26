@@ -40,6 +40,8 @@ export class PipelineLogger {
     this.stageIndex++;
 
     this.currentStageName = stageName;
+    // A new stage starts unattributed — the stage's agent claims it on execute.
+    this.setAgentName('');
 
     const now = new Date().toISOString();
     const header = [
@@ -87,9 +89,21 @@ export class PipelineLogger {
     this.agentNameSetter = setter;
   }
 
-  /** Forward the active agent name to the sink (no-op if unsupported). */
+  /**
+   * Attribute subsequent log entries to a named agent. Pass an empty string to
+   * clear it — entries the orchestrator or a revision loop writes itself belong
+   * to no agent, and crediting them to whichever agent last ran would be worse
+   * than leaving them blank.
+   *
+   * Goes straight to the sink (the `onAgentName` setter is the older hook, kept
+   * for consumers that wire their own forwarder). Routing *only* through that
+   * hook was the bug: the pipeline never registered one, so every
+   * `setAgentName` call in `runAgent` silently evaporated and `agent_name` was
+   * NULL on every pipeline row.
+   */
   setAgentName(name: string): void {
     this.agentNameSetter?.(name);
+    this.sink?.setAgentName?.(name);
   }
 
   /** Write a footer with telemetry data. */
