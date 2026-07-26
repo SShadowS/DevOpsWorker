@@ -92,6 +92,11 @@ export async function findRerunCommandInComments(
   const comments = [...response.comments].reverse();
   for (const comment of comments) {
     if (since && comment.createdDate <= since) continue;
+    // Never read the pipeline's own comments as a human command. The escalation
+    // and error comments both TELL the human to reply with `/fix ...`, so an
+    // unfiltered scan is one line-break away from the pipeline answering itself
+    // in a loop. getCommentsSince already filters these; this scan did not.
+    if (isPipelineComment(comment.text)) continue;
     // Strip HTML tags — DevOps comments are HTML-formatted
     const plainText = comment.text.replace(/<[^>]+>/g, '').trim();
     const commandRegex = new RegExp(`(?:^|\\n)\\s*${command.replace('/', '\\/')}`, 'm');

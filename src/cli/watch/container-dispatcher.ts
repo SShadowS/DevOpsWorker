@@ -224,6 +224,11 @@ export async function handleContainerOutcome(
       workItemId,
       outcome.stage,
       new Error(outcome.message),
+      // The original error class is gone by here (the container reported a
+      // message, not an object), so the diagnostic is derived from state instead
+      // — which is also why it works for any stalled loop, not just one that
+      // threw RevisionExhaustedError.
+      state ?? undefined,
     );
     await postWorkItemComment(workItemId, comment, pollingConfig);
     logWI(workItemId, 'Posted error comment to work item');

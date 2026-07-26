@@ -3,6 +3,7 @@ import type { DevPlan } from '../agents/planner/schema.ts';
 import type { Changeset } from '../agents/coder/schema.ts';
 import type { PipelineState, TelemetryData } from '../types/pipeline.types.ts';
 import { TransientAgentError } from '../sdk/errors.ts';
+import { recurringFindings } from '../pipeline/revision-loop.ts';
 
 // ---------------------------------------------------------------------------
 // DevOps comment formatters — HTML for posting to work item comments
@@ -205,6 +206,118 @@ function textToHtml(text: string): string {
   return out.join('\n');
 }
 
+
+// ---------------------------------------------------------------------------
+// Stalled revision loop — the shared diagnostic
+//
+// A loop can stop for two reasons and both used to tell the human almost
+// nothing. Budget exhaustion posted a bare "exhausted N attempts without
+// approval" plus generic recovery options: no findings, no trend, nothing to
+// decide — so the only available move was to resume and hope. The convergence
+// escalation and the exhaustion error now render the SAME summary, because the
+// human needs identical information either way: what is being objected to, is it
+// getting better, and what is being asked of them.
+// ---------------------------------------------------------------------------
+
+export interface StalledLoopSummary {
+  loop: string;
+  /** Issue count per round, oldest first. Empty when the reviewer reported none. */
+  issueCounts: number[];
+  /** Findings raised in more than one round — what iteration is failing to resolve. */
+  recurring: string[];
+  /** Findings from the most recent round only, worst-first. */
+  latest: Array<{ severity: string; filePath?: string; comment: string }>;
+  /** The last reviewer's own summary. */
+  lastFeedback?: string;
+  /** What the last reviewer told the producer to do. */
+  revisionInstructions?: string;
+  attempts?: number;
+}
+
+const SEVERITY_ORDER = ['critical', 'major', 'minor', 'suggestion'];
+
+/**
+ * How many outstanding findings to list, and how much of each.
+ *
+ * Real reviewer findings run to paragraph length — WI 63396's last round had 22,
+ * several over 1,500 characters. Rendered in full that is a wall of text nobody
+ * reads, which fails the same way the bare error did. The comment's job is to
+ * support a decision, not to reproduce the review: blocking findings only,
+ * trimmed to their opening claim, with the count of what was left out.
+ */
+const MAX_LISTED_FINDINGS = 8;
+const MAX_FINDING_CHARS = 320;
+
+/** Trim to a whole word near the limit, marking that it was cut. */
+export function truncateFinding(text: string, limit = MAX_FINDING_CHARS): string {
+  if (text.length <= limit) return text;
+  const cut = text.slice(0, limit);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd() + '…';
+}
+
+/** Findings that would block: critical + major. Minors never gate a verdict. */
+export function blockingFindings<T extends { severity: string }>(findings: T[]): T[] {
+  return findings.filter((f) => f.severity === 'critical' || f.severity === 'major');
+}
+
+/**
+ * Pull everything a human needs to unblock a stalled loop out of accumulated
+ * state. Returns null when the loop left no reviews to report on — there is
+ * genuinely nothing to say, and inventing a section would be worse.
+ *
+ * Reads `codeReviews` structurally: it is typed as the shared `ReviewVerdict`
+ * minimum, and this formatter must not import agent output schemas.
+ */
+export function summarizeStalledLoop(
+  state: PipelineState | undefined,
+  loop: string,
+): StalledLoopSummary | null {
+  if (!state) return null;
+  const reviews = (state.codeReviews ?? []) as Array<{
+    verdict?: string;
+    feedback?: string;
+    revisionInstructions?: string;
+    issues?: Array<{ severity?: string; filePath?: string; comment?: string }>;
+  }>;
+  if (reviews.length === 0) return null;
+
+  const perRound = reviews.map((r) =>
+    (r.issues ?? []).map((i) => i.comment ?? '').filter(Boolean),
+  );
+  const last = reviews.at(-1);
+
+  const latest = [...(last?.issues ?? [])]
+    .map((i) => ({
+      severity: i.severity ?? 'unknown',
+      filePath: i.filePath,
+      comment: i.comment ?? '',
+    }))
+    .filter((i) => i.comment)
+    .sort((a, b) => {
+      const ai = SEVERITY_ORDER.indexOf(a.severity);
+      const bi = SEVERITY_ORDER.indexOf(b.severity);
+      return (ai < 0 ? SEVERITY_ORDER.length : ai) - (bi < 0 ? SEVERITY_ORDER.length : bi);
+    });
+
+  return {
+    loop,
+    issueCounts: state.revisionIssueCounts?.[loop]
+      ?? reviews.map((r) => (r.issues ?? []).length),
+    recurring: recurringFindings(perRound),
+    latest,
+    lastFeedback: last?.feedback,
+    revisionInstructions: last?.revisionInstructions,
+    attempts: state.revisionAttempts?.[loop],
+  };
+}
+
+/** Is the trend flat or worsening? Decides which reading we present. */
+function trendIsFlat(counts: number[]): boolean {
+  if (counts.length < 2) return false;
+  return counts.at(-1)! >= counts[0]!;
+}
+
 /**
  * Format a pipeline error as a DevOps work item comment (HTML).
  */
@@ -212,6 +325,7 @@ export function formatErrorComment(
   workItemId: number,
   stageName: string,
   error: Error,
+  state?: PipelineState,
 ): string {
   const parts: string[] = [];
   parts.push(`<h2>🚨 Pipeline Error — Work Item #${workItemId}</h2>`);
@@ -222,14 +336,95 @@ export function formatErrorComment(
     parts.push(`<p><b>Retry attempts:</b> ${error.attempts}</p>`);
   }
 
+  // A revision loop that ran out of budget is not a crash — it is a stalled
+  // negotiation. "Resume and hope" is not a decision anyone can make without
+  // seeing what is being objected to, so attach the same diagnostic the
+  // convergence escalation posts.
+  const stalled = summarizeStalledLoop(state, stageName);
+  if (stalled) {
+    parts.push(renderStalledLoopHtml(stalled));
+  }
+
   parts.push(`<hr>`);
   parts.push(`<h3>Recovery Options</h3>`);
   parts.push(`<ol>`);
-  parts.push(`<li><b>Resume from failed stage</b> — use the dashboard "Continue" action (preferred)</li>`);
+  if (stalled) {
+    // Lead with the option that carries a decision. A bare resume re-runs the
+    // producer against the same reviewers that just deadlocked.
+    parts.push(
+      `<li><b>Answer and resume</b> — comment `
+        + `<code>/fix &lt;which findings to fix, which to drop, and why&gt;</code>. `
+        + `This is the only option that changes the inputs.</li>`,
+    );
+  }
+  parts.push(
+    `<li><b>Resume from failed stage</b> — use the dashboard "Continue" action`
+      + `${stalled ? ' (retries with the same inputs)' : ' (preferred)'}</li>`,
+  );
   parts.push(`<li><b>CLI resume</b> — <code>bun run pipeline -- continue --work-item ${workItemId}</code></li>`);
   parts.push(`<li><b>Restart from scratch</b> — re-tag with <code>analyse</code> (last resort)</li>`);
   parts.push(`</ol>`);
   return parts.join('\n');
+}
+
+/** The stalled-loop diagnostic as HTML, for the error comment. */
+function renderStalledLoopHtml(s: StalledLoopSummary): string {
+  const p: string[] = [];
+  p.push(`<hr>`);
+  p.push(`<h3>Why it is stuck</h3>`);
+
+  if (s.issueCounts.length > 0) {
+    p.push(
+      `<p><b>Findings per round:</b> <code>${s.issueCounts.join(' → ')}</code>`
+        + (trendIsFlat(s.issueCounts)
+          ? ` — not going down. The reviewers are not converging on this change.</p>`
+          : ` — falling, but the attempt budget ran out first.</p>`),
+    );
+  }
+
+  if (s.recurring.length > 0) {
+    p.push(`<h4>Raised in more than one round</h4>`);
+    p.push(`<ul>`);
+    for (const f of s.recurring) p.push(`<li>${esc(f)}</li>`);
+    p.push(`</ul>`);
+  } else if (s.issueCounts.length > 1) {
+    p.push(
+      `<p><i>No finding repeated across rounds — the reviewers raised <b>different</b> `
+        + `objections each time. That usually means the target is underspecified rather `
+        + `than the code being wrong.</i></p>`,
+    );
+  }
+
+  const blocking = blockingFindings(s.latest);
+  if (blocking.length > 0) {
+    p.push(`<h4>Blocking after the last round (${blocking.length} of ${s.latest.length} findings)</h4>`);
+    p.push(`<ul>`);
+    for (const i of blocking.slice(0, MAX_LISTED_FINDINGS)) {
+      const where = i.filePath ? ` <code>${esc(i.filePath)}</code>` : '';
+      p.push(`<li><b>${esc(i.severity)}</b>${where} — ${esc(truncateFinding(i.comment))}</li>`);
+    }
+    const hidden = blocking.length - MAX_LISTED_FINDINGS;
+    if (hidden > 0) {
+      p.push(`<li><i>…and ${hidden} more blocking — see the full review in the pipeline logs</i></li>`);
+    }
+    p.push(`</ul>`);
+  }
+
+  if (s.revisionInstructions) {
+    p.push(`<h4>What the reviewer last asked for</h4>`);
+    p.push(textToHtml(s.revisionInstructions));
+  } else if (s.lastFeedback) {
+    p.push(`<h4>Last reviewer summary</h4>`);
+    p.push(textToHtml(s.lastFeedback));
+  }
+
+  p.push(`<h3>What you need to decide</h3>`);
+  p.push(`<ul>`);
+  p.push(`<li>Which of the findings above are <b>real and worth fixing</b>?</li>`);
+  p.push(`<li>Which are <b>wrong or out of scope</b>, so the coder should stop trying to satisfy them?</li>`);
+  p.push(`<li>Anything the reviewers are <b>missing or misreading</b> about the intent?</li>`);
+  p.push(`</ul>`);
+  return p.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +441,12 @@ const PIPELINE_COMMENT_SIGNATURES = [
   'Dev Plan',
   'Pipeline Error',
   'Recovery Options',
+  // Stalled-loop diagnostics. These comments quote `/fix` as the instruction to
+  // the human, so they MUST be recognised as bot output or the rerun scan reads
+  // them back as the human's reply.
+  'Review not converging',
+  'Why it is stuck',
+  'What you need to decide',
 ];
 
 export function isPipelineComment(htmlText: string): boolean {
@@ -314,6 +515,25 @@ export function formatConvergenceEscalation(
         + `objections each round, which is its own signal: the target may be underspecified._`,
       '',
     );
+  }
+
+  // The escalation marker carries only counts and recurrences. The actual
+  // outstanding findings and the reviewer's own instructions live in state, and
+  // they are what makes the ask answerable rather than abstract.
+  const stalled = summarizeStalledLoop(state, esc.loop);
+  const blocking = blockingFindings(stalled?.latest ?? []);
+  if (blocking.length > 0) {
+    L.push(`### Blocking after the last round (${blocking.length} of ${stalled!.latest.length} findings)`, '');
+    for (const i of blocking.slice(0, MAX_LISTED_FINDINGS)) {
+      const where = i.filePath ? ` \`${i.filePath}\`` : '';
+      L.push(`- **${i.severity}**${where} — ${truncateFinding(i.comment)}`);
+    }
+    const hidden = blocking.length - MAX_LISTED_FINDINGS;
+    if (hidden > 0) L.push(`- _…and ${hidden} more blocking — see the full review in the pipeline logs_`);
+    L.push('');
+  }
+  if (stalled?.revisionInstructions) {
+    L.push(`### What the reviewer last asked for`, '', stalled.revisionInstructions, '');
   }
 
   L.push(`### What to do`, '');
