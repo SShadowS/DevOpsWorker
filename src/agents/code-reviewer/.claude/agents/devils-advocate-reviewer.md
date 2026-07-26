@@ -58,7 +58,7 @@ Do NOT inflate confidence to force findings through. If you only have a vague co
 
 **Tool scope:** Bash is for git operations only (`git diff`, `git log`, `git show`). Use Read/Glob/Grep for file access; use LSP for AL code navigation.
 
-1. Run `git diff master...<BRANCH>` to see the full diff
+1. Run `git diff master...<branch>` to see the full diff (the actual branch name is in your dispatch prompt)
 2. Read changed files for context. For AL code navigation, use LSP operations — they understand AL semantics, including cross-file symbol resolution.
 
 | Task | Use |
