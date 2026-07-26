@@ -97,7 +97,7 @@ Usage:
   pipeline learn-rules --pr <pr-id>                        Learn review patterns from PR comments
   pipeline webhook-server [--port <n>]                     Start webhook receiver
   pipeline review-pr     --pr-id <id> --repo-id <guid>    Review a pull request
-  pipeline subagent-stats [--limit <n>] [--repo <key>]     Per-sub-agent cost/turns across recent reviews
+  pipeline subagent-stats [--limit <n>] [--repo <key>]     Per-sub-agent cost/turns across reviews + pipeline runs
 
 Options:
   --work-item, -w   Azure DevOps work item ID (required for run/continue/status)
@@ -108,6 +108,7 @@ Options:
   --pr              Pull request ID (required for learn-rules)
   --limit, -n       Reviews to scan (default: 50, subagent-stats only)
   --repo, -r        Restrict to one repo key (subagent-stats only)
+  --source          reviews | pipeline | all (default: all, subagent-stats only)
   --json            Machine-readable output (subagent-stats only)
       `);
       process.exit(command ? 1 : 0);
