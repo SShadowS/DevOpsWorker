@@ -491,3 +491,68 @@ describe('consumeAgentStream subAgents', () => {
     expect(out.subAgents).toEqual({});
   });
 });
+
+describe('consumeAgentStream subAgents — split assistant turns', () => {
+  test('one API turn split across messages counts once, but every tool call counts', async () => {
+    // The SDK may emit several assistant messages for a single API turn; they
+    // share message.id and repeat the turn's usage. Summing them naively would
+    // double-count both turns and tokens.
+    const fragment = (blocks: unknown[]) => ({
+      type: 'assistant',
+      subagent_type: 'security-reviewer',
+      message: {
+        id: 'msg_same',
+        model: 'claude-sonnet-5',
+        content: blocks,
+        usage: {
+          input_tokens: 100, output_tokens: 200,
+          cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+        },
+      },
+    }) as never;
+
+    async function* stream() {
+      yield fragment([{ type: 'tool_use', name: 'Read' }]);
+      yield fragment([{ type: 'tool_use', name: 'Grep' }]);
+      yield {
+        type: 'result', subtype: 'success', total_cost_usd: 1, duration_ms: 1, num_turns: 1,
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      } as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'code-reviewer' });
+    const sec = out.subAgents['security-reviewer']!;
+
+    expect(sec.turns).toBe(1);
+    expect(sec.tokens.input).toBe(100);
+    expect(sec.tokens.output).toBe(200);
+    // tool calls are per-block, so both fragments' calls count
+    expect(sec.toolCalls).toEqual({ Read: 1, Grep: 1 });
+  });
+
+  test('distinct message ids still count as distinct turns', async () => {
+    const turn = (id: string) => ({
+      type: 'assistant',
+      subagent_type: 'security-reviewer',
+      message: {
+        id,
+        model: 'claude-sonnet-5',
+        content: [],
+        usage: { input_tokens: 10, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      },
+    }) as never;
+
+    async function* stream() {
+      yield turn('msg_a');
+      yield turn('msg_b');
+      yield {
+        type: 'result', subtype: 'success', total_cost_usd: 1, duration_ms: 1, num_turns: 2,
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      } as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'code-reviewer' });
+    expect(out.subAgents['security-reviewer']!.turns).toBe(2);
+    expect(out.subAgents['security-reviewer']!.tokens.input).toBe(20);
+  });
+});

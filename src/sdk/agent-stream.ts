@@ -97,6 +97,11 @@ export async function consumeAgentStream(
   const modelUsage: Record<string, StageModelUsage> = {};
   const subAgents: Record<string, SubAgentUsage> = {};
   let currentSubAgent: string | undefined;
+  /** Assistant `message.id`s already counted, so a single API turn split across
+   *  several assistant messages (the SDK explicitly allows this — they share a
+   *  message.id) counts one turn and its usage once, not once per fragment.
+   *  Tool-call blocks are NOT deduped: each fragment carries its own. */
+  const countedMessageIds = new Set<string>();
   const subAgentByToolUseId = new Map<string, string>();
   let resultMessage: SDKResultMessage | undefined;
 
@@ -136,14 +141,18 @@ export async function consumeAgentStream(
           tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
           toolCalls: {},
         };
-        entry.turns++;
         entry.model ??= message.message?.model;
-        const u = message.message?.usage;
-        if (u) {
-          entry.tokens.input += u.input_tokens ?? 0;
-          entry.tokens.output += u.output_tokens ?? 0;
-          entry.tokens.cacheRead += u.cache_read_input_tokens ?? 0;
-          entry.tokens.cacheCreation += u.cache_creation_input_tokens ?? 0;
+        const messageId = message.message?.id;
+        if (!messageId || !countedMessageIds.has(messageId)) {
+          if (messageId) countedMessageIds.add(messageId);
+          entry.turns++;
+          const u = message.message?.usage;
+          if (u) {
+            entry.tokens.input += u.input_tokens ?? 0;
+            entry.tokens.output += u.output_tokens ?? 0;
+            entry.tokens.cacheRead += u.cache_read_input_tokens ?? 0;
+            entry.tokens.cacheCreation += u.cache_creation_input_tokens ?? 0;
+          }
         }
         currentSubAgent = subName;
       } else {
