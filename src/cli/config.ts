@@ -166,7 +166,9 @@ export function buildConfigFromRepo(
     },
 
     revisionLoops: {
-      maxAttempts: 5,
+      // Overridable so a run can be capped without a code change — useful when
+      // measuring a loop's early behaviour without paying for the full budget.
+      maxAttempts: Number(env['REVISION_MAX_ATTEMPTS'] ?? 5),
     },
 
     models: {
