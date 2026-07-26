@@ -3,6 +3,7 @@ import type { PipelineConfig } from '../types/pipeline.types.ts';
 import type { IStateStore } from '../pipeline/state-store.interface.ts';
 import type { RepoConfig } from '../config/repo-config.ts';
 import { companionRegistry } from '../config/companions.ts';
+import { getRepoConfig } from '../config/repos.ts';
 import { getCachedManifest } from '../overlay/index.ts';
 
 // ---------------------------------------------------------------------------
@@ -206,6 +207,24 @@ export function buildConfigFromRepo(
 }
 
 /**
+ * Build the config this deployment would produce right now, using the same
+ * resolution order as the start-fresh path in `run.ts`: the repo registry when
+ * `REPO_CONFIG` is set (container mode), generic defaults otherwise (local mode).
+ *
+ * Resolving via `loadConfig()` alone was wrong for containers: it yields
+ * placeholder ADO coordinates (`your-org` / `Your Project`), so a resumed run with
+ * no persisted config looked its work item up in an organisation that does not
+ * exist and died on a 404.
+ */
+function buildCurrentConfig(): PipelineConfig {
+  const repoKey = process.env['REPO_CONFIG'];
+  if (repoKey) {
+    return buildConfigFromRepo(getRepoConfig(repoKey), process.env as Record<string, string>);
+  }
+  return loadConfig(process.env['PIPELINE_SESSION'] ?? '.');
+}
+
+/**
  * Load a persisted PipelineConfig for a resumed work item.
  *
  * Two kinds of setting live in PipelineConfig, and they need opposite treatment:
@@ -228,10 +247,10 @@ export function buildConfigFromRepo(
  */
 export async function loadConfigFromState(stateStore: IStateStore, workItemId: number): Promise<PipelineConfig> {
   const persisted = await stateStore.loadConfig(workItemId);
-  const current = loadConfig(process.env['PIPELINE_SESSION'] ?? '.');
+  const current = buildCurrentConfig();
 
   if (!persisted) {
-    console.warn('  ⚠️  No persisted config found, using defaults');
+    console.warn('  ⚠️  No persisted config found, rebuilding from the repo registry');
     return current;
   }
 

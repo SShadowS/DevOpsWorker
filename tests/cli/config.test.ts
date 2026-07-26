@@ -1,6 +1,7 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test';
 import { loadConfig, loadConfigFromState, buildConfigFromRepo, resolveAdoField } from '../../src/cli/config.ts';
 import type { RepoConfig } from '../../src/config/repo-config.ts';
+import { registerRepos } from '../../src/config/repos.ts';
 import { openDatabase } from '../../src/db/database.ts';
 import { SqliteStateStore } from '../../src/db/sqlite-state-store.ts';
 import type { Database } from 'bun:sqlite';
@@ -231,6 +232,41 @@ describe('loadConfigFromState', () => {
     const loaded = await loadConfigFromState(store, 999);
     // Falls back to loadConfig defaults
     expect(loaded.azureDevOps.organization).toBe('your-org');
+  });
+
+  // With no persisted config, a container run previously fell through to
+  // loadConfig()'s placeholder coordinates ('your-org' / 'Your Project') and then
+  // 404'd looking its work item up in an organisation that does not exist.
+  // REPO_CONFIG is already passed to continue containers (docker.ts:51) — use it.
+  test('rebuilds from the repo registry when REPO_CONFIG is set and nothing is persisted', async () => {
+    const { store } = setupTempDir();
+    setEnv('AZURE_DEVOPS_PAT', 'env-pat');
+
+    registerRepos({
+      'config-fallback-fixture': {
+        url: 'https://example/_git/Fixture',
+        branch: 'master',
+        repoKey: 'FixtureRepo',
+        azureDevOps: {
+          organization: 'real-org',
+          project: 'Real Project',
+          repositoryId: 'real-id',
+          repositoryName: 'Real Repo',
+          areaPath: 'Real\\Area',
+        },
+        layout: { appRoot: 'Cloud', source: 'Cloud/Al', testAppRoot: 'Test', test: 'Test/Src' },
+        companions: {},
+      } as unknown as RepoConfig,
+    });
+    setEnv('REPO_CONFIG', 'config-fallback-fixture');
+
+    const loaded = await loadConfigFromState(store, 12345);
+
+    expect(loaded.azureDevOps.organization).toBe('real-org');
+    expect(loaded.azureDevOps.project).toBe('Real Project');
+    expect(loaded.repoKey).toBe('FixtureRepo');
+    // the placeholder that caused the 404 must not appear
+    expect(loaded.azureDevOps.organization).not.toBe('your-org');
   });
 
   // A resumed work item must keep the coordinates it started with, but must NOT
