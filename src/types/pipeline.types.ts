@@ -388,6 +388,13 @@ export interface StageTokenUsage {
 export interface ReviewVerdict {
   verdict: 'approve' | 'revise';
   feedback: string;
+  /** Instructions for the producer when `verdict === 'revise'`. */
+  revisionInstructions?: string;
+  // NOTE: `issues` is deliberately absent. PlanReview and CodeReview findings do
+  // not share a shape — one carries `description` + `relatedObject`, the other
+  // `comment` + `filePath` — and this file must not import agent output schemas
+  // (see the note on `planReviews`/`codeReviews` above). An agent that needs to
+  // read back its own findings narrows at the read site instead.
 }
 
 // ---------------------------------------------------------------------------

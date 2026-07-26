@@ -53,14 +53,17 @@ Launch **all 8 sub-agents in a single message** (one message, 8 tool calls) usin
 
 The `.md` file is the sub-agent's **system prompt** — stable instructions, identical every run. Your dispatch prompt is its **first user turn** — the per-run facts it has no other way to learn. Nothing else feeds it: a sub-agent sees neither your context nor another sub-agent's output.
 
-So **every one of the 8 dispatch prompts MUST carry all four values**, filled in from Step 1 — never left as literal placeholder tokens:
+So **every one of the 8 dispatch prompts MUST carry all five values**, filled in from Step 1 — never left as literal placeholder tokens:
 
 - `<BRANCH>` — the branch under review, so the sub-agent can run `git diff master...<BRANCH>`
 - `<FILE_LIST>` — the changed files
 - `<DEV_PLAN_SUMMARY>` — what the change was supposed to do
 - `<COMPILATION_ERRORS>` — compiler output, or `none`
+- `<PRIOR_FINDINGS>` — the **Prior Findings** block from your prompt verbatim, or `none` on the first iteration
 
 Dropping one degrades that sub-agent silently. `correctness-reviewer`'s `plan_compliance` output, for example, is meaningless without `<DEV_PLAN_SUMMARY>`.
+
+`<PRIOR_FINDINGS>` is what stops the loop from oscillating. Without it a sub-agent reviews each round as if it were the first, and can demand the reverse of what the previous round demanded without ever knowing it did. Forward it to all 8 — a reviewer that cannot see round N-1 cannot avoid contradicting it.
 
 Use this shape for each of the 8 prompts:
 
@@ -74,6 +77,15 @@ Compilation errors (if any): <COMPILATION_ERRORS>
 Start from `git diff master...<BRANCH>`, then read the changed files in full for
 context. Return your findings in the JSON format your instructions specify —
 JSON only, nothing before or after it.
+
+## Prior Review Rounds (critical + major)
+<PRIOR_FINDINGS>
+
+Treat the above as context to be reconciled, NOT as settled decisions. A prior
+round may have been wrong; if you think it was, say so in your finding text
+instead of silently re-asserting it. But do not contradict a prior round without
+noticing — if you are about to demand the reverse of what a previous round
+demanded, name that explicitly and justify it.
 
 ## Known AL Anti-Patterns
 <patterns routed to this domain — see below; omit this section if none apply>
@@ -92,7 +104,7 @@ Reproduce each routed pattern under the `## Known AL Anti-Patterns` heading with
 
 #### devils-advocate-reviewer
 
-It dispatches exactly like the other seven — same `Agent` call, same four values, no Read step and no special handling. Its blocking-vs-advisory treatment is decided in Step 4, not here; dispatch it the same way regardless of the mode you chose in Step 1.
+It dispatches exactly like the other seven — same `Agent` call, same five values, no Read step and no special handling. Its blocking-vs-advisory treatment is decided in Step 4, not here; dispatch it the same way regardless of the mode you chose in Step 1.
 
 Do not try to reference one sub-agent's findings in another's prompt — all 8 run in parallel and none can see another's output.
 

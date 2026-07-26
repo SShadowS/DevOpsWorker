@@ -1,6 +1,6 @@
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { PipelineConfig, PipelineState, PipelineContext, Stage } from '../../types/pipeline.types.ts';
+import type { PipelineConfig, PipelineState, PipelineContext, Stage, ReviewVerdict } from '../../types/pipeline.types.ts';
 import type { AgentConfig } from '../../types/agent.types.ts';
 import { CodeReviewSchema, type CodeReview } from './schema.ts';
 import { agentStage } from '../../pipeline/stage.ts';
@@ -13,7 +13,8 @@ import type { SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 
 const AGENT_DIR = dirname(fileURLToPath(import.meta.url));
 
-function createCodeReviewerConfig(config: PipelineConfig): AgentConfig<typeof CodeReviewSchema> {
+/** Exported for tests — buildPrompt is the §4.2 seam. */
+export function createCodeReviewerConfig(config: PipelineConfig): AgentConfig<typeof CodeReviewSchema> {
   return {
     name: 'code-reviewer',
     useClaudeCodePreset: true,
@@ -42,10 +43,45 @@ function createCodeReviewerConfig(config: PipelineConfig): AgentConfig<typeof Co
       const devPlan = state.devPlan!;
       const changeset = state.changeset!;
       const layout = ctx.config.layout;
-      const priorReviews = (state.codeReviews ?? []).slice(-2).map((r) => ({
+      const allReviews = state.codeReviews ?? [];
+
+      // Two windows, deliberately different sizes.
+      //
+      // The circuit breaker in CLAUDE.md Step 1 does a literal "last two entries"
+      // check on domainAnalyses — widening that window would change what it
+      // decides, so it stays at 2.
+      const circuitBreakerHistory = allReviews.slice(-2).map((r) => ({
         verdict: r.verdict,
         domainAnalyses: (r as { domainAnalyses?: unknown }).domainAnalyses,
       }));
+
+      // Prior findings, however, were being thrown away entirely: only verdict +
+      // domainAnalyses survived, so round N+1 could not see what round N demanded.
+      // Reviewers then contradicted each other across rounds — one round demanding
+      // a change the next round objected to — and the loop could not converge.
+      // Full history, not slice(-2): the observed oscillation spanned rounds 3–5,
+      // i.e. straddling the old window edge. Critical + major only keeps it small.
+      //
+      // `state.codeReviews` is typed `ReviewVerdict[]` — the common minimum —
+      // because pipeline.types.ts must not import agent output schemas. Every
+      // entry in it was written by THIS agent's `applyOutput`, so it is a
+      // CodeReview; narrow to the fields we need rather than widening the shared
+      // type with a shape PlanReview does not have.
+      const priorFindings = (allReviews as Array<ReviewVerdict & Partial<CodeReview>>)
+        .map((r, i) => ({
+          round: i + 1,
+          verdict: r.verdict,
+          issues: (r.issues ?? [])
+            .filter((issue) => issue.severity === 'critical' || issue.severity === 'major')
+            .map((issue) => ({
+              severity: issue.severity,
+              filePath: issue.filePath,
+              category: issue.category,
+              comment: issue.comment,
+            })),
+          revisionInstructions: r.revisionInstructions,
+        }))
+        .filter((r) => r.issues.length > 0 || r.revisionInstructions);
 
       return [
         `## Task`,
@@ -75,9 +111,25 @@ function createCodeReviewerConfig(config: PipelineConfig): AgentConfig<typeof Co
           : '',
         ``,
         `## Prior Review History (for circuit-breaker evaluation)`,
-        priorReviews.length
-          ? `${JSON.stringify(priorReviews, null, 2)}`
+        circuitBreakerHistory.length
+          ? `${JSON.stringify(circuitBreakerHistory, null, 2)}`
           : `(none — this is the first iteration; devils-advocate mode defaults to blocking)`,
+        ``,
+        `## Prior Findings (critical + major, all rounds) — forward these to every sub-agent`,
+        priorFindings.length
+          ? [
+              `${JSON.stringify(priorFindings, null, 2)}`,
+              ``,
+              `These are **context to be reconciled, not settled decisions.** A prior round`,
+              `may itself have been mistaken — if you or a sub-agent concludes a previous`,
+              `demand was wrong, say so explicitly in \`feedback\` rather than silently`,
+              `re-asserting it. What you must NOT do is contradict a prior round without`,
+              `noticing: demanding the reverse of round N-1 with no acknowledgement is the`,
+              `failure this history exists to prevent.`,
+              ``,
+              `Pass this block to all 8 sub-agents as \`<PRIOR_FINDINGS>\`.`,
+            ].join('\n')
+          : `(none — first iteration. Pass \`<PRIOR_FINDINGS>\` as "none" to every sub-agent.)`,
         ``,
         `Proceed per the orchestrator procedure in your CLAUDE.md: circuit-breaker check, parallel spawn of 8 subagents, synthesis into CodeReview. Use \`git diff master...${changeset.branchName}\` in Step 1.`,
       ].join('\n');
