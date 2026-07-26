@@ -41,23 +41,29 @@ describe('sub-agent frontmatter', () => {
     expect(offenders).toEqual([]);
   });
 
-  test('code-reviewer and plan-reviewer agents pin model: inherit (Phase 1A holds behaviour)', () => {
+  test('code-reviewer and plan-reviewer agents pin model: claude-sonnet-5 (Phase 1B activates real values)', () => {
     const scoped = files.filter(
       (f) => f.includes('code-reviewer') || f.includes('plan-reviewer'),
     );
     expect(scoped.length).toBe(12);
     for (const f of scoped) {
       const src = readFileSync(f, 'utf-8');
-      expect(src).toMatch(/^model:\s*inherit\s*$/m);
+      expect(src).toMatch(/^model:\s*claude-sonnet-5\s*$/m);
     }
   });
 
-  test('code-reviewer and plan-reviewer agents declare no tools key in Phase 1A', () => {
+  test('code-reviewer and plan-reviewer agents declare a scoped tools key as a comma-separated string (Phase 1B)', () => {
     const scoped = files.filter(
       (f) => f.includes('code-reviewer') || f.includes('plan-reviewer'),
     );
     for (const f of scoped) {
-      expect(frontmatterKeys(f)).not.toContain('tools');
+      expect(frontmatterKeys(f)).toContain('tools');
+      const src = readFileSync(f, 'utf-8');
+      const m = src.match(/^tools:\s*(.+)\s*$/m);
+      expect(m).not.toBeNull();
+      // Must be a comma-separated string, not a YAML array — a `[` here would mean
+      // the old broken `allowed_tools` array format crept back in under the new key.
+      expect(m![1]).not.toContain('[');
     }
   });
 });

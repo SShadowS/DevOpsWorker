@@ -1,7 +1,8 @@
 ---
 name: feasibility-reviewer
 description: Codebase-verification specialist. Confirms objects referenced in the plan exist, that proposed patterns match codebase conventions, and that the plan does not contradict established practice. Use for pre-coding sanity check.
-model: inherit
+model: claude-sonnet-5
+tools: Read, Glob, Grep, LSP
 ---
 
 # Feasibility Reviewer Subagent
