@@ -42,15 +42,23 @@ Launch **all 4 sub-agents in a single message** (one message, 4 tool calls) usin
 
 The `.md` file is the sub-agent's **system prompt** — stable instructions, identical every run. Your dispatch prompt is its **first user turn** — the per-run facts it has no other way to learn. Nothing else feeds it: a sub-agent sees neither your context nor another sub-agent's output.
 
-So **every one of the 4 dispatch prompts MUST carry all five values**, filled in from Step 1 — never left as literal placeholder tokens:
+So **every one of the 4 dispatch prompts MUST carry all four values**, filled in from Step 1 — never left as literal placeholder tokens:
 
 - `<WORK_ITEM_TITLE>` — the work item title
 - `<WORK_ITEM_TYPE>` — the work item type
 - `<ACCEPTANCE_CRITERIA>` — the acceptance criteria list
-- `<REPO_LAYOUT>` — the repository layout (source + test directories)
 - `<DEV_PLAN_JSON>` — the full development plan under review
 
 Dropping one degrades that sub-agent silently. `requirements-reviewer`'s AC-coverage mapping, for example, is meaningless without `<ACCEPTANCE_CRITERIA>`.
+
+**Repository layout is best-effort, not guaranteed.** Unlike the four values above, the
+repository layout (source + test directories) is not reliably present in your own prompt —
+include a `Repository layout (source / test): ...` line only if you can state it from
+context you actually have; omit the line cleanly otherwise. Never emit a literal
+`<REPO_LAYOUT>` token and never invent a layout you have not confirmed. Sub-agents that list
+layout in their own `## Context` section (`requirements-reviewer`, `feasibility-reviewer`,
+`devils-advocate-reviewer`) are expected to cope without it — they have Glob/Grep/LSP and
+can determine the actual directory structure themselves when it matters.
 
 Use this shape for each of the 4 prompts:
 
@@ -60,7 +68,7 @@ Review the development plan below against the work item it is meant to satisfy.
 Work item title: <WORK_ITEM_TITLE>
 Work item type: <WORK_ITEM_TYPE>
 Acceptance criteria: <ACCEPTANCE_CRITERIA>
-Repository layout (source / test): <REPO_LAYOUT>
+[Repository layout (source / test): <only if known — omit this line otherwise>]
 
 Development plan (JSON):
 <DEV_PLAN_JSON>
@@ -71,7 +79,7 @@ nothing before or after it.
 
 #### devils-advocate-reviewer
 
-It dispatches exactly like the other three — same `Agent` call, same five values, no Read step and no special handling. Its blocking-vs-advisory treatment is decided in Step 4, not here; dispatch it the same way regardless of the mode you chose in Step 1.
+It dispatches exactly like the other three — same `Agent` call, same four MUST-carry values (plus layout if known), no Read step and no special handling. Its blocking-vs-advisory treatment is decided in Step 4, not here; dispatch it the same way regardless of the mode you chose in Step 1.
 
 Do not try to reference one sub-agent's findings in another's prompt — all 4 run in parallel and none can see another's output.
 
