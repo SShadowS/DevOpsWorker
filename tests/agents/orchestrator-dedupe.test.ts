@@ -32,8 +32,7 @@ describe('orchestrators do not inline sub-agent prompts', () => {
     expect(readFileSync(CODE_REVIEWER, 'utf-8')).not.toContain('general-purpose');
   });
 
-  // Owned by the sibling plan-reviewer conversion task; flip to `test` there.
-  test.skip('plan-reviewer does not dispatch general-purpose', () => {
+  test('plan-reviewer does not dispatch general-purpose', () => {
     expect(readFileSync(PLAN_REVIEWER, 'utf-8')).not.toContain('general-purpose');
   });
 });
