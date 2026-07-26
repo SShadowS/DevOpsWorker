@@ -78,7 +78,7 @@ export function MobileSessionCard({ session }: Props) {
       </div>
 
       <div class="mobile-card__bar">
-        <div class="mobile-card__bar-fill" style={{ width: `${pct}%` }} />
+        <div class="mobile-card__bar-fill" style={{ width: '100%', transform: `scaleX(${pct / 100})` }} />
       </div>
 
       <div class="mobile-card__meta">

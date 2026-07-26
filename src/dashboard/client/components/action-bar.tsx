@@ -222,7 +222,14 @@ export function ActionBar({ session, rewindStage }: Props) {
         );
       })}
       {actionError.value?.workItemId === session.workItemId && (
-        <span class="action-error" onClick={() => { actionError.value = null; }}>{actionError.value.message}</span>
+        <button
+          type="button"
+          class="action-error"
+          onClick={() => { actionError.value = null; }}
+          aria-label="Dismiss error"
+        >
+          {actionError.value.message}
+        </button>
       )}
     </div>
   );

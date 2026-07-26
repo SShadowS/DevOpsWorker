@@ -226,10 +226,15 @@ export function EnvironmentPanel({ session }: Props) {
       )}
 
       {envError.value && (
-        <div class="env-panel__error" onClick={() => { envError.value = null; }}>
+        <button
+          type="button"
+          class="env-panel__error"
+          onClick={() => { envError.value = null; }}
+          aria-label="Dismiss error"
+        >
           {envError.value}
-          <span class="env-panel__error-dismiss" title="Dismiss">x</span>
-        </div>
+          <span class="env-panel__error-dismiss" aria-hidden="true">x</span>
+        </button>
       )}
     </div>
   );

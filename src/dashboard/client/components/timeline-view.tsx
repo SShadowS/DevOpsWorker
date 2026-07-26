@@ -28,12 +28,16 @@ export function TimelineView({ session }: Props) {
       </div>
       <div class="timeline__bars">
         {stages.map((stage, i) => {
-          const pct = maxDuration > 0 ? (stage.durationMs / maxDuration) * 100 : 0;
+          // Floor at 0.5% so a near-zero stage still shows a sliver. This used
+          // to be `min-width: 2px` in CSS, which stops applying once the bar is
+          // full-width and scaled rather than sized.
+          const raw = maxDuration > 0 ? (stage.durationMs / maxDuration) * 100 : 0;
+          const pct = Math.max(raw, 0.5);
           return (
             <div key={`${stage.name}-${i}`} class="timeline__row">
               <span class="timeline__label">{stage.name}</span>
               <div class="timeline__track">
-                <div class="timeline__bar" style={{ width: `${pct}%`, backgroundColor: stageColor(stage.name) }} />
+                <div class="timeline__bar" style={{ width: '100%', transform: `scaleX(${pct / 100})`, backgroundColor: stageColor(stage.name) }} />
               </div>
               <span class="timeline__duration">{formatDuration(stage.durationMs)}</span>
             </div>

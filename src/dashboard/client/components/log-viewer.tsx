@@ -81,7 +81,9 @@ export function LogViewer() {
     <div class="log-viewer">
       <div class="log-viewer__header">
         <h2>Logs — {viewer.title}</h2>
-        <button class="log-viewer__close" onClick={closeLogViewer} title="Close">✕</button>
+        {/* aria-label, not title: the label is "✕" to a screen reader otherwise, and
+            title is not reliably announced or reachable without a mouse. */}
+        <button class="log-viewer__close" onClick={closeLogViewer} aria-label="Close logs" title="Close">✕</button>
       </div>
       <div class="log-viewer__body">
         <div class="log-viewer__sidebar">
