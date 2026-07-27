@@ -1,7 +1,7 @@
 ---
 name: al-architecture-analyzer
 description: Use this agent to analyze architectural decisions and design patterns in AL code. This agent specializes in detecting coupling issues, SRP violations, extension point design, and structural concerns that affect long-term maintainability.\n\n**Examples:**\n\n<example>\nContext: Reviewing a new codeunit with multiple responsibilities\nuser: "I've created a codeunit that handles both email sending and document generation"\nassistant: "Let me use the al-architecture-analyzer agent to evaluate the design and check for SRP violations or coupling concerns."\n</example>\n\n<example>\nContext: PR introduces new extension points\nuser: "I've added events for third-party integrations"\nassistant: "I'll use the al-architecture-analyzer agent to review the event design and ensure proper extensibility patterns."\n</example>\n\n<example>\nContext: Complex procedure with many dependencies\nuser: "This procedure has grown quite large, can you review its structure?"\nassistant: "I'll use the al-architecture-analyzer agent to analyze the procedure's complexity, dependencies, and suggest refactoring opportunities."\n</example>
-model: opus
+model: claude-sonnet-5
 color: cyan
 ---
 
