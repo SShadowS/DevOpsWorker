@@ -19,8 +19,8 @@
  * lets each arm carry its own env.
  *
  * Usage:
- *   bun scripts/pr-review-tooling-ab.ts --pr 52081 --runs 2            # dry-run plan
- *   bun scripts/pr-review-tooling-ab.ts --pr 52081 --runs 2 --go       # execute
+ *   bun scripts/pr-review-tooling-ab.ts --pr 52081                     # dry-run plan
+ *   bun scripts/pr-review-tooling-ab.ts --pr 52081 --go                # execute (1 run/arm)
  *   bun scripts/pr-review-tooling-ab.ts --pr 52081 --collect --since <iso>
  *
  * Posting is OFF unless --post is passed. Nothing reaches the PR by default.
@@ -29,7 +29,7 @@ import { connectStores } from '../src/db/connect-stores.ts';
 import { loadManifest, applyOverlayRegistries } from '../src/overlay/index.ts';
 import { findRepoByRepositoryId, repos, getRepoConfig } from '../src/config/repos.ts';
 import { buildConfigFromRepo } from '../src/cli/config.ts';
-import { buildDockerArgs, createVolume, removeContainer, spawnContainer } from '../src/sdk/docker.ts';
+import { buildDockerArgs, createVolume, removeContainer, spawnContainer, containerDatabaseUrl } from '../src/sdk/docker.ts';
 import { getPrReviewContainerEnv } from '../src/cli/watch/container-dispatcher.ts';
 import { summarizeSubAgents, type SubAgentRunUsage } from '../src/cli/pr-review-metrics.ts';
 
@@ -40,7 +40,7 @@ function arg(name: string, def = ''): string {
 const has = (name: string) => process.argv.includes(`--${name}`);
 
 const prId = parseInt(arg('pr', '0'), 10);
-const runs = parseInt(arg('runs', '2'), 10);
+const runs = parseInt(arg('runs', '1'), 10);
 const post = has('post');
 const imageName = arg('image', 'devopsworker:latest');
 const stateVolume = arg('state-volume', 'do-pipeline-state');
@@ -56,7 +56,7 @@ const ARMS: Arm[] = [
 ];
 
 applyOverlayRegistries(await loadManifest());
-const { sql, prReviewStore } = await connectStores();
+const { prReviewStore } = await connectStores();
 
 // ---------------------------------------------------------------------------
 // collect
@@ -104,6 +104,54 @@ if (has('collect')) {
   process.exit(0);
 }
 
+/**
+ * Wait for the row a finished container should have written.
+ *
+ * Polls rather than reading once: the container's own DB write races the
+ * `docker run` exit by a moment. Returns the row, or null once the window
+ * closes — which the caller treats as fatal, not as something to retry past.
+ */
+async function waitForRow(pr: number, since: string, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const rows = await prReviewStore.listRecent(20);
+    const hit = rows.find(r => r.prId === pr && r.createdAt >= since);
+    if (hit) return hit;
+    await new Promise(res => setTimeout(res, 2000));
+  }
+  return null;
+}
+
+/**
+ * Prove the containers' write path works BEFORE spending a review on it.
+ *
+ * Runs a throwaway container on the same network with the same DATABASE_URL and
+ * has it count rows. Costs seconds and no tokens; catches the exact failure that
+ * wasted ~$60.
+ */
+async function preflightDb(dbUrl: string): Promise<boolean> {
+  const proc = Bun.spawn([
+    'docker', 'run', '--rm', '--network', 'pipeline-net',
+    '-e', `DATABASE_URL=${dbUrl}`,
+    '--entrypoint', 'bun', imageName,
+    '-e', `const postgres=(await import('postgres')).default;
+           const sql=postgres(process.env.DATABASE_URL);
+           const r=await sql\`SELECT count(*)::int AS n FROM pr_reviews\`;
+           console.log('PREFLIGHT_OK rows=' + r[0].n); await sql.end();`,
+  ], { stdout: 'pipe', stderr: 'pipe' });
+  const out = await new Response(proc.stdout).text();
+  const err = await new Response(proc.stderr).text();
+  await proc.exited;
+  if (out.includes('PREFLIGHT_OK')) {
+    console.log(`[ab] preflight: ${out.trim().split(String.fromCharCode(10)).pop()}`);
+    return true;
+  }
+  console.error(`[ab] preflight FAILED — containers cannot reach the database.`);
+  const NL = String.fromCharCode(10);
+  console.error((err || out).trim().split(NL).slice(-6).join(NL));
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // plan / execute
 // ---------------------------------------------------------------------------
@@ -140,6 +188,14 @@ if (!has('go')) {
   process.exit(0);
 }
 
+// Prove the containers' write path BEFORE spending a review on it. Costs
+// seconds and no tokens.
+const containerDbUrl = containerDatabaseUrl(process.env['DATABASE_URL'] ?? '');
+if (!await preflightDb(containerDbUrl)) {
+  console.error('[ab] refusing to spend a review until the write path is proven.');
+  process.exit(1);
+}
+
 const cutoff = new Date().toISOString();
 console.log(`[ab] cutoff=${cutoff}\n`);
 
@@ -156,6 +212,8 @@ for (let r = 0; r < runs; r++) {
 
     const env = {
       ...getPrReviewContainerEnv(),
+      // Must be the compose-internal host: see containerDatabaseUrl.
+      DATABASE_URL: containerDbUrl,
       PR_REVIEW_NO_POST: post ? '' : '1',
       PR_REVIEW_SUBAGENT_MODEL: armCfg.model,
       PR_REVIEW_SUBAGENT_TOOL_RULE: armCfg.toolRule ? '1' : '',
@@ -175,11 +233,32 @@ for (let r = 0; r < runs; r++) {
     const nameIdx = args.indexOf('--name');
     if (nameIdx !== -1 && args[nameIdx + 1]) args[nameIdx + 1] = container;
 
+    const startedAt = new Date().toISOString();
     const code = await spawnContainer(args);
-    console.log(`[ab]     exit=${code}`);
+
+    // HARD GATE. A review that finishes but records nothing is worse than one
+    // that fails: it costs the same and yields nothing, and the store swallows
+    // connection errors so it looks like success. Eight arms once ran to
+    // completion against an unreachable DB — ~$60, zero rows. Never spend a
+    // second run without proof the first was recorded.
+    const recorded = await waitForRow(prId, startedAt);
+    if (!recorded) {
+      console.error(
+        `\n[ab] ABORTING after run ${n}/${total} (${armCfg.label}, exit=${code}).\n` +
+        `[ab] The container finished but no pr_reviews row appeared for PR ${prId}.\n` +
+        `[ab] Fix the recording path before spending another run — check DATABASE_URL\n` +
+        `[ab] inside the container resolves to the compose service, not localhost.`,
+      );
+      process.exit(1);
+    }
+    console.log(
+      `[ab]     exit=${code}  recorded id=${recorded.id}  $${(recorded.costUsd ?? 0).toFixed(2)}  ` +
+      `turns=${recorded.turns}  bash=${recorded.toolCalls?.['Bash'] ?? 0}  ` +
+      `read=${recorded.toolCalls?.['Read'] ?? 0}  lsp=${recorded.toolCalls?.['LSP'] ?? 0}`,
+    );
   }
 }
 
 console.log(`\n[ab] done. Collect with:`);
 console.log(`  bun scripts/pr-review-tooling-ab.ts --pr ${prId} --collect --since ${cutoff}`);
-await sql.end();
+process.exit(0);

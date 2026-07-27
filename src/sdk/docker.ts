@@ -43,9 +43,16 @@ export function buildDockerArgs(config: ContainerConfig): string[] {
     if (value) args.push('-e', `${key}=${value}`);
   }
 
-  // Pass DATABASE_URL so containers connect to PostgreSQL
-  const databaseUrl = process.env['DATABASE_URL'];
-  if (databaseUrl) args.push('-e', `DATABASE_URL=${databaseUrl}`);
+  // Pass DATABASE_URL so containers connect to PostgreSQL.
+  //
+  // Only when the caller did not supply one. Docker takes the LAST `-e` for a
+  // given key, so appending unconditionally here silently overrode anything the
+  // caller put in `config.env` — a caller that had deliberately rewritten the
+  // URL for in-container use got the host value back and could not tell.
+  if (!('DATABASE_URL' in config.env)) {
+    const databaseUrl = process.env['DATABASE_URL'];
+    if (databaseUrl) args.push('-e', `DATABASE_URL=${databaseUrl}`);
+  }
 
   // Repo-specific env vars
   args.push('-e', `REPO_CONFIG=${config.repoKey}`);
@@ -130,4 +137,24 @@ export async function spawnContainer(args: string[]): Promise<number> {
     stderr: 'inherit',
   });
   return await proc.exited;
+}
+
+/**
+ * Rewrite a host-facing DATABASE_URL for use INSIDE a spawned container.
+ *
+ * `.env` points at `localhost:5432` because that is correct for anything run on
+ * the host. Handing that value to a container points the container at itself:
+ * the work completes, the store swallows the connection failure, and nothing is
+ * ever written. The watcher never hits this — it runs inside compose and already
+ * holds `postgres:5432` — so only host-launched tooling needs the rewrite.
+ *
+ * Learned the expensive way: eight PR-review arms ran to completion against an
+ * unreachable database. ~$60, zero rows, and nothing in the logs to say so.
+ */
+export function containerDatabaseUrl(hostUrl: string, service = 'postgres'): string {
+  if (!hostUrl) return hostUrl;
+  return hostUrl.replace(
+    /@(localhost|127\.0\.0\.1|host\.docker\.internal)(:\d+)?/,
+    (_m, _h, port) => `@${service}${port ?? ''}`,
+  );
 }
