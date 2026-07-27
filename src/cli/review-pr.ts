@@ -61,6 +61,80 @@ export function maybeOverrideSubAgentModel(): number {
   return modified;
 }
 
+/**
+ * The tool-discipline block injected by `maybeInjectToolRule`.
+ *
+ * Framed as routing ("use X for Y"), never as prohibition. Negative framing has
+ * been measured on this codebase to backfire — telling an agent what NOT to do
+ * suppresses the tool entirely rather than redirecting it.
+ */
+export const SUBAGENT_TOOL_RULE = `
+## Reading code — use the right tool
+
+You have \`Read\`, \`Grep\`, \`Glob\` and a running AL Language Server (\`LSP\`).
+Reach for those first; \`Bash\` is for commands with no tool equivalent (\`git\`,
+\`az\`).
+
+| To... | Use |
+|---|---|
+| Read part of a file | \`Read\` with \`offset\`/\`limit\` |
+| Find text | \`Grep\` |
+| Find files | \`Glob\` |
+| Jump to a definition | \`LSP goToDefinition\` |
+| Find every usage of a symbol | \`LSP findReferences\` |
+| Check a type, signature or table relation | \`LSP hover\` |
+| List an object's procedures/fields | \`LSP documentSymbol\` |
+| Find callers of a procedure | \`LSP incomingCalls\` |
+
+\`Read\` returns the same bytes as \`sed -n\` but the harness can track and
+de-duplicate it, so re-reading a file you already opened is nearly free —
+whereas each \`sed\`/\`cat\` result is fresh text that stays in your context for
+every later turn. On a large AL repo that difference dominates the cost of a
+review.
+
+LSP answers from the compiled symbol table, so it resolves what text search
+cannot: aliases, cross-file references, and inherited members.
+`;
+
+/**
+ * EVAL-ONLY: append a tool-discipline section to every pr-reviewer sub-agent.
+ *
+ * The 7 sub-agents inherit `Read`/`Grep`/`Glob`/`LSP` from the orchestrator's
+ * `allowedTools`, but nothing in their prompts steers them there. Measured on
+ * PR 52081: 207 Bash calls of which 168 were `sed`/`cat`/`head`/`tail` file
+ * reads, 23 `Read` calls, and ZERO LSP calls — 10.0M cache-read tokens on a
+ * two-file diff, $16.53.
+ *
+ * Guarded so this is a TRUE NO-OP unless `PR_REVIEW_SUBAGENT_TOOL_RULE=1`.
+ * Idempotent — appends only to files that don't already carry the block.
+ *
+ * Returns the number of files modified (0 when the env var is unset).
+ */
+export function maybeInjectToolRule(): number {
+  if (process.env['PR_REVIEW_SUBAGENT_TOOL_RULE'] !== '1') return 0;
+
+  const cliDir = dirname(fileURLToPath(import.meta.url));
+  const agentsDir = resolve(cliDir, '..', 'agents', 'pr-reviewer', '.claude', 'agents');
+  if (!existsSync(agentsDir)) {
+    console.log(`[eval] PR_REVIEW_SUBAGENT_TOOL_RULE set but sub-agent dir not found at ${agentsDir} — skipping`);
+    return 0;
+  }
+
+  const marker = '## Reading code — use the right tool';
+  let modified = 0;
+  for (const file of readdirSync(agentsDir)) {
+    if (!file.endsWith('.md')) continue;
+    const path = join(agentsDir, file);
+    const content = readFileSync(path, 'utf-8');
+    if (content.includes(marker)) continue;
+    writeFileSync(path, `${content.trimEnd()}\n${SUBAGENT_TOOL_RULE}`);
+    modified++;
+  }
+
+  console.log(`[eval] injected tool-usage rule into ${modified} sub-agent files`);
+  return modified;
+}
+
 export async function reviewPR(args: string[]): Promise<void> {
   let prId: number | undefined;
   let repoId: string | undefined;
@@ -94,6 +168,7 @@ export async function reviewPR(args: string[]): Promise<void> {
   // frontmatter in the pr-reviewer sub-agents so the A/B model arm takes effect.
   // No-op by default — production runs leave this unset.
   maybeOverrideSubAgentModel();
+  maybeInjectToolRule();
 
   const repo = findRepoByRepositoryId(repoId);
   if (!repo) {

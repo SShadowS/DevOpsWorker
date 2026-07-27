@@ -70,6 +70,11 @@ export function getContainerEnv(): Record<string, string> {
     DATABASE_URL: process.env['DATABASE_URL'] ?? '',
     DISCORD_WEBHOOK_URL: process.env['DISCORD_WEBHOOK_URL'] ?? '',
     PR_REVIEW_NO_POST: process.env['PR_REVIEW_NO_POST'] ?? '',
+    // EVAL-ONLY A/B arms (no-ops when unset). Forwarded here because the
+    // allowlist is the only route into a spawned container — a var the eval
+    // hooks read but that is not listed silently does nothing, with no error.
+    PR_REVIEW_SUBAGENT_MODEL: process.env['PR_REVIEW_SUBAGENT_MODEL'] ?? '',
+    PR_REVIEW_SUBAGENT_TOOL_RULE: process.env['PR_REVIEW_SUBAGENT_TOOL_RULE'] ?? '',
     // Git identity inside pipeline containers. Email must be authorized in the
     // AL Object ID Ninja backend app pool; name marks commits as AI-made.
     GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',
