@@ -31,7 +31,7 @@ import { findRepoByRepositoryId, repos, getRepoConfig } from '../src/config/repo
 import { buildConfigFromRepo } from '../src/cli/config.ts';
 import { buildDockerArgs, createVolume, removeContainer, spawnContainer, containerDatabaseUrl } from '../src/sdk/docker.ts';
 import { getPrReviewContainerEnv } from '../src/cli/watch/container-dispatcher.ts';
-import { summarizeSubAgents, type SubAgentRunUsage } from '../src/cli/pr-review-metrics.ts';
+import { summarizeSubAgents, isAtOrAfter, type SubAgentRunUsage } from '../src/cli/pr-review-metrics.ts';
 
 function arg(name: string, def = ''): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -55,6 +55,16 @@ const ARMS: Arm[] = [
   { label: 'sonnet+rule',    model: 'claude-sonnet-5', toolRule: true  },
 ];
 
+// --arms lets a canary run ONE arm, confirm it recorded, then continue with the
+// rest. The post-run gate would catch a failure anyway, but on a first outing
+// after a recording bug, proving it by hand costs one run and settles it.
+const onlyArms = arg('arms').split(',').map(a => a.trim()).filter(Boolean);
+const SELECTED = onlyArms.length > 0 ? ARMS.filter(a => onlyArms.includes(a.label)) : ARMS;
+if (SELECTED.length === 0) {
+  console.error(`No arm matched --arms "${onlyArms.join(',')}". Known: ${ARMS.map(a => a.label).join(', ')}`);
+  process.exit(1);
+}
+
 applyOverlayRegistries(await loadManifest());
 const { prReviewStore } = await connectStores();
 
@@ -66,7 +76,7 @@ if (has('collect')) {
   if (!since) { console.error('--collect requires --since <iso>'); process.exit(1); }
 
   const rows = await prReviewStore.listRecent(200);
-  const mine = rows.filter(r => r.prId === prId && r.createdAt >= since);
+  const mine = rows.filter(r => r.prId === prId && isAtOrAfter(r.createdAt, since));
   if (mine.length === 0) { console.log('No rows yet.'); process.exit(0); }
 
   // Arm identity is not stored on the row, so recover it from what the arm
@@ -115,7 +125,7 @@ async function waitForRow(pr: number, since: string, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const rows = await prReviewStore.listRecent(20);
-    const hit = rows.find(r => r.prId === pr && r.createdAt >= since);
+    const hit = rows.find(r => r.prId === pr && isAtOrAfter(r.createdAt, since));
     if (hit) return hit;
     await new Promise(res => setTimeout(res, 2000));
   }
@@ -176,10 +186,10 @@ for (const k of repoKeys) {
 }
 if (!repo) { console.error(`Could not locate PR #${prId} in any registered repo`); process.exit(1); }
 
-const total = ARMS.length * runs;
-console.log(`[ab] ${ARMS.length} arms × ${runs} runs = ${total} reviews`);
+const total = SELECTED.length * runs;
+console.log(`[ab] ${SELECTED.length} arm(s) × ${runs} run(s) = ${total} reviews`);
 console.log(`[ab] posting to the PR: ${post ? 'YES' : 'no (PR_REVIEW_NO_POST=1)'}`);
-for (const a of ARMS) {
+for (const a of SELECTED) {
   console.log(`       ${a.label.padEnd(14)} model=${a.model || '(pinned opus)'} toolRule=${a.toolRule}`);
 }
 
@@ -201,7 +211,7 @@ console.log(`[ab] cutoff=${cutoff}\n`);
 
 let n = 0;
 for (let r = 0; r < runs; r++) {
-  for (const armCfg of ARMS) {
+  for (const armCfg of SELECTED) {
     n++;
     const container = `pr-ab-${prId}-${armCfg.label.replace(/\W+/g, '')}-${r}`;
     const volume = `pr-ab-${prId}-${r}-${armCfg.label.replace(/\W+/g, '')}`;

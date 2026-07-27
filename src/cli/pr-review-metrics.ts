@@ -147,3 +147,23 @@ export function summarizeSubAgents(
 
   return stats.sort((a, b) => b.totalCostUsd - a.totalCostUsd);
 }
+
+/**
+ * Is a stored timestamp at or after a given instant?
+ *
+ * Postgres renders `created_at::text` as `2026-07-27 09:44:02.345483+00` — a
+ * SPACE separator and a `+00` offset. `Date.toISOString()` produces
+ * `2026-07-27T09:45:19.727Z`. Comparing those as strings silently always answers
+ * false, because ' ' (0x20) sorts below 'T' (0x54) at index 10 — so a
+ * "did my run record?" check built on `>=` reports "no" for every row that
+ * exists. Parse both to instants instead.
+ *
+ * Returns false when either value is unparseable, so a malformed timestamp reads
+ * as "not found" rather than silently matching everything.
+ */
+export function isAtOrAfter(storedTimestamp: string, sinceInstant: string): boolean {
+  const a = Date.parse(storedTimestamp);
+  const b = Date.parse(sinceInstant);
+  if (Number.isNaN(a) || Number.isNaN(b)) return false;
+  return a >= b;
+}

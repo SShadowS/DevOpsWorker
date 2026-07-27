@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { categorizeCommand, summarizeRuns, diffSummaries, summarizeSubAgents, type RunMetrics } from '../../src/cli/pr-review-metrics.ts';
+import { categorizeCommand, summarizeRuns, diffSummaries, summarizeSubAgents, isAtOrAfter, type RunMetrics } from '../../src/cli/pr-review-metrics.ts';
 
 describe('categorizeCommand', () => {
   test('classifies MCP-result parsing', () => {
@@ -123,5 +123,48 @@ describe('summarizeSubAgents', () => {
       { 'a': { turns: 1, tokens: { input: 1, output: 0, cacheRead: 0, cacheCreation: 0 }, toolCalls: {} } },
     ]);
     expect(stats[0]!.totalCostUsd).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isAtOrAfter
+//
+// Postgres `created_at::text` uses a SPACE separator and a `+00` offset;
+// `toISOString()` uses `T` and `Z`. String-comparing them always answers false
+// (' ' 0x20 < 'T' 0x54 at index 10), so a "did my run record?" gate built on
+// `>=` reports "no" for every row that exists — which is exactly what aborted a
+// benchmark whose row had saved correctly.
+// ---------------------------------------------------------------------------
+
+describe('isAtOrAfter', () => {
+  const PG = '2026-07-27 09:44:02.345483+00';
+
+  test('a Postgres timestamp after an ISO instant compares true', () => {
+    expect(isAtOrAfter(PG, '2026-07-27T09:28:14.123Z')).toBe(true);
+  });
+
+  test('the naive string comparison this replaces gets it wrong', () => {
+    // Kept as an executable record of the bug.
+    expect(PG >= '2026-07-27T09:28:14.123Z').toBe(false);
+  });
+
+  test('before the instant is false', () => {
+    expect(isAtOrAfter(PG, '2026-07-27T10:00:00.000Z')).toBe(false);
+  });
+
+  test('the same instant in the two formats is at-or-after', () => {
+    expect(isAtOrAfter('2026-07-27 09:44:02.345483+00', '2026-07-27T09:44:02.345Z')).toBe(true);
+  });
+
+  test('respects a non-UTC offset rather than comparing wall-clock text', () => {
+    // 12:00+02:00 is 10:00Z — after 09:00Z despite "12" vs "09" reading later.
+    expect(isAtOrAfter('2026-07-27 12:00:00+02', '2026-07-27T09:00:00.000Z')).toBe(true);
+    expect(isAtOrAfter('2026-07-27 12:00:00+02', '2026-07-27T11:00:00.000Z')).toBe(false);
+  });
+
+  test('unparseable input reads as "not found", never as a match', () => {
+    expect(isAtOrAfter('not a date', '2026-07-27T09:00:00.000Z')).toBe(false);
+    expect(isAtOrAfter(PG, 'nonsense')).toBe(false);
+    expect(isAtOrAfter('', '')).toBe(false);
   });
 });
