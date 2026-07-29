@@ -215,6 +215,76 @@ export async function fetchReviewThreadsRaw(
   return threads;
 }
 
+// ---------------------------------------------------------------------------
+// Anchored thread writer (public — posts/updates/replies for inline findings)
+// ---------------------------------------------------------------------------
+
+export interface InlineThreadArgs {
+  filePath: string;
+  line: number;
+  content: string;
+}
+
+/**
+ * Open a comment thread anchored to a line on the source-branch side of the diff.
+ *
+ * Status is `active` and never anything else: an inline finding is something a
+ * human decides about. Pre-closing it (as `postPRComment` does with status 4)
+ * would hide it from the PR's unresolved-comments count.
+ */
+export async function postInlineThread(
+  prId: number,
+  args: InlineThreadArgs,
+  config: PipelineConfig,
+): Promise<void> {
+  const filePath = args.filePath.startsWith('/') ? args.filePath : `/${args.filePath}`;
+  await adoFetch<unknown>(
+    config.azureDevOps,
+    `git/repositories/${config.azureDevOps.repositoryId}/pullrequests/${prId}/threads?api-version=7.0`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        comments: [{ content: args.content, commentType: 1 }],
+        status: 'active',
+        threadContext: {
+          filePath,
+          rightFileStart: { line: args.line, offset: 1 },
+          rightFileEnd: { line: args.line, offset: 1 },
+        },
+      }),
+    },
+  );
+}
+
+/** Rewrite an existing comment in place — used when a finding is raised again. */
+export async function updateThreadComment(
+  prId: number,
+  threadId: number,
+  commentId: number,
+  content: string,
+  config: PipelineConfig,
+): Promise<void> {
+  await adoFetch<unknown>(
+    config.azureDevOps,
+    `git/repositories/${config.azureDevOps.repositoryId}/pullrequests/${prId}/threads/${threadId}/comments/${commentId}?api-version=7.0`,
+    { method: 'PATCH', body: JSON.stringify({ content }) },
+  );
+}
+
+/** Add a reply. Used for "not detected in review of <date>" — never closes the thread. */
+export async function appendToThread(
+  prId: number,
+  threadId: number,
+  content: string,
+  config: PipelineConfig,
+): Promise<void> {
+  await adoFetch<unknown>(
+    config.azureDevOps,
+    `git/repositories/${config.azureDevOps.repositoryId}/pullrequests/${prId}/threads/${threadId}/comments?api-version=7.0`,
+    { method: 'POST', body: JSON.stringify({ content, commentType: 1 }) },
+  );
+}
+
 /**
  * Post a comment thread on a pull request.
  * Uses status=4 (closed) so it shows as informational without requiring resolution.
