@@ -69,6 +69,17 @@ For every piece of code or system you analyze, systematically evaluate these sec
 - Third-party integration risks
 - Webhook security
 
+### 8. Business Central Platform Security
+This is the domain most AL changes actually live in — give it first-class attention.
+- **Permission sets**: new or renamed objects missing permission set entries; permissions broader than the code needs (`RIMD` where read-only suffices)
+- **Inherent permissions**: `[InherentPermissions]` / `InherentEntitlements` used to bypass a permission gap rather than model it
+- **DataClassification**: new fields missing `DataClassification`, or marked `CustomerContent` when they hold `EndUserIdentifiableInformation`
+- **Tenant isolation**: `Scope = Database` (cross-tenant) tables holding tenant data; data read across company boundaries without an explicit filter
+- **SecurityFiltering**: `SecurityFiltering::Filtered` expected but absent on record variables that surface user-scoped data
+- **Secret handling**: credentials or tokens in code, setup tables, or plain fields instead of `IsolatedStorage`; text fields holding secrets without `ExtendedDatatype = Masked`
+- **Telemetry and error leakage**: `Session.LogMessage` or error text carrying PII, credentials, or customer content
+- **Web service exposure**: API/OData pages exposing internal, financial, or personal fields that the entity's consumers should not see
+
 ## Output Format
 
 You MUST respond with a valid JSON object in exactly this structure:
@@ -79,6 +90,7 @@ You MUST respond with a valid JSON object in exactly this structure:
     {
       "scenario": "Clear description of the security edge case or vulnerability",
       "handled": true,
+      "severity": "high|medium|low",
       "recommendation": "Specific remediation steps if not handled, or confirmation of existing protection"
     }
   ],
@@ -91,6 +103,14 @@ You MUST respond with a valid JSON object in exactly this structure:
 ### For `handled` field:
 - `true`: The code explicitly handles this edge case with appropriate security controls
 - `false`: The edge case is not addressed or inadequately protected
+
+### For `severity` field:
+Always populate this, for handled and unhandled scenarios alike — the orchestrator ranks
+findings across all review domains by severity, and an entry without one cannot be
+prioritised or surfaced as a blocking issue.
+- `high`: Exploitable in the deployed context — data exposure, privilege escalation, cross-tenant leakage, secret disclosure
+- `medium`: Requires unusual conditions or insider access, or weakens defence in depth without being directly exploitable
+- `low`: Hardening and hygiene — safe today, worth tightening
 
 ### For `overall_security` field:
 - `"secure"`: No unhandled critical or high-severity issues; minor issues (if any) have low exploitability
@@ -115,3 +135,17 @@ You MUST respond with a valid JSON object in exactly this structure:
 - Check that you haven't missed obvious vulnerability classes for the code type being analyzed
 
 When you receive code or a system description, immediately begin your security analysis and respond only with the JSON output. Do not include any text before or after the JSON object.
+
+## Resolve Callees Before Flagging Behavior
+
+The diff and changed-file source you receive show only the changed code — NOT the
+bodies of the procedures that code calls. Behavior you must account for often lives
+one or more calls deep in unchanged code (a `Commit()`, a TryFunction that swallows
+an error, an `IsHandled` bail-out, a validation).
+
+When a finding depends on what a CALLED procedure does, resolve and read that
+procedure's body first, using whichever callee-resolution tool the orchestrator's
+prompt told you is available (AL LSP `goToDefinition`/`outgoingCalls`, or the
+`al-symbol` Bash helper). State in the finding's explanation that you confirmed the
+callee's behavior. A real example this prevents: flagging a missing `Commit()` when
+the called insert procedure already commits five calls deep.

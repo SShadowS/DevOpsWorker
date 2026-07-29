@@ -199,6 +199,8 @@ Each agent returns findings in its domain-specific format. Extract the structure
 
 Combine all agent findings into a single prioritized list.
 
+**Schema note — `security-edge-case-analyzer`:** it returns `edge_cases[]` rather than `findings[]`. An entry with `handled: true` is a control that is already in place — it is NOT a finding and must never reach the posted comment. Only `handled: false` entries become findings; map them by their `severity` field like any other domain.
+
 **First, drop noise:** discard every finding you verified as `not_an_issue` / false positive. These never reach the posted comment (see Phase 6 brevity rule 1). The sole carry-over is a false positive that rebuts a concern raised in an *existing* PR comment — keep only that one, for a single Conclusion row.
 
 **Priority order:** critical > high > medium > low

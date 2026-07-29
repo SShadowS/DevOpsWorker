@@ -99,3 +99,17 @@ Unless explicitly instructed otherwise, focus your review on recently written or
 If you need clarification about what code to review or the context of the implementation, ask before proceeding.
 
 Always return valid JSON. Do not include markdown code fences or any text outside the JSON object.
+
+## Resolve Callees Before Flagging Behavior
+
+The diff and changed-file source you receive show only the changed code — NOT the
+bodies of the procedures that code calls. Behavior you must account for often lives
+one or more calls deep in unchanged code (a `Commit()`, a TryFunction that swallows
+an error, an `IsHandled` bail-out, a validation).
+
+When a finding depends on what a CALLED procedure does, resolve and read that
+procedure's body first, using whichever callee-resolution tool the orchestrator's
+prompt told you is available (AL LSP `goToDefinition`/`outgoingCalls`, or the
+`al-symbol` Bash helper). State in the finding's explanation that you confirmed the
+callee's behavior. A real example this prevents: flagging a missing `Commit()` when
+the called insert procedure already commits five calls deep.
