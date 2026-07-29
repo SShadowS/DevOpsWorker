@@ -1,4 +1,5 @@
 import type { SubAgentUsage, StageModelUsage } from '../types/pipeline.types.ts';
+import type { PRFinding } from '../agents/pr-reviewer/schema.ts';
 
 export interface PRReviewRow {
   id: number;
@@ -26,6 +27,13 @@ export interface PRReviewRow {
   createdAt: string;
   actionId: number | null;
   reviewRunId: string | null;
+  /** Every finding as a structured record. Null for runs recorded before this
+   *  was captured, and for reviews that produced no findings. */
+  findingsList: PRFinding[] | null;
+  /** Counters from posting Critical/Major findings as inline PR threads. Null
+   *  when nothing was attempted (noPost mode or no findings) — distinct from
+   *  an all-zero result, which means it ran and found nothing to anchor. */
+  inlineThreads: { created: number; updated: number; stale: number; failed: number } | null;
 }
 
 export interface IPRReviewStore {

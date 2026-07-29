@@ -319,8 +319,11 @@ export async function reviewPR(args: string[]): Promise<void> {
 
     // `noPost` is read above and already suppresses the agent's own summary
     // comment. Inline threads MUST honour it too — see applyInlineFindings' doc.
+    // `null` means "not attempted" (noPost, or no findings) — kept distinct from
+    // an all-zero result, which means it ran and found nothing to anchor.
+    let inlineThreads: { created: number; updated: number; stale: number; failed: number } | null = null;
     if (!noPost && result.output?.findingsList?.length) {
-      await applyInlineFindings(prId, result.output.findingsList, config);
+      inlineThreads = await applyInlineFindings(prId, result.output.findingsList, config);
     }
 
     if (prReviewStore) {
@@ -347,6 +350,8 @@ export async function reviewPR(args: string[]): Promise<void> {
           createdAt: new Date().toISOString(),
           actionId: actionId ?? null,
           reviewRunId,
+          findingsList: result.output.findingsList ?? null,
+          inlineThreads,
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -387,6 +392,8 @@ export async function reviewPR(args: string[]): Promise<void> {
         createdAt: new Date().toISOString(),
         actionId: actionId ?? null,
         reviewRunId,
+        findingsList: null,
+        inlineThreads: null,
       });
     }
 

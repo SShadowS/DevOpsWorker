@@ -107,6 +107,11 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_run_id TEXT;
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS sub_agents JSONB;
 -- Per-model cost/token split, keyed by model id.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS model_usage JSONB;
+-- Every finding as a structured record ({severity, title, file?, line?, location?, body}[]).
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS findings_list JSONB;
+-- Counters from posting Critical/Major findings as inline PR threads. Null when
+-- nothing was attempted (noPost mode or no findings), not a zeroed result.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS inline_threads JSONB;
 `;
 
 /**

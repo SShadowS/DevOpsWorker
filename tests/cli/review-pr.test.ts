@@ -233,6 +233,9 @@ describe('reviewPR call site — inline posting honours PR_REVIEW_NO_POST', () =
   // via reviewPR() would require standing up the full agent + DB stack.
   test('the inline-post call is guarded by `!noPost &&`', () => {
     const src = readFileSync(fileURLToPath(new URL('../../src/cli/review-pr.ts', import.meta.url)), 'utf-8');
-    expect(src).toMatch(/if\s*\(\s*!noPost\s*&&\s*result\.output\?\.findingsList\?\.length\s*\)\s*\{\s*\n\s*await applyInlineFindings\(/);
+    // Allows an optional `inlineThreads = ` capture in front of the call — the
+    // counters are persisted to pr_reviews — but still pins the call directly
+    // inside the guard body, with nothing else between them.
+    expect(src).toMatch(/if\s*\(\s*!noPost\s*&&\s*result\.output\?\.findingsList\?\.length\s*\)\s*\{\s*\n\s*(?:\w+\s*=\s*)?await applyInlineFindings\(/);
   });
 });
