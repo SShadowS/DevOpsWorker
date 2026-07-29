@@ -318,7 +318,20 @@ export async function applyInlineFindings(
 
   const stamp = opts.today ?? new Date().toISOString().slice(0, 10);
 
-  for (const action of reconcileFindings(findings, threads)) {
+  // Computed inside its own try, not the `for` header: reconcileFindings is pure
+  // and has no reason to throw today, but the governing invariant is "inline
+  // posting can never fail a review" — an exception here would otherwise escape
+  // applyInlineFindings entirely and land in reviewPR's outer catch, failing a
+  // review whose agent already succeeded and posted its summary.
+  let actions: ReturnType<typeof reconcileFindings>;
+  try {
+    actions = reconcileFindings(findings, threads);
+  } catch (err) {
+    console.log(`[inline] could not reconcile findings against existing threads, skipping inline comments: ${err}`);
+    return result;
+  }
+
+  for (const action of actions) {
     try {
       if (action.kind === 'create') {
         const { finding, key } = action;
@@ -477,6 +490,15 @@ export async function reviewPR(args: string[]): Promise<void> {
       config,
       logger,
     );
+
+    // The likeliest way this feature silently does nothing on a real PR: the
+    // model reports findings in its counts but leaves findingsList empty (or
+    // omits it), which is otherwise indistinguishable in the logs from a
+    // genuinely findings-free review. Naming both numbers turns that into a log
+    // read instead of a database query.
+    if ((result.output?.findingsCount ?? 0) > 0 && !result.output?.findingsList?.length) {
+      console.warn(`[inline] findingsCount=${result.output?.findingsCount} but findingsList has 0 entries — inline posting will not run`);
+    }
 
     // `noPost` is read above and already suppresses the agent's own summary
     // comment. Inline threads MUST honour it too — see applyInlineFindings' doc.

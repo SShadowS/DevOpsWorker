@@ -106,6 +106,18 @@ describe('reconcileFindings', () => {
     expect(a).toEqual([{ kind: 'create', finding: expect.objectContaining({ title: 'Echoed' }), key }]);
   });
 
+  test('when two existing threads share a key, the first one encountered is canonical — agrees with buildPriorFindingsBlock\'s own first-wins dedup', () => {
+    // review-pr.ts's buildPriorFindingsBlock keeps the first marker thread it sees
+    // per key; this map must agree, or the two halves of the feature point a
+    // re-review's update at a different duplicate than the one the model was
+    // shown — the state a fork produces.
+    const key = findingKey('A.al', 'Boom');
+    const first = thread(1, key);
+    const second = thread(2, key);
+    const a = reconcileFindings([f('critical', 'Boom', 'A.al', 5)], [first, second]);
+    expect(a).toEqual([{ kind: 'update', threadId: 1, commentId: 10, finding: expect.objectContaining({ title: 'Boom' }), key }]);
+  });
+
   test('two findings colliding on the same key in one review: the first claims the thread, the second is dropped', () => {
     // Deliberate dedup (declined for change in plan review): same file + same
     // normalised title within a single review's findings list collide to one key.

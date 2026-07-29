@@ -43,7 +43,11 @@ export function reconcileFindings(
     // overwriting the entire review with one finding's body.
     if (!t.filePath) continue;
     const key = extractKey(t.rawContent);
-    if (key) existing.set(key, t);
+    // First-wins: agrees with buildPriorFindingsBlock's own `seen` dedup in
+    // review-pr.ts, which keeps the first thread it encounters per key. Two
+    // halves of the feature disagreeing about which duplicate is canonical is
+    // exactly the ambiguity a fork produces.
+    if (key && !existing.has(key)) existing.set(key, t);
   }
 
   const eligible = findings
