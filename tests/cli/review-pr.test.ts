@@ -239,3 +239,30 @@ describe('reviewPR call site — inline posting honours PR_REVIEW_NO_POST', () =
     expect(src).toMatch(/if\s*\(\s*!noPost\s*&&\s*result\.output\?\.findingsList\?\.length\s*\)\s*\{\s*\n\s*(?:\w+\s*=\s*)?await applyInlineFindings\(/);
   });
 });
+
+describe('reviewPR call site — inlineThreads counters actually reach save()', () => {
+  // The guard test above only pins that applyInlineFindings is called inside
+  // `!noPost && ...` — it deliberately allows an optional capture, so it does
+  // NOT catch a future edit that drops just the `inlineThreads = ` assignment
+  // while leaving `await applyInlineFindings(...)` for its side effect. That
+  // still typechecks (inlineThreads stays declared, always null) and still
+  // satisfies the guard regex, but silently defeats this feature's whole
+  // point — the counters would always persist as null instead of a measured
+  // result. Pin the specific assignment, not just its optional shape.
+  const src = readFileSync(fileURLToPath(new URL('../../src/cli/review-pr.ts', import.meta.url)), 'utf-8');
+
+  test('the applyInlineFindings return value is captured into inlineThreads', () => {
+    expect(src).toMatch(/inlineThreads\s*=\s*await applyInlineFindings\(/);
+  });
+
+  test('the success-branch save() call passes both findingsList and inlineThreads', () => {
+    // Isolate the success-branch `prReviewStore.save({...})` object literal —
+    // not the catch-block save(), which intentionally always persists null
+    // for both fields since nothing was computed before the run errored.
+    const saveMatch = src.match(/if \(prReviewStore\) \{\s*\n\s*try \{\s*\n\s*await prReviewStore\.save\(\{([\s\S]*?)\}\);/);
+    expect(saveMatch).not.toBeNull();
+    const body = saveMatch![1]!;
+    expect(body).toContain('findingsList: result.output.findingsList ?? null');
+    expect(body).toContain('inlineThreads,');
+  });
+});
