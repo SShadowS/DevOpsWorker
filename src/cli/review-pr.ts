@@ -302,6 +302,11 @@ export async function applyInlineFindings(
 ): Promise<{ created: number; updated: number; stale: number; failed: number }> {
   const result = { created: 0, updated: 0, stale: 0, failed: 0 };
   if (findings.length === 0) return result;
+  // Belt and braces: the call site already guards on `!noPost`, but this function
+  // is exported and an A/B harness is about to call it directly across many arms.
+  // Guarding here too means a caller that forgets the check still cannot write to
+  // a live PR.
+  if (process.env['PR_REVIEW_NO_POST'] === '1') return result;
 
   let threads: ReviewThread[] = [];
   try {

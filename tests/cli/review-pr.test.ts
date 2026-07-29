@@ -133,6 +133,24 @@ describe('applyInlineFindings', () => {
     }
   });
 
+  test('applyInlineFindings itself makes no fetch call when PR_REVIEW_NO_POST is set — the internal guard, called directly rather than through the call-site guard', async () => {
+    // Unlike the test above, this calls applyInlineFindings unconditionally — it
+    // must refuse on its own. The call site is guarded today, but the function is
+    // exported and an upcoming A/B harness calls it directly across many arms; a
+    // caller that forgets the site guard must still be unable to write to a live PR.
+    const spy = mock(() => Promise.resolve(new Response('{"value":[]}', { status: 200 })));
+    globalThis.fetch = spy as unknown as typeof fetch;
+    process.env['PR_REVIEW_NO_POST'] = '1';
+    try {
+      const findings = [{ severity: 'critical', title: 'X', file: 'A.al', line: 3, body: 'b' }] as any;
+      const r = await applyInlineFindings(1, findings, config);
+      expect(r).toEqual({ created: 0, updated: 0, stale: 0, failed: 0 });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      delete process.env['PR_REVIEW_NO_POST'];
+    }
+  });
+
   // Discrimination tests: each of the three reconcileFindings action kinds must
   // reach its OWN writer. All three writers take similar arguments and hit
   // similar (sometimes identical) URLs, so a mis-wire (e.g. 'update' calling
