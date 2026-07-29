@@ -388,7 +388,7 @@ Return the PRReviewResult with:
   - `title` must match the finding's heading text, and should stay stable if you review this PR again — it is what links a finding to the thread already discussing it.
   - `file` is the **repo-relative** path of a changed file (`App/Cloud/Al/Codeunits/X.Codeunit.al`), not an AL object name.
   - `line` is a line number on the **RIGHT (source-branch) side** of the diff — a line that exists in the changed file.
-  - `location` is the name of the enclosing AL procedure, trigger, or method — for example `OnAfterValidateEvent`, `PostDocument`. Omit it when the finding is not inside one.
+  - `location` is the name of the enclosing AL procedure, trigger, or method — for example `OnAfterValidateEvent`, `PostDocument`. Just the identifier: when an agent reported it inside a longer reference (`Codeunit 50100 SalesPost, procedure PostDocument, line 88`), take the procedure name out of it. Omit it when the finding is not inside one.
   - When a finding has no single location — a missing test, a pattern spanning several call sites — **omit `file` and `line`**. A guessed line is worse than none: it anchors a comment to unrelated code. Omitting them costs nothing; the finding still appears in the summary.
   - The severity counts in `findings` must agree with the entries here.
 - **reviewBody**: the COMPLETE formatted review markdown from step 9 (identical to what you posted/would post as the comment). Always include this, including in REPLAY MODE.
@@ -397,6 +397,8 @@ Critical and Major entries that carry a `file` and `line` are additionally poste
 line-anchored PR threads (at most 5, Critical first). You do not post these — the pipeline
 does it from `findingsList` after your summary comment is published. Report every finding
 in the summary exactly as before; inline threads are an addition to it, never a replacement.
+Anchor Minor and Nitpick findings too — the pipeline uses their locations to tell a finding
+that was fixed from one that was downgraded.
 
 ## Critical Rules
 

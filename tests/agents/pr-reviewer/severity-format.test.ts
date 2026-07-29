@@ -106,6 +106,25 @@ describe('pr-reviewer structured findingsList', () => {
     expect(structuredOutputSection()).toMatch(/`location`[^\n]*enclosing[^\n]*(procedure|trigger|method)/);
   });
 
+  test('the `location` guidance reduces an agent-reported composite reference', () => {
+    // Four sub-agents emit a per-finding field literally named `location` meaning
+    // something else — "Object name and procedure/line reference"
+    // (al-performance-analyzer.md:73, al-error-pattern-analyzer.md:75) and "Object
+    // name and specific area" (al-architecture-analyzer.md:75,
+    // al-integration-analyzer.md:86). Copied into findingsList verbatim it embeds the
+    // line number this field exists to avoid, and the two families word it
+    // differently, so pooling on file + location fails across domains and runs.
+    expect(structuredOutputSection()).toMatch(/`location`[\s\S]{0,600}procedure name/);
+  });
+
+  test('anchors are asked for at every severity, not only the inline-eligible ones', () => {
+    // reconcile-findings.ts:59-61 builds its suppression set from EVERY finding that
+    // carries a `file`, at ANY severity. A finding downgraded to minor and re-emitted
+    // without an anchor reads as absent, so its live thread collects a "not detected"
+    // reply that is simply false — the outcome that code exists to prevent.
+    expect(structuredOutputSection()).toMatch(/Minor and Nitpick/);
+  });
+
   test('inline threads are documented as the pipeline\'s job and additive to the summary', () => {
     const section = structuredOutputSection();
     // The agent posts one summary comment; it must not try to post threads itself,
