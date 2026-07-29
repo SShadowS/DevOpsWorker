@@ -10,8 +10,8 @@
   "scripts": {
     "pipeline": "bun run src/cli/index.ts",
     "analyze-docs": "bun run scripts/analyze-doc-styles.ts",
-    "test": "bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/agents tests/db",
-    "test:unit": "bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/db",
+    "test": "bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/agents tests/db/pg-pr-review-store-mapper.test.ts",
+    "test:unit": "bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/db/pg-pr-review-store-mapper.test.ts",
     "test:integration": "bun test --preload ./tests/setup.ts tests/integration",
     "test:all": "bun test --preload ./tests/setup.ts",
     "typecheck": "tsc --noEmit",
