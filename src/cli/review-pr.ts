@@ -18,7 +18,7 @@ import {
   type ReviewThread,
 } from '../sdk/ado/pull-requests.ts';
 import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
-import { markerFor } from '../sdk/ado/finding-key.ts';
+import { extractKey, FINDING_MARKER_RE, markerFor } from '../sdk/ado/finding-key.ts';
 
 export function makeReviewRunId(prId: number): string {
   return `pr-${prId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -153,6 +153,93 @@ export function maybeInjectToolRule(): number {
  */
 function buildCommentBody(finding: PRFinding, key: string): string {
   return `${markerFor(key)}\n\n**${finding.severity === 'critical' ? '🔴 Critical' : '🟠 Major'}** — ${finding.title}\n\n${finding.body}`;
+}
+
+/**
+ * The severity line `buildCommentBody` renders directly under the marker, e.g.
+ * `**🔴 Critical** — Missing timeout`.
+ *
+ * The emoji is optional so a body written before it existed still parses, but the
+ * severity word itself is required: that is what keeps a bold em-dash line from
+ * the finding's own prose from being lifted as a title.
+ */
+const SEVERITY_TITLE_RE = /^\*\*(?:🔴 |🟠 )?(?:Critical|Major)\*\*\s+—\s+(.+?)\s*$/;
+
+/**
+ * Recover the title from a marker thread's first comment.
+ *
+ * Only the FIRST non-empty line after the marker is considered — the title lives
+ * there by construction, and scanning further would start matching the body.
+ * Returns null when that line is not a severity line, so a hand-edited comment
+ * contributes no row rather than a wrong one.
+ */
+function parseFindingTitle(rawContent: string): string | null {
+  // ADO round-trips comment bodies through JSON and can hand back CRLF. The
+  // \r?\n split keeps a blank line from arriving as '\r' (which would read as
+  // content and end the scan early), and the per-line trim strips any CR the
+  // split left behind — either would carry a stray \r into the printed title.
+  for (const line of rawContent.replace(FINDING_MARKER_RE, '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    return SEVERITY_TITLE_RE.exec(trimmed)?.[1]?.trim() ?? null;
+  }
+  return null;
+}
+
+/** Keep a `|` in a title from breaking the markdown table it is printed in. */
+function escapeCell(text: string): string {
+  return text.replace(/\|/g, '\\|');
+}
+
+/**
+ * Tell the model the exact `file` + `title` pairs that already carry a thread on
+ * this PR, so a re-review can reuse them instead of paraphrasing them.
+ *
+ * This is the lookup the whole inline-comment design rests on. A finding's
+ * identity is `sha1(file + '::' + normalised title)` — but the sub-agents write
+ * their findings fresh every run and never see the previous wording, so without
+ * being shown it the orchestrator has nothing to be stable *against* and each
+ * re-review forks every thread into a duplicate.
+ *
+ * Anchored, marked threads only: a human's thread carries no marker and their
+ * "by design, see ticket X" reply must stay out of this table, and an unanchored
+ * thread has no path for the model to reuse.
+ *
+ * Returns '' when nothing qualifies — an empty heading and table would tell the
+ * model prior findings exist when they do not.
+ */
+export function buildPriorFindingsBlock(threads: ReviewThread[]): string {
+  const rows: string[] = [];
+  const seen = new Set<string>();
+
+  for (const thread of threads) {
+    if (!thread.filePath) continue;
+    const key = extractKey(thread.rawContent);
+    if (!key) continue;
+    const title = parseFindingTitle(thread.rawContent);
+    if (!title) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // The model reports `file` repo-relative while ADO stores the anchor with a
+    // leading slash. Print the repo-relative form: a path copied back with the
+    // slash hashes to a different key than the thread it is meant to update.
+    rows.push(`| ${thread.filePath.replace(/^\/+/, '')} | ${escapeCell(title)} |`);
+  }
+
+  if (rows.length === 0) return '';
+
+  return [
+    `## Findings already tracked on this PR`,
+    ``,
+    `Each row below is a finding an earlier review raised, and each already has its own comment`,
+    `thread on this PR. When you raise one of them again, reuse that row's \`file\` and \`title\``,
+    `verbatim in \`findingsList\`: the two together identify the thread, so reusing them updates`,
+    `the existing discussion, while any rewording opens a second thread beside it.`,
+    ``,
+    `| File | Title |`,
+    `|---|---|`,
+    ...rows,
+  ].join('\n');
 }
 
 /**
@@ -310,9 +397,30 @@ export async function reviewPR(args: string[]): Promise<void> {
   }
   logger.stageStart('pr-reviewer');
 
+  // Read the PR's existing marker threads BEFORE the agent runs, so the prompt can
+  // hand it the exact file+title pairs already under discussion. Without this the
+  // agent is asked to keep titles stable with nothing to be stable against.
+  //
+  // This is deliberately a SECOND read of the same endpoint — applyInlineFindings
+  // reads it again after the run. The agent publishes its summary comment during
+  // the run, so this snapshot is already stale by the time reconciliation needs
+  // one; reusing it would risk reconciling against a thread list that predates the
+  // review's own comment. One extra GET is the cheaper half of that trade.
+  //
+  // Guarded like every other ADO read here: a failed read costs the model its
+  // lookup table, never the review.
+  let priorFindingsBlock = '';
+  try {
+    priorFindingsBlock = buildPriorFindingsBlock(await fetchReviewThreadsRaw(prId, config));
+    const rows = priorFindingsBlock ? priorFindingsBlock.split('\n').filter((l) => l.startsWith('| ')).length - 1 : 0;
+    console.log(`[inline] prompting with ${rows} prior finding(s) already threaded on this PR`);
+  } catch (err) {
+    console.log(`[inline] could not read prior PR threads, prompting without them: ${err}`);
+  }
+
   try {
     const result = await runPRReview(
-      { prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId, project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl, prTitle, prDescription, noPost },
+      { prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId, project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl, prTitle, prDescription, noPost, priorFindingsBlock },
       config,
       logger,
     );

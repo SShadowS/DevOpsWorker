@@ -329,6 +329,40 @@ describe('createPRReviewConfig — buildPrompt', () => {
     expect(prompt.startsWith('## Task')).toBe(true);
   });
 
+  // --- Prior-findings block --------------------------------------------------
+
+  const priorBlock = [
+    '## Findings already tracked on this PR',
+    '',
+    '| File | Title |',
+    '|---|---|',
+    '| App/Cloud/Al/Codeunits/X.Codeunit.al | Missing HTTP timeout |',
+  ].join('\n');
+
+  test('prepends the prior-findings block when one is supplied', () => {
+    // buildPrompt ignores both its arguments, so this block can only arrive
+    // through PRReviewParams. Computing it and never reaching the prompt is the
+    // failure mode worth pinning.
+    const prompt = buildPromptFor({ priorFindingsBlock: priorBlock });
+    expect(prompt.startsWith(priorBlock)).toBe(true);
+    expect(prompt).toContain('Missing HTTP timeout');
+    expect(prompt).toContain('## Task');
+  });
+
+  test('omits the prior-findings block when it is empty', () => {
+    // An unconditional heading with an empty table would tell the model prior
+    // findings exist when they do not.
+    const prompt = buildPromptFor({ priorFindingsBlock: '' });
+    expect(prompt.startsWith('## Task')).toBe(true);
+    expect(prompt).not.toContain('Findings already tracked');
+  });
+
+  test('omits the prior-findings block when the field is absent', () => {
+    const prompt = buildPromptFor({});
+    expect(prompt.startsWith('## Task')).toBe(true);
+    expect(prompt).not.toContain('Findings already tracked');
+  });
+
   // --- Cherry-pick injection -------------------------------------------------
 
   test('does not inject cherry-pick section for a normal PR', () => {

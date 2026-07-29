@@ -385,12 +385,13 @@ Return the PRReviewResult with:
 - **findings**: object with counts by severity: `{ critical: N, major: N, minor: N, nitpick: N }`. Count each deduplicated finding based on its final severity after merging.
 - **findingsList**: every finding as a structured record — `{severity, title, file, line, location, body}`.
   - `severity` is the same label you printed in the heading: `critical` / `major` / `minor` / `nitpick`.
-  - `title` must match the finding's heading text, and should stay stable if you review this PR again — it is what links a finding to the thread already discussing it.
-  - `file` is the **repo-relative** path of a changed file (`App/Cloud/Al/Codeunits/X.Codeunit.al`), not an AL object name.
+  - `title` must match the finding's heading text. `file` and `title` together are what link a finding to the thread already discussing it, so keeping both stable across reviews of this PR is what makes a re-review update that thread rather than open a second one beside it.
+  - `file` is the **repo-relative** path of a changed file (`App/Cloud/Al/Codeunits/X.Codeunit.al`), not an AL object name. Spell the same path the same way every review — a path written differently between runs identifies a different finding, exactly as a reworded title does.
   - `line` is a line number on the **RIGHT (source-branch) side** of the diff — a line that exists in the changed file.
   - `location` is the name of the enclosing AL procedure, trigger, or method — for example `OnAfterValidateEvent`, `PostDocument`. Just the identifier: when an agent reported it inside a longer reference (`Codeunit 50100 SalesPost, procedure PostDocument, line 88`), take the procedure name out of it. Omit it when the finding is not inside one.
   - When a finding has no single location — a missing test, a pattern spanning several call sites — **omit `file` and `line`**. A guessed line is worse than none: it anchors a comment to unrelated code. Omitting them costs nothing; the finding still appears in the summary.
   - The severity counts in `findings` must agree with the entries here.
+  - If a finding matches one listed under "Findings already tracked on this PR", reuse that row's `file` and `title` verbatim here.
 - **reviewBody**: the COMPLETE formatted review markdown from step 9 (identical to what you posted/would post as the comment). Always include this, including in REPLAY MODE.
 
 Critical and Major entries that carry a `file` and `line` are additionally posted as

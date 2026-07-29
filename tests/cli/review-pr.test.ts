@@ -6,8 +6,10 @@ import {
   maybeOverrideSubAgentModel,
   SUBAGENT_TOOL_RULE,
   applyInlineFindings,
+  buildPriorFindingsBlock,
 } from '../../src/cli/review-pr.ts';
 import { findingKey, markerFor } from '../../src/sdk/ado/finding-key.ts';
+import type { ReviewThread } from '../../src/sdk/ado/pull-requests.ts';
 
 // ---------------------------------------------------------------------------
 // EVAL-ONLY A/B hooks
@@ -223,6 +225,225 @@ describe('applyInlineFindings', () => {
     expect(calls[0]!.url).not.toContain('/threads?api-version=7.0'); // not the create endpoint
     expect(calls[0]!.body.content).toBe('_Not detected in review of 2026-07-29._');
     expect(calls[0]!.body.status).toBeUndefined(); // never closes the thread
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPriorFindingsBlock
+//
+// The lookup the whole reconciliation rests on. Sub-agents regenerate their
+// findings from scratch every run, so unless the orchestrator is SHOWN the
+// previous file+title pairs it has nothing to be stable against, and every
+// re-review forks each thread while this suite stays green — every other test
+// here hand-constructs its titles and so cannot detect drift.
+// ---------------------------------------------------------------------------
+
+function markerThread(over: Partial<ReviewThread> = {}): ReviewThread {
+  return {
+    id: 1,
+    firstCommentId: 1,
+    lastCommentIsStaleNotice: false,
+    rawContent: '',
+    filePath: '/A.al',
+    line: 3,
+    ...over,
+  };
+}
+
+/** The shape `buildCommentBody` renders — see the round-trip test for the real thing. */
+function bodyFor(key: string, severity: string, title: string, body = 'why it matters'): string {
+  return `${markerFor(key)}\n\n**${severity}** — ${title}\n\n${body}`;
+}
+
+function rowFor(block: string, filePrefix: string): string | undefined {
+  return block.split('\n').find((l) => l.startsWith(`| ${filePrefix}`));
+}
+
+describe('buildPriorFindingsBlock', () => {
+  test('lists prior findings so a re-review can reuse their titles', () => {
+    const key = findingKey('A.al', 'Missing timeout');
+    const block = buildPriorFindingsBlock([
+      markerThread({ rawContent: bodyFor(key, '🔴 Critical', 'Missing timeout') }),
+    ]);
+    expect(block).toContain('Missing timeout');
+    expect(block).toContain('A.al');
+    expect(block).toContain('| File | Title |');
+  });
+
+  test('is empty when the PR has no prior inline findings', () => {
+    expect(buildPriorFindingsBlock([])).toBe('');
+  });
+
+  test('the file and title it prints hash back to the thread\'s own key', () => {
+    // The whole point of the block: what the model copies out of the table must
+    // produce the SAME findingKey as the marker on the thread it should update.
+    // ADO stores the anchor as `/App/...` while the model reports `App/...`, so
+    // a block that passes the leading slash through would hand the model a path
+    // that hashes to a different key — a duplicate thread on every re-review,
+    // with the containment assertions above still green.
+    const file = 'App/Cloud/Al/Codeunits/X.Codeunit.al';
+    const key = findingKey(file, 'Missing HTTP timeout');
+    const block = buildPriorFindingsBlock([
+      markerThread({ filePath: `/${file}`, rawContent: bodyFor(key, '🟠 Major', 'Missing HTTP timeout') }),
+    ]);
+
+    const row = rowFor(block, 'App/');
+    expect(row).toBeDefined();
+    const [, printedFile, printedTitle] = row!.split('|').map((c) => c.trim());
+    expect(findingKey(printedFile!, printedTitle!)).toBe(key);
+  });
+
+  test('parses a body written by the real inline renderer, not an approximation', async () => {
+    // `buildCommentBody` is private, so reach it the way production does: post a
+    // finding, capture the exact bytes ADO stores, and feed those back in. If
+    // either side of that format drifts independently the parser silently stops
+    // emitting rows — titles fork again and no hand-built fixture would notice.
+    const realFetch = globalThis.fetch;
+    let posted = '';
+    globalThis.fetch = mock((_u: string, init?: any) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        return Promise.resolve(new Response('{"value":[]}', { status: 200 }));
+      }
+      posted = JSON.parse(init.body).comments[0].content;
+      return Promise.resolve(new Response('{"id":1}', { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    try {
+      const file = 'App/Cloud/Al/Codeunits/X.Codeunit.al';
+      const findings = [{ severity: 'critical', title: 'HttpClient has no timeout', file, line: 12, body: 'b' }] as any;
+      const r = await applyInlineFindings(1, findings, config);
+      expect(r.created).toBe(1);
+      expect(posted).not.toBe('');
+
+      const block = buildPriorFindingsBlock([markerThread({ filePath: `/${file}`, rawContent: posted })]);
+      expect(block).toContain(`| ${file} | HttpClient has no timeout |`);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('a human thread carries no marker and never reaches the table', () => {
+    const block = buildPriorFindingsBlock([
+      markerThread({ rawContent: 'Please rename this to something clearer.' }),
+    ]);
+    expect(block).toBe('');
+  });
+
+  test('keeps the marker thread and drops the human one when both are present', () => {
+    const key = findingKey('A.al', 'Missing timeout');
+    const block = buildPriorFindingsBlock([
+      markerThread({ id: 1, rawContent: 'By design — see the linked ticket.' }),
+      markerThread({ id: 2, rawContent: bodyFor(key, '🔴 Critical', 'Missing timeout') }),
+    ]);
+    expect(block).toContain('Missing timeout');
+    expect(block).not.toContain('By design');
+    expect(block.split('\n').filter((l) => l.startsWith('| A.al')).length).toBe(1);
+  });
+
+  test('a marker thread with no severity line yields no row and does not throw', () => {
+    const key = findingKey('A.al', 'Whatever');
+    expect(buildPriorFindingsBlock([
+      markerThread({ rawContent: `${markerFor(key)}\n\nsomeone reflowed this by hand\n\nbody` }),
+    ])).toBe('');
+    // Marker and nothing else — the body was deleted in the ADO web UI.
+    expect(buildPriorFindingsBlock([markerThread({ rawContent: markerFor(key) })])).toBe('');
+  });
+
+  test('only the first line after the marker can be the title', () => {
+    // A parser that scanned the whole body would lift this severity-shaped line
+    // out of the prose and emit a garbage row the model is then told to reuse.
+    const key = findingKey('A.al', 'x');
+    expect(buildPriorFindingsBlock([
+      markerThread({
+        rawContent: `${markerFor(key)}\n\nsomeone replaced the heading with prose\n\n**🔴 Critical** — quoted from an earlier review\n`,
+      }),
+    ])).toBe('');
+  });
+
+  test('a bold em-dash line that is not a severity line is not taken for the title', () => {
+    // Dropping the Critical/Major requirement from the parser would lift `a
+    // hand-written reply` here — the row would look plausible and be wrong.
+    const key = findingKey('A.al', 'x');
+    expect(buildPriorFindingsBlock([
+      markerThread({ rawContent: `${markerFor(key)}\n\n**Note** — a hand-written reply\n` }),
+    ])).toBe('');
+  });
+
+  test('an unanchored marker thread is skipped', () => {
+    // The orchestrator reads existing PR comments in Phase 2; if it ever echoes a
+    // marker into the summary it posts, that thread has no filePath and no path
+    // for the model to reuse. Same guard reconcileFindings applies.
+    const key = findingKey('A.al', 'Missing timeout');
+    expect(buildPriorFindingsBlock([
+      markerThread({ filePath: undefined, rawContent: bodyFor(key, '🔴 Critical', 'Missing timeout') }),
+    ])).toBe('');
+  });
+
+  test('a CRLF body still yields a clean title', () => {
+    // ADO round-trips comment bodies through JSON and can hand back CRLF. A
+    // parser that splits on \n alone leaves a trailing \r glued to the title,
+    // which changes nothing about the key but prints a broken table row.
+    const key = findingKey('A.al', 'Missing timeout');
+    const block = buildPriorFindingsBlock([
+      markerThread({ rawContent: bodyFor(key, '🔴 Critical', 'Missing timeout').replace(/\n/g, '\r\n') }),
+    ]);
+    expect(block).toContain('| A.al | Missing timeout |');
+    expect(block).not.toContain('\r');
+  });
+
+  test('a pipe in a title is escaped, and escaping cannot fork the key', () => {
+    const title = 'Error() | ErrorInfo() mismatch';
+    const key = findingKey('A.al', title);
+    const block = buildPriorFindingsBlock([markerThread({ rawContent: bodyFor(key, '🟠 Major', title) })]);
+
+    expect(rowFor(block, 'A.al')).toBe('| A.al | Error() \\| ErrorInfo() mismatch |');
+    // Safe because findingKey collapses every non-alphanumeric run to one space:
+    // the escaped form the model copies back normalises to the same key.
+    expect(findingKey('A.al', 'Error() \\| ErrorInfo() mismatch')).toBe(key);
+  });
+
+  test('two threads sharing a key print one row', () => {
+    const key = findingKey('A.al', 'Missing timeout');
+    const block = buildPriorFindingsBlock([
+      markerThread({ id: 1, rawContent: bodyFor(key, '🔴 Critical', 'Missing timeout') }),
+      markerThread({ id: 2, rawContent: bodyFor(key, '🟠 Major', 'Missing timeout') }),
+    ]);
+    expect(block.split('\n').filter((l) => l.startsWith('| A.al')).length).toBe(1);
+  });
+
+  test('states the consequence of rewording rather than forbidding it', () => {
+    // Prohibition wording is measured on this codebase to suppress the behaviour
+    // outright instead of redirecting it.
+    const key = findingKey('A.al', 'Missing timeout');
+    const block = buildPriorFindingsBlock([
+      markerThread({ rawContent: bodyFor(key, '🔴 Critical', 'Missing timeout') }),
+    ]);
+    expect(block).not.toMatch(/\bnever\b|\bdo not\b|\bdon't\b|\bavoid\b/i);
+    expect(block).toContain('reuse');
+  });
+});
+
+describe('reviewPR call site — the prior-findings block reaches the agent', () => {
+  // The block is worthless if it is computed and dropped, and exercising reviewPR()
+  // would need the full agent + DB stack — so pin the wiring in the real source.
+  const src = readFileSync(fileURLToPath(new URL('../../src/cli/review-pr.ts', import.meta.url)), 'utf-8');
+
+  test('the block is built from a pre-agent thread read', () => {
+    expect(src).toMatch(/priorFindingsBlock\s*=\s*buildPriorFindingsBlock\(\s*await fetchReviewThreadsRaw\(prId, config\)\s*\)/);
+  });
+
+  test('the read happens before the agent runs, not after', () => {
+    const readAt = src.indexOf('priorFindingsBlock = buildPriorFindingsBlock(');
+    const runAt = src.indexOf('await runPRReview(');
+    expect(readAt).toBeGreaterThan(-1);
+    expect(runAt).toBeGreaterThan(-1);
+    expect(readAt).toBeLessThan(runAt);
+  });
+
+  test('the block is passed into runPRReview', () => {
+    const call = src.match(/await runPRReview\(\s*\{([\s\S]*?)\},/);
+    expect(call).not.toBeNull();
+    expect(call![1]).toContain('priorFindingsBlock');
   });
 });
 
