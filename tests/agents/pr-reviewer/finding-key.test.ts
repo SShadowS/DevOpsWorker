@@ -31,6 +31,9 @@ describe('marker round-trip', () => {
   });
 
   test('returns null for a marker-shaped string that is not ours', () => {
+    // Full-length (16 hex) key, wrong tool prefix — isolates the `ai-finding:` literal check.
+    expect(extractKey('<!-- some-other-tool:0123456789abcdef -->')).toBeNull();
+    // Short key, wrong tool prefix — kept for the length-mismatch case too.
     expect(extractKey('<!-- some-other-tool:abc123 -->')).toBeNull();
   });
 });
