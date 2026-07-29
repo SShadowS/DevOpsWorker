@@ -402,6 +402,68 @@ describe('buildPriorFindingsBlock', () => {
     expect(findingKey('A.al', 'Error() \\| ErrorInfo() mismatch')).toBe(key);
   });
 
+  test('a file reported with a leading slash prints the spelling that hashes back', () => {
+    // `findingKey` applies no slash normalisation, and `postInlineThread` tolerates
+    // a leading slash — so the key on this thread may have been built from
+    // '/App/…'. ADO stores the anchor with a leading slash either way, so the
+    // thread alone does not say which spelling was hashed. Stripping it
+    // unconditionally prints a pair that names a DIFFERENT identity than the
+    // thread it sits on: the model reuses the row verbatim, reconcileFindings
+    // matches nothing, and the re-review both creates a duplicate and drops a
+    // false "not detected" reply on the original.
+    const reported = '/App/Cloud/Al/Codeunits/X.Codeunit.al';
+    const key = findingKey(reported, 'Missing timeout');
+    const block = buildPriorFindingsBlock([
+      markerThread({ filePath: reported, rawContent: bodyFor(key, '🔴 Critical', 'Missing timeout') }),
+    ]);
+
+    const row = block.split('\n').find((l) => l.includes('Missing timeout'));
+    expect(row).toBeDefined();
+    const [, printedFile, printedTitle] = row!.split('|').map((c) => c.trim());
+    expect(findingKey(printedFile!, printedTitle!)).toBe(key);
+  });
+
+  test('a title that spans lines never prints a truncated pair', () => {
+    // `PRFinding.title` is a bare z.string(), so a newline is reachable. findingKey
+    // normalises it to a space; parseFindingTitle only ever sees the first line.
+    const title = 'Missing timeout\nin the document sender';
+    const key = findingKey('A.al', title);
+    const block = buildPriorFindingsBlock([
+      markerThread({ rawContent: bodyFor(key, '🔴 Critical', title) }),
+    ]);
+
+    // This is the row an unguarded strip prints. It hashes to a different identity
+    // than the thread it names, so the model would reuse it and still fork.
+    expect(block).not.toContain('| A.al | Missing timeout |');
+    // Asserting the invariant rather than `toBe('')`: a parser that recovered the
+    // whole title would print a row that DOES reproduce the key, and that is a
+    // better outcome this test should not forbid.
+    for (const row of block.split('\n').filter((l) => l.startsWith('| A.al'))) {
+      const [, file, printedTitle] = row.split('|').map((c) => c.trim());
+      expect(findingKey(file!, printedTitle!)).toBe(key);
+    }
+  });
+
+  test('a hand-edited body whose title no longer matches its marker is dropped and logged', () => {
+    // Someone reworded the comment in the ADO web UI, so no parse can recover the
+    // title the key was built from. The row must be withheld — and visibly: Task 8
+    // measures duplicate threads on a live re-review, and a silent drop makes a
+    // duplicate unattributable between "the model reworded" and "the table withheld
+    // the row it was supposed to reuse".
+    const key = findingKey('A.al', 'Missing timeout');
+    const logs: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => { logs.push(args.map(String).join(' ')); };
+    try {
+      expect(buildPriorFindingsBlock([
+        markerThread({ id: 42, rawContent: bodyFor(key, '🔴 Critical', 'Reworded by a reviewer') }),
+      ])).toBe('');
+    } finally {
+      console.log = realLog;
+    }
+    expect(logs.join('\n')).toContain('42');
+  });
+
   test('two threads sharing a key print one row', () => {
     const key = findingKey('A.al', 'Missing timeout');
     const block = buildPriorFindingsBlock([

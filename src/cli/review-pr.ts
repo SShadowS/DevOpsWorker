@@ -18,7 +18,7 @@ import {
   type ReviewThread,
 } from '../sdk/ado/pull-requests.ts';
 import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
-import { extractKey, FINDING_MARKER_RE, markerFor } from '../sdk/ado/finding-key.ts';
+import { extractKey, findingKey, FINDING_MARKER_RE, markerFor } from '../sdk/ado/finding-key.ts';
 
 export function makeReviewRunId(prId: number): string {
   return `pr-${prId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -192,6 +192,30 @@ function escapeCell(text: string): string {
 }
 
 /**
+ * Return the `file` spelling that reproduces this thread's own key, or null when
+ * neither candidate does.
+ *
+ * `findingKey` hashes the path the MODEL reported and applies no slash
+ * normalisation, so `/App/x.al` and `App/x.al` are different identities. Both are
+ * reachable — `postInlineThread` tolerates a leading slash — and ADO stores the
+ * anchor with a leading slash either way, so the thread alone does not say which
+ * spelling was hashed. Try the repo-relative form first (what the prompt asks the
+ * model for) and fall back to the stored form.
+ *
+ * A null means the pair on hand cannot name this thread: the comment was
+ * hand-edited, or the title spans lines and only its first line survived parsing.
+ * Printing that row would be worse than omitting it — the model would reuse it
+ * verbatim and still fork the thread, with the table taking the blame off the
+ * model. So the row is dropped, and the caller logs the drop.
+ */
+function fileSpellingMatchingKey(filePath: string, title: string, key: string): string | null {
+  for (const candidate of [filePath.replace(/^\/+/, ''), filePath]) {
+    if (findingKey(candidate, title) === key) return candidate;
+  }
+  return null;
+}
+
+/**
  * Tell the model the exact `file` + `title` pairs that already carry a thread on
  * this PR, so a re-review can reuse them instead of paraphrasing them.
  *
@@ -211,6 +235,7 @@ function escapeCell(text: string): string {
 export function buildPriorFindingsBlock(threads: ReviewThread[]): string {
   const rows: string[] = [];
   const seen = new Set<string>();
+  const unverifiable: number[] = [];
 
   for (const thread of threads) {
     if (!thread.filePath) continue;
@@ -218,12 +243,23 @@ export function buildPriorFindingsBlock(threads: ReviewThread[]): string {
     if (!key) continue;
     const title = parseFindingTitle(thread.rawContent);
     if (!title) continue;
+    // Every row must hash back to the key of the thread it names — this is a
+    // runtime self-check on the one assumption the design rests on, covering
+    // hand-edited bodies and any future drift in how the body is rendered.
+    const file = fileSpellingMatchingKey(thread.filePath, title, key);
+    if (!file) { unverifiable.push(thread.id); continue; }
     if (seen.has(key)) continue;
     seen.add(key);
-    // The model reports `file` repo-relative while ADO stores the anchor with a
-    // leading slash. Print the repo-relative form: a path copied back with the
-    // slash hashes to a different key than the thread it is meant to update.
-    rows.push(`| ${thread.filePath.replace(/^\/+/, '')} | ${escapeCell(title)} |`);
+    rows.push(`| ${file} | ${escapeCell(title)} |`);
+  }
+
+  if (unverifiable.length > 0) {
+    // Visible rather than silent: a duplicate thread on the next review is then
+    // attributable — the model was never handed these rows to reuse.
+    console.log(
+      `[inline] ${unverifiable.length} marker thread(s) left out of the prior-findings table` +
+      ` — file+title does not reproduce the thread key (thread ids: ${unverifiable.join(', ')})`,
+    );
   }
 
   if (rows.length === 0) return '';
@@ -402,10 +438,14 @@ export async function reviewPR(args: string[]): Promise<void> {
   // agent is asked to keep titles stable with nothing to be stable against.
   //
   // This is deliberately a SECOND read of the same endpoint — applyInlineFindings
-  // reads it again after the run. The agent publishes its summary comment during
-  // the run, so this snapshot is already stale by the time reconciliation needs
-  // one; reusing it would risk reconciling against a thread list that predates the
-  // review's own comment. One extra GET is the cheaper half of that trade.
+  // reads it again after the run. A review takes minutes, and reconciliation has to
+  // act on the threads that exist when it WRITES: a human reply, or a second review
+  // running on the same PR, lands inside that window, and two reviews sharing one
+  // pre-agent snapshot would both see "no thread" and both create. One extra GET is
+  // the cheaper half of that trade.
+  //
+  // Not a factor either way: the agent's own summary comment is posted PR-level via
+  // the MCP tool, so it carries no threadContext and reconcileFindings filters it.
   //
   // Guarded like every other ADO read here: a failed read costs the model its
   // lookup table, never the review.
