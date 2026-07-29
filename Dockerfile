@@ -51,6 +51,20 @@ COPY src/ src/
 COPY scripts/ scripts/
 COPY tsconfig.json ./
 
+# Normalise agent prompt line endings. A sub-agent is discovered by parsing the
+# YAML frontmatter delimited by a line that must be exactly `---`; when the file
+# arrives CRLF the delimiter is `---\r`, the parse fails, and the Agent tool
+# silently does not register that agent. The orchestrator then falls back to
+# `general-purpose` and performs that domain's analysis itself, which costs far
+# more than the sub-agent would have — observed 2026-07-29: three agents dropped
+# out and the orchestrator's own spend tripled ($3.50 -> $11/review) with no
+# error anywhere.
+#
+# .gitattributes stores these LF, but the build context is the WORKING TREE, and
+# `text=auto` checks them out CRLF on Windows. Normalising here makes the host's
+# line endings irrelevant. Same treatment as entrypoint.sh below.
+RUN find src/agents -name '*.md' -exec sed -i 's/\r$//' {} +
+
 # Build the dashboard SPA bundle (src/dashboard/dist/). dist/ is gitignored, so the
 # image must build it — the dashboard compose service serves these static assets.
 RUN bun run dashboard:build

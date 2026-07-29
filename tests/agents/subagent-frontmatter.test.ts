@@ -68,6 +68,37 @@ describe('sub-agent frontmatter', () => {
     }
   });
 
+  test('the image normalises agent prompt line endings', () => {
+    // Regression guard for 2026-07-29. A sub-agent is discovered by parsing the
+    // frontmatter delimited by a line that must be exactly `---`. When the file
+    // reaches the container CRLF, the delimiter is `---\r`, the parse fails, and
+    // the Agent tool silently does not register that agent — no error, nothing in
+    // the logs. Three pr-reviewer agents dropped out this way; the orchestrator
+    // fell back to `general-purpose` and did their analysis itself, tripling its
+    // own spend ($3.50 -> $11/review).
+    //
+    // .gitattributes stores these LF, but the Docker build context is the WORKING
+    // TREE and `text=auto` checks them out CRLF on Windows. The Dockerfile step is
+    // what makes the host's line endings irrelevant, so it must not be removed.
+    //
+    // This asserts the mechanism rather than the files: on Windows every agent .md
+    // in the working tree is legitimately CRLF, so checking them here would fail
+    // for the wrong reason.
+    const dockerfile = readFileSync('Dockerfile', 'utf-8');
+    expect(dockerfile).toMatch(/find src\/agents -name '\*\.md' -exec sed -i 's\/\\r\$\/\/' \{\} \+/);
+  });
+
+  test('every agent file has a parseable frontmatter block once CR is stripped', () => {
+    // Complements the test above: the delimiters must be well-formed in the first
+    // place, so normalisation is sufficient rather than merely necessary.
+    const offenders: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(f, 'utf-8').replace(/\r/g, '');
+      if (!/^---\n[\s\S]*?\n---\n/.test(src)) offenders.push(f);
+    }
+    expect(offenders).toEqual([]);
+  });
+
   test('code-reviewer and plan-reviewer agents declare a scoped tools key as a comma-separated string (Phase 1B)', () => {
     const scoped = files.filter(
       (f) => f.includes('code-reviewer') || f.includes('plan-reviewer'),
