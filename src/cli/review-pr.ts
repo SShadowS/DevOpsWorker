@@ -3,11 +3,22 @@ import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadConfig } from './config.ts';
 import { runPRReview } from '../agents/pr-reviewer/config.ts';
+import type { PRFinding } from '../agents/pr-reviewer/schema.ts';
 import { findRepoByRepositoryId } from '../config/repos.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
 import { connectStores } from '../db/connect-stores.ts';
 import { notifyPipelineError } from '../sdk/discord-notify.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
+import type { PipelineConfig } from '../types/pipeline.types.ts';
+import {
+  fetchReviewThreadsRaw,
+  postInlineThread,
+  updateThreadComment,
+  appendToThread,
+  type ReviewThread,
+} from '../sdk/ado/pull-requests.ts';
+import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
+import { markerFor } from '../sdk/ado/finding-key.ts';
 
 export function makeReviewRunId(prId: number): string {
   return `pr-${prId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -135,6 +146,63 @@ export function maybeInjectToolRule(): number {
   return modified;
 }
 
+/**
+ * Post this review's Critical/Major findings as line-anchored threads.
+ *
+ * Additive by construction: it runs AFTER the agent has already posted the
+ * summary comment, and every ADO call is individually guarded. An inline failure
+ * is counted and logged; the finding is in the summary regardless, so a rejected
+ * anchor costs presentation, never information.
+ */
+export async function applyInlineFindings(
+  prId: number,
+  findings: PRFinding[],
+  config: PipelineConfig,
+  opts: { today?: string } = {},
+): Promise<{ created: number; updated: number; stale: number; failed: number }> {
+  const result = { created: 0, updated: 0, stale: 0, failed: 0 };
+  if (findings.length === 0) return result;
+
+  let threads: ReviewThread[] = [];
+  try {
+    threads = await fetchReviewThreadsRaw(prId, config);
+  } catch (err) {
+    console.log(`[inline] could not read PR threads, skipping inline comments: ${err}`);
+    return result;
+  }
+
+  const stamp = opts.today ?? new Date().toISOString().slice(0, 10);
+
+  for (const action of reconcileFindings(findings, threads)) {
+    try {
+      if (action.kind === 'create') {
+        const { finding, key } = action;
+        await postInlineThread(prId, {
+          filePath: finding.file!,
+          line: finding.line!,
+          content: `${markerFor(key)}\n\n**${finding.severity === 'critical' ? '🔴 Critical' : '🟠 Major'}** — ${finding.title}\n\n${finding.body}`,
+        }, config);
+        result.created++;
+      } else if (action.kind === 'update') {
+        const { finding, key } = action;
+        await updateThreadComment(prId, action.threadId, action.commentId,
+          `${markerFor(key)}\n\n**${finding.severity === 'critical' ? '🔴 Critical' : '🟠 Major'}** — ${finding.title}\n\n${finding.body}`,
+          config);
+        result.updated++;
+      } else {
+        await appendToThread(prId, action.threadId, `_Not detected in review of ${stamp}._`, config);
+        result.stale++;
+      }
+    } catch (err) {
+      result.failed++;
+      console.log(`[inline] ${action.kind} failed: ${err}`);
+    }
+  }
+
+  console.log(`[inline] created=${result.created} updated=${result.updated} stale=${result.stale} failed=${result.failed}`);
+  return result;
+}
+
 export async function reviewPR(args: string[]): Promise<void> {
   let prId: number | undefined;
   let repoId: string | undefined;
@@ -241,6 +309,12 @@ export async function reviewPR(args: string[]): Promise<void> {
       config,
       logger,
     );
+
+    // `noPost` is read above and already suppresses the agent's own summary
+    // comment. Inline threads MUST honour it too — see applyInlineFindings' doc.
+    if (!noPost && result.output?.findingsList?.length) {
+      await applyInlineFindings(prId, result.output.findingsList, config);
+    }
 
     if (prReviewStore) {
       try {
