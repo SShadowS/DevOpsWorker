@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, afterEach } from 'bun:test';
-import { fetchReviewThreadsRaw } from '../../../src/sdk/ado/pull-requests.ts';
+import { fetchReviewThreadsRaw, STALE_NOTICE_PREFIX } from '../../../src/sdk/ado/pull-requests.ts';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -48,5 +48,29 @@ describe('fetchReviewThreadsRaw', () => {
   test('skips threads with no comments rather than throwing', async () => {
     mockThreads([{ id: 9, comments: [] }]);
     expect(await fetchReviewThreadsRaw(1, config)).toEqual([]);
+  });
+
+  test('flags a thread whose LAST comment is a stale notice, even though the FIRST is not', async () => {
+    mockThreads([{
+      id: 11,
+      comments: [
+        { id: 1, content: '<!-- ai-finding:abc1234567890def -->\n\nOriginal finding', commentType: 'text' },
+        { id: 2, content: `${STALE_NOTICE_PREFIX}2026-07-29._`, commentType: 'text' },
+      ],
+    }]);
+    const t = (await fetchReviewThreadsRaw(1, config))[0]!;
+    expect(t.lastCommentIsStaleNotice).toBe(true);
+  });
+
+  test('does not flag a thread whose last comment is ordinary content', async () => {
+    mockThreads([{
+      id: 12,
+      comments: [
+        { id: 1, content: '<!-- ai-finding:abc1234567890def -->\n\nOriginal finding', commentType: 'text' },
+        { id: 2, content: 'Thanks, fixed in the next commit.', commentType: 'text' },
+      ],
+    }]);
+    const t = (await fetchReviewThreadsRaw(1, config))[0]!;
+    expect(t.lastCommentIsStaleNotice).toBe(false);
   });
 });
