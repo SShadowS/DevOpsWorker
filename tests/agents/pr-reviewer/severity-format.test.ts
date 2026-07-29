@@ -13,6 +13,7 @@
 // prompt that never asks for it validates fine and posts no inline threads at all.
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
+import { Glob } from 'bun';
 import { PRFindingSchema, PRReviewSchema } from '../../../src/agents/pr-reviewer/schema.ts';
 
 const PROMPT = 'src/agents/pr-reviewer/CLAUDE.md';
@@ -168,5 +169,101 @@ describe('pr-reviewer structured findingsList', () => {
     expect(crlf === 0 || crlf === lf).toBe(true);
     // No bare CR either — inside a line, or old-Mac endings.
     expect(raw.replace(/\r\n/g, '\n')).not.toContain('\r');
+  });
+});
+
+describe('pr-reviewer sub-agents report a location', () => {
+  const AGENTS_DIR = 'src/agents/pr-reviewer/.claude/agents';
+
+  function subAgentFiles(): string[] {
+    return [...new Glob(`${AGENTS_DIR}/*.md`).scanSync({ cwd: '.', dot: true })];
+  }
+
+  /** From the appended heading to the end of the file — it is the last section in each agent. */
+  function reportingLocationSection(path: string): string {
+    const src = readFileSync(path, 'utf-8');
+    const start = src.indexOf('## Reporting a location');
+    expect(start).toBeGreaterThan(-1);
+    return src.slice(start);
+  }
+
+  test('every pr-reviewer sub-agent is asked for a repo-relative path and a diff line', () => {
+    const files = subAgentFiles();
+    expect(files).toHaveLength(7);
+    for (const f of files) {
+      const src = readFileSync(f, 'utf-8');
+      expect(src).toContain('## Reporting a location');
+      expect(src).toContain('repo-relative');
+    }
+  });
+
+  test('the appended section names all three anchor fields', () => {
+    // Pins that the section asks for file, line AND location — not just prose
+    // about what a location is, which would pass without giving the model
+    // anything new to emit.
+    for (const f of subAgentFiles()) {
+      const section = reportingLocationSection(f);
+      expect(section).toContain('`file`');
+      expect(section).toContain('`line`');
+      expect(section).toContain('`location`');
+    }
+  });
+
+  test('the location guidance states a consequence rather than a prohibition', () => {
+    // Measured on this codebase: prohibition wording ("never guess", "do not
+    // invent") suppresses the behaviour outright instead of redirecting it.
+    // "Omit both" is a directive, not a prohibition, and is fine.
+    for (const f of subAgentFiles()) {
+      const section = reportingLocationSection(f);
+      expect(section).not.toMatch(/\b(never|do not|don't|dont)\s+(guess|invent)/i);
+    }
+  });
+
+  test('the four sub-agents that already declared a location field no longer describe a composite', () => {
+    // al-performance-analyzer.md:73 and al-error-pattern-analyzer.md:75 said
+    // "Object name and procedure/line reference"; al-architecture-analyzer.md:75
+    // and al-integration-analyzer.md:86 said "Object name and specific area".
+    // Both embed the line number `location` exists to avoid pooling drift on, and
+    // the two families word it differently, so cross-domain pooling on file +
+    // location failed. They must now describe the same bare identifier the
+    // orchestrator's own `location` field documents.
+    const composite = [
+      'al-error-pattern-analyzer.md',
+      'al-performance-analyzer.md',
+      'al-architecture-analyzer.md',
+      'al-integration-analyzer.md',
+    ];
+    for (const name of composite) {
+      const src = readFileSync(`${AGENTS_DIR}/${name}`, 'utf-8');
+      const m = /"location":\s*"([^"]+)"/.exec(src);
+      expect(m).not.toBeNull();
+      const text = m![1]!.toLowerCase();
+      expect(text).not.toMatch(/procedure\/line reference|specific area/);
+      expect(text).toMatch(/enclosing (procedure|trigger|method)/);
+    }
+  });
+
+  test('sub-agents without a pre-existing location field do not gain one in their Output Format json', () => {
+    // The appended section covers these three via prose; their Output Format
+    // json block is otherwise untouched, so no `location` key should appear there.
+    const untouched = ['code-review-validator.md', 'code-quality-assessor.md', 'security-edge-case-analyzer.md'];
+    for (const name of untouched) {
+      const src = readFileSync(`${AGENTS_DIR}/${name}`, 'utf-8');
+      const jsonBlock = /```json\n([\s\S]*?)```/.exec(src)?.[1] ?? '';
+      expect(jsonBlock).not.toContain('"location"');
+    }
+  });
+
+  test('each sub-agent file keeps uniform line endings', () => {
+    // A block pasted with the other line-ending convention leaves the file
+    // mixed — the failure mode that has already dropped agents from discovery.
+    for (const f of subAgentFiles()) {
+      const raw = readFileSync(f, 'utf-8');
+      const lf = (raw.match(/\n/g) ?? []).length;
+      const crlf = (raw.match(/\r\n/g) ?? []).length;
+      expect(lf).toBeGreaterThan(0);
+      expect(crlf === 0 || crlf === lf).toBe(true);
+      expect(raw.replace(/\r\n/g, '\n')).not.toContain('\r');
+    }
   });
 });
