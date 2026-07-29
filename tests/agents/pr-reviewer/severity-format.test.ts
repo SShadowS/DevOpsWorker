@@ -219,38 +219,51 @@ describe('pr-reviewer sub-agents report a location', () => {
     }
   });
 
-  test('the four sub-agents that already declared a location field no longer describe a composite', () => {
-    // al-performance-analyzer.md:73 and al-error-pattern-analyzer.md:75 said
-    // "Object name and procedure/line reference"; al-architecture-analyzer.md:75
-    // and al-integration-analyzer.md:86 said "Object name and specific area".
-    // Both embed the line number `location` exists to avoid pooling drift on, and
-    // the two families word it differently, so cross-domain pooling on file +
-    // location failed. They must now describe the same bare identifier the
-    // orchestrator's own `location` field documents.
-    const composite = [
-      'al-error-pattern-analyzer.md',
-      'al-performance-analyzer.md',
-      'al-architecture-analyzer.md',
-      'al-integration-analyzer.md',
-    ];
-    for (const name of composite) {
-      const src = readFileSync(`${AGENTS_DIR}/${name}`, 'utf-8');
-      const m = /"location":\s*"([^"]+)"/.exec(src);
+  /**
+   * The literal Output Format example — a model that ignores prose still sees this.
+   * `\r?\n` (not a bare `\n`) because three of these seven files are CRLF: a bare
+   * `\n` after the fence silently fails to match on those, and an earlier version
+   * of this suite masked that with a `?? ''` fallback instead of asserting the
+   * match — which made two-thirds of one now-removed test a no-op on CRLF files.
+   */
+  function outputFormatJsonBlock(path: string): string {
+    const src = readFileSync(path, 'utf-8');
+    const m = /```json\r?\n([\s\S]*?)```/.exec(src);
+    expect(m).not.toBeNull();
+    return m![1]!;
+  }
+
+  test('every sub-agent\'s literal Output Format json example declares file, line, and location', () => {
+    // Fix round 1: the prose section alone was not enough. Every file's json block
+    // says "Respond with a valid JSON object in this exact structure" and "Return
+    // only valid JSON" — a model that takes that literally has no shown slot for
+    // file/line/location unless the example itself carries them. This applies to
+    // all seven now, including the three that had no location field at all before
+    // this task (code-review-validator, code-quality-assessor,
+    // security-edge-case-analyzer) and security-edge-case-analyzer's differently
+    // shaped `edge_cases[]`/`scenario` block.
+    for (const f of subAgentFiles()) {
+      const jsonBlock = outputFormatJsonBlock(f);
+      expect(jsonBlock).toContain('"file"');
+      expect(jsonBlock).toContain('"line"');
+      expect(jsonBlock).toContain('"location"');
+    }
+  });
+
+  test('every sub-agent\'s location declaration in the json example describes the bare enclosing procedure, not a composite', () => {
+    // Originally only 4 of the 7 declared a location field at all, and those 4
+    // described a composite ("Object name and procedure/line reference" /
+    // "Object name and specific area") that embeds the line number `location`
+    // exists to avoid pooling drift on. Now all 7 declare it, so this check
+    // covers all 7 rather than the original 4 — a regression in any of them
+    // (including the 3 added in the fix round) reintroduces the same drift.
+    for (const f of subAgentFiles()) {
+      const jsonBlock = outputFormatJsonBlock(f);
+      const m = /"location":\s*"([^"]+)"/.exec(jsonBlock);
       expect(m).not.toBeNull();
       const text = m![1]!.toLowerCase();
       expect(text).not.toMatch(/procedure\/line reference|specific area/);
       expect(text).toMatch(/enclosing (procedure|trigger|method)/);
-    }
-  });
-
-  test('sub-agents without a pre-existing location field do not gain one in their Output Format json', () => {
-    // The appended section covers these three via prose; their Output Format
-    // json block is otherwise untouched, so no `location` key should appear there.
-    const untouched = ['code-review-validator.md', 'code-quality-assessor.md', 'security-edge-case-analyzer.md'];
-    for (const name of untouched) {
-      const src = readFileSync(`${AGENTS_DIR}/${name}`, 'utf-8');
-      const jsonBlock = /```json\n([\s\S]*?)```/.exec(src)?.[1] ?? '';
-      expect(jsonBlock).not.toContain('"location"');
     }
   });
 

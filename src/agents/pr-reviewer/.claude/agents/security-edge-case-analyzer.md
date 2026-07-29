@@ -91,6 +91,9 @@ You MUST respond with a valid JSON object in exactly this structure:
       "scenario": "Clear description of the security edge case or vulnerability",
       "handled": true,
       "severity": "high|medium|low",
+      "file": "Repo-relative path of the changed file",
+      "line": "Line number on the RIGHT (source-branch) side of the diff",
+      "location": "The enclosing procedure, trigger, or method name — nothing else",
       "recommendation": "Specific remediation steps if not handled, or confirmation of existing protection"
     }
   ],

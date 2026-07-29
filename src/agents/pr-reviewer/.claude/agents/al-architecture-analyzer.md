@@ -72,6 +72,8 @@ Respond with a valid JSON object in this exact structure:
     {
       "severity": "high|medium|low",
       "category": "srp|coupling|extensibility|procedure|organization|dependency|pattern",
+      "file": "Repo-relative path of the changed file",
+      "line": "Line number on the RIGHT (source-branch) side of the diff",
       "location": "The enclosing procedure, trigger, or method name — nothing else",
       "issue": "Clear description of the architectural concern",
       "impact": "How this affects maintainability, testability, or extensibility",

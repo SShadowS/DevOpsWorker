@@ -59,6 +59,9 @@ Always return your findings as a JSON object with this exact structure:
       "title": "Concise description of the finding",
       "verdict": "valid_issue|not_an_issue|needs_verification",
       "severity": "high|medium|low",
+      "file": "Repo-relative path of the changed file",
+      "line": "Line number on the RIGHT (source-branch) side of the diff",
+      "location": "The enclosing procedure, trigger, or method name — nothing else",
       "explanation": "Detailed explanation with specific line references and control flow analysis",
       "code_snippet": "The relevant code excerpt if it helps clarify the issue"
     }

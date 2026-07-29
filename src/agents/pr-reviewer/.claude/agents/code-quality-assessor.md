@@ -68,6 +68,9 @@ Always respond with a valid JSON object in this exact structure:
   "findings": [
     {
       "severity": "high|medium|low",
+      "file": "Repo-relative path of the changed file",
+      "line": "Line number on the RIGHT (source-branch) side of the diff",
+      "location": "The enclosing procedure, trigger, or method name — nothing else",
       "explanation": "Clear, specific description of the issue including the exact location in code and why it's problematic",
       "suggestion": "Concrete, actionable fix with code example when helpful"
     }

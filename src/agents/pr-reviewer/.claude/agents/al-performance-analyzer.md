@@ -70,6 +70,8 @@ Respond with a valid JSON object in this exact structure:
     {
       "severity": "high|medium|low",
       "category": "setloadfields|query|loop|transaction|temp_table|design|report_api",
+      "file": "Repo-relative path of the changed file",
+      "line": "Line number on the RIGHT (source-branch) side of the diff",
       "location": "The enclosing procedure, trigger, or method name — nothing else",
       "issue": "Clear description of the performance anti-pattern",
       "impact": "Estimated performance impact (e.g., 'O(n²) instead of O(n)', 'extra query per record')",
