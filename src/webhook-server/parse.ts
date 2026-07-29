@@ -117,6 +117,8 @@ export function parseWebhookPayload(payload: unknown): PRWebhookEvent | null {
     const linkMatch = selfHref.match(/threads\/(\d+)\/comments\/(\d+)/);
     if (!linkMatch) throw new Error(`Cannot extract thread/comment ID from: ${selfHref}`);
     const commentKey = `${linkMatch[1]}:${linkMatch[2]}`;
+    // Format is `threadId:commentId` — parseCommentKey below is its reader. Keep the
+    // two together so the format cannot drift apart from the code that consumes it.
 
     // Replay protection (same 5-minute window as PR created)
     const age = Date.now() - new Date(result.data.createdDate).getTime();
@@ -170,4 +172,26 @@ export function parseWebhookPayload(payload: unknown): PRWebhookEvent | null {
       description: resource.description,
     },
   };
+}
+
+/**
+ * Read back the `commentKey` this module writes — `threadId:commentId`.
+ *
+ * Returns `null` for anything that is not two positive integers separated by a single
+ * colon, so a caller cannot silently address thread `NaN`. Consumers treat `null` as
+ * "no comment to act on" rather than an error: the key only exists for
+ * comment-triggered reviews, and nothing downstream should fail because a reaction
+ * could not be placed.
+ */
+export function parseCommentKey(
+  key: string | undefined | null,
+): { threadId: number; commentId: number } | null {
+  if (!key) return null;
+  const match = /^(\d+):(\d+)$/.exec(key.trim());
+  if (!match) return null;
+  const threadId = Number(match[1]);
+  const commentId = Number(match[2]);
+  if (!Number.isSafeInteger(threadId) || !Number.isSafeInteger(commentId)) return null;
+  if (threadId <= 0 || commentId <= 0) return null;
+  return { threadId, commentId };
 }

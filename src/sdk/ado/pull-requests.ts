@@ -286,6 +286,34 @@ export async function appendToThread(
 }
 
 /**
+ * Add a Like reaction to a PR comment.
+ *
+ * Used to acknowledge a `/review` command the moment the pipeline starts working on
+ * it. A review takes minutes, so without a signal the author cannot tell whether the
+ * command was seen and tends to comment again.
+ *
+ * `POST`, not `PUT` — the real API answers `PUT` on this sub-resource with
+ * *405 Method Not Allowed*. It takes no body: the liking identity is whoever owns the
+ * PAT, so the reaction appears under that account rather than as a distinct bot.
+ *
+ * A Like is the only reaction Azure DevOps offers on PR comments — the resource is a
+ * list of users, not of reaction types, and there is no `reactions` endpoint here
+ * (work *item* comments are a separate API that does support typed reactions).
+ */
+export async function likePRComment(
+  prId: number,
+  threadId: number,
+  commentId: number,
+  config: PipelineConfig,
+): Promise<void> {
+  await adoFetch<unknown>(
+    config.azureDevOps,
+    `git/repositories/${config.azureDevOps.repositoryId}/pullrequests/${prId}/threads/${threadId}/comments/${commentId}/likes?api-version=7.0`,
+    { method: 'POST' },
+  );
+}
+
+/**
  * Post a comment thread on a pull request.
  * Uses status=4 (closed) so it shows as informational without requiring resolution.
  */

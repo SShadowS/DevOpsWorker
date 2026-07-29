@@ -5,6 +5,7 @@ import {
   postInlineThread,
   updateThreadComment,
   appendToThread,
+  likePRComment,
 } from '../../../src/sdk/ado/pull-requests.ts';
 
 const realFetch = globalThis.fetch;
@@ -167,5 +168,41 @@ describe('appendToThread', () => {
     expect(url).not.toContain('/threads?api-version=7.0');
     expect(body).toEqual({ content: 'not detected in this review', commentType: 1 });
     expect(body.status).toBeUndefined();   // a reply must never close/resolve the thread
+  });
+});
+
+describe('likePRComment', () => {
+  test('POSTs to the comment likes sub-resource', async () => {
+    let method: string | undefined;
+    let url: string | undefined;
+    globalThis.fetch = mock((u: string, init: any) => {
+      url = u;
+      method = init.method;
+      return Promise.resolve(new Response('', { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await likePRComment(1, 7, 3, config);
+
+    // POST, not PUT — verified against the real API, which answers PUT with
+    // 405 Method Not Allowed on this sub-resource.
+    expect(method).toBe('POST');
+    // Full suffix, not a fragment: `appendToThread` POSTs to
+    // ".../threads/7/comments?api-version=7.0", so a substring check on
+    // "/comments" would pass even if this wrongly hit that endpoint and posted
+    // a reply to the PR instead of adding a reaction.
+    expect(url).toContain('/pullrequests/1/threads/7/comments/3/likes?api-version=7.0');
+    expect(url).not.toContain('/comments?api-version=7.0');
+  });
+
+  test('sends no body — the liking identity comes from the PAT', async () => {
+    let init: any;
+    globalThis.fetch = mock((_u: string, i: any) => {
+      init = i;
+      return Promise.resolve(new Response('', { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await likePRComment(1, 7, 3, config);
+
+    expect(init.body).toBeUndefined();
   });
 });

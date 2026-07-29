@@ -42,7 +42,12 @@ export async function adoFetch<T>(
     );
   }
 
-  return res.json() as Promise<T>;
+  // Several Azure DevOps write endpoints answer a successful call with 200 and an
+  // EMPTY body — adding a Like to a PR comment is one. `res.json()` throws
+  // "Unexpected end of JSON input" on those, so treat an empty body as `undefined`
+  // rather than a failure. Non-empty bodies parse exactly as before.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 /**
