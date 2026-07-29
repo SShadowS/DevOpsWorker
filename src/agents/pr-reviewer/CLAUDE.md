@@ -203,15 +203,29 @@ Combine all agent findings into a single prioritized list.
 
 **First, drop noise:** discard every finding you verified as `not_an_issue` / false positive. These never reach the posted comment (see Phase 6 brevity rule 1). The sole carry-over is a false positive that rebuts a concern raised in an *existing* PR comment — keep only that one, for a single Conclusion row.
 
-**Priority order:** critical > high > medium > low
+**Priority order:** Critical > Major > Minor > Nitpick
 
-**Severity mapping from agent outputs:**
+**Severity mapping from agent outputs.** These four names are the ONLY valid
+severities — they are what step 11's `findings` object counts, so anything else
+cannot be reported:
 
-| Agent severity | Review severity |
-|----------------|-----------------|
-| `high` | Critical |
-| `medium` | High |
-| `low` | Medium |
+| Agent severity | Review severity | Means |
+|----------------|-----------------|-------|
+| `high` | **Critical** | Wrong behaviour, data loss, security exposure, or a real performance problem. Blocks the PR. |
+| `medium` | **Major** | A genuine defect in a narrower case, or a live regression with a workaround. Should be fixed in this PR. |
+| `low` | **Minor** | Correct today but worth tightening — hardening, a latent issue with no live trigger, a missing guard nothing currently hits. |
+| (see below) | **Nitpick** | Style, naming, wording, a suggestion the author can decline without consequence. |
+
+Assign **Nitpick** yourself, regardless of what the agent said, when the finding
+is an improvement rather than a defect: a missing log line, a suggested
+refactor, a documentation nit.
+
+Downgrade to **Minor** when a finding is real in principle but you established
+it cannot fire today — for example an event whose only subscriber is a test, or
+a stale global that no shipped code path reaches. Say so in one clause ("latent
+— no production subscriber today"). A reader who cannot tell a live regression
+from a latent one has to re-derive that themselves for every finding, which is
+the fastest way to lose their trust in the whole review.
 
 **Deduplication rules** — when multiple agents flag the same code location:
 1. Keep the entry with the most detail and context
@@ -253,10 +267,17 @@ Cherry-pick findings influence the recommendation the same way as any other find
 
 ### 8. Determine Recommendation
 
-- **Request changes** if ANY critical-severity finding exists across ANY domain
+Judge on the severities you assigned in step 7, not on how many findings there are.
+
+- **Request changes** if ANY **Critical** finding exists across ANY domain
 - **Request changes** if the correctness agent reports `overall_correctness: "needs_fixes"` or plan compliance fails
-- **Needs discussion** if there are multiple high-severity findings that require human judgment
-- **Approve** if no critical findings and all domains report acceptable or better ratings
+- **Needs discussion** if there are multiple **Major** findings that require human judgment
+- **Approve** if there are no Critical findings and all domains report acceptable or better ratings
+
+A review of only Minor and Nitpick findings is an **approve** with suggestions —
+say so plainly rather than reaching for "needs discussion". Volume is not
+severity: eight Nitpicks do not add up to a blocker, and treating them as one
+teaches authors to ignore the recommendation line.
 
 ## Phase 6: Prepare and Post Review Comment
 
@@ -269,12 +290,12 @@ Use this structure for the final comment:
 
 [Optional: ONE short sentence of overall context, only if it adds signal. Skip praise.]
 
-### Finding 1: [Title] — [Emoji] **[VERDICT]**
+### Finding 1: [Title] — [Emoji] **[Severity]**
 [Explanation with code references]
 
 ---
 
-### Finding 2: [Title] — [Emoji] **[VERDICT]**
+### Finding 2: [Title] — [Emoji] **[Severity]**
 [Explanation with code references]
 
 ---
@@ -283,9 +304,9 @@ Use this structure for the final comment:
 
 ## Conclusion
 
-| Concern | Status |
-|---------|--------|
-| [Item] | [Emoji] [Verdict] |
+| Concern | Severity |
+|---------|----------|
+| [Item] | [Emoji] [Severity] |
 
 **Recommendation: [approve / request changes / needs discussion]**
 
@@ -293,16 +314,32 @@ Use this structure for the final comment:
 <sub>💡 Comment `/review` on this PR to request a new review.</sub>
 ```
 
-**Status emojis (only two verdict classes appear in the body):**
-- ⚠️ Real issue that should be addressed
-- ❓ Needs manual verification
+**Severity labels — the heading carries the severity, not a verdict:**
+
+| Label | Emoji | Use for |
+|---|---|---|
+| Critical | 🔴 | Wrong behaviour, data loss, security exposure, real performance problem |
+| Major | 🟠 | Genuine defect in a narrower case; fix in this PR |
+| Minor | 🟡 | Correct today; hardening, or latent with no live trigger |
+| Nitpick | 🔵 | Style or suggestion the author can decline |
+| Needs verification | ❓ | Cannot be settled from the code; needs a human or product decision |
+
+Order findings by severity, Critical first.
+
+**Do not label findings "REAL ISSUE".** Every finding you post is one you already
+judged real — Phase 5 dropped the false positives — so the words add no
+information and read as an accusation. The severity is the useful signal: it
+tells the author what to fix now, what to fix later, and what they may decline.
+A list where eight items all read "REAL ISSUE" is indistinguishable from a list
+of eight blockers, and an author who cannot triage it tends to discount all of
+it. Give them the gradient you already computed.
 
 **Brevity rules — the review is read by busy engineers, every line must earn its place:**
 
 1. **Never include a "Verified false positives" / "False alarms" / "Not an issue" section, table, or list.** A finding an agent raised and you disproved is internal scratch work — it has zero value to the PR author. Drop it silently. The ONLY exception: a concern raised in an **existing PR comment** (human or prior AI) that you verified as a non-issue — note that in a single Conclusion row so the standing concern is closed.
-2. **No status legend.** The emojis (⚠️/❓) are self-evident; do not print a legend explaining them.
+2. **No status legend.** Each label prints its emoji and its word together (🔴 **Critical**), so it explains itself; do not print a table defining them.
 3. **Each finding ≤ ~4 sentences of prose.** Include a code snippet only when it pinpoints the exact defect — never to restate context the author already has.
-4. **Conclusion table lists only actionable or unverified items** (⚠️/❓ rows). Do not add "✅ Solid" / "✅ Good hygiene" praise rows — absence of a finding already says the code is fine.
+4. **Conclusion table lists only findings and unverified items.** Do not add "✅ Solid" / "✅ Good hygiene" praise rows — absence of a finding already says the code is fine.
 5. **No opening praise paragraph.** At most one sentence of context if it changes how findings are read (e.g. "brand-new feature, no prior version to diff against"). Otherwise go straight to Finding 1.
 6. A coverage caveat (truncated file list, missing diff) is worth one short line — state it once, do not repeat it per finding.
 
