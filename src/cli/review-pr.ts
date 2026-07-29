@@ -147,6 +147,15 @@ export function maybeInjectToolRule(): number {
 }
 
 /**
+ * Render the marker + severity-labeled body shared by a thread's creation and
+ * its later update — the only difference between the two call sites is which
+ * ADO write carries this same string.
+ */
+function buildCommentBody(finding: PRFinding, key: string): string {
+  return `${markerFor(key)}\n\n**${finding.severity === 'critical' ? '🔴 Critical' : '🟠 Major'}** — ${finding.title}\n\n${finding.body}`;
+}
+
+/**
  * Post this review's Critical/Major findings as line-anchored threads.
  *
  * Additive by construction: it runs AFTER the agent has already posted the
@@ -180,14 +189,12 @@ export async function applyInlineFindings(
         await postInlineThread(prId, {
           filePath: finding.file!,
           line: finding.line!,
-          content: `${markerFor(key)}\n\n**${finding.severity === 'critical' ? '🔴 Critical' : '🟠 Major'}** — ${finding.title}\n\n${finding.body}`,
+          content: buildCommentBody(finding, key),
         }, config);
         result.created++;
       } else if (action.kind === 'update') {
         const { finding, key } = action;
-        await updateThreadComment(prId, action.threadId, action.commentId,
-          `${markerFor(key)}\n\n**${finding.severity === 'critical' ? '🔴 Critical' : '🟠 Major'}** — ${finding.title}\n\n${finding.body}`,
-          config);
+        await updateThreadComment(prId, action.threadId, action.commentId, buildCommentBody(finding, key), config);
         result.updated++;
       } else {
         await appendToThread(prId, action.threadId, `_Not detected in review of ${stamp}._`, config);
