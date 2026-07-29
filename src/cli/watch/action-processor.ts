@@ -4,6 +4,8 @@ import type { IPRReviewStore } from '../../pipeline/pr-review-store.interface.ts
 import type { PipelineConfig, TestCaseFailure } from '../../types/pipeline.types.ts';
 import type { PipelineAction } from '../../dashboard/actions.ts';
 import { addWorkItemTags, fetchTestCaseFailures } from '../../sdk/azure-devops-client.ts';
+import { likePRComment } from '../../sdk/ado/pull-requests.ts';
+import { parseCommentKey } from '../../webhook-server/parse.ts';
 import { findRepoByRepositoryId } from '../../config/repos.ts';
 import {
   buildDockerArgs,
@@ -144,6 +146,41 @@ export async function executeAction(
     if (!repo) {
       log(`Cannot review PR #${prId}: unknown repo ${repositoryId}`);
       return;
+    }
+
+    // Acknowledge a `/review` command with a Like, so the author can see it was picked
+    // up. A review takes minutes; without a signal people cannot tell the command was
+    // seen and comment again.
+    //
+    // Here rather than in the webhook server, deliberately: this runs once the action
+    // has been claimed and the repo resolved, so the Like means "accepted, starting
+    // work" rather than "a request arrived that might still be filtered". The
+    // duplicate-review guard upstream has already returned by this point, so a
+    // re-triggered PR is not liked twice.
+    //
+    // Cosmetic only — never let a failed reaction stop a review. `commentKey` is
+    // `threadId:commentId`, set by the webhook server for comment-triggered reviews
+    // and absent for PR-creation triggers.
+    const triggerComment = parseCommentKey(payload.commentKey);
+    if (triggerComment) {
+      // The PR may live in any registered repo, so override the polling config's
+      // default repositoryId/project with this PR's own.
+      const prConfig: PipelineConfig = {
+        ...pollingConfig,
+        azureDevOps: {
+          ...pollingConfig.azureDevOps,
+          repositoryId,
+          project: project || pollingConfig.azureDevOps.project,
+        },
+      };
+      try {
+        await likePRComment(prId, triggerComment.threadId, triggerComment.commentId, prConfig);
+        log(`[PR #${prId}] Acknowledged /review comment ${payload.commentKey} with a Like`);
+      } catch (err) {
+        log(`[PR #${prId}] Could not Like /review comment ${payload.commentKey}: ${err}`);
+      }
+    } else if (payload.commentKey) {
+      log(`[PR #${prId}] Malformed commentKey '${payload.commentKey}' — skipping the Like`);
     }
 
     // Use PR ID as workspace volume name (not work item ID)

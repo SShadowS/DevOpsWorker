@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { parseWebhookPayload } from '../../src/webhook-server/parse.ts';
+import { parseWebhookPayload, parseCommentKey } from '../../src/webhook-server/parse.ts';
 
 function prCreatedPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -201,5 +201,42 @@ describe('comment event parsing', () => {
     delete resource.comment.content;
     const result = parseWebhookPayload(payload);
     expect(result).toBeNull();
+  });
+});
+
+describe('parseCommentKey', () => {
+  test('reads back the key parseWebhookPayload writes', () => {
+    expect(parseCommentKey('246397:1')).toEqual({ threadId: 246397, commentId: 1 });
+  });
+
+  test('round-trips a real comment event, so the writer and reader cannot drift', () => {
+    // Not a hand-built string: take the key the parser actually emits and feed it back.
+    // A change to either side alone breaks this.
+    const event = parseWebhookPayload(commentEventPayload('/review'));
+    expect(event?.commentKey).toBeDefined();
+    expect(parseCommentKey(event!.commentKey!)).toEqual({ threadId: 5001, commentId: 1 });
+  });
+
+  test('returns null for a missing key — PR-creation triggers have none', () => {
+    expect(parseCommentKey(undefined)).toBeNull();
+    expect(parseCommentKey(null)).toBeNull();
+    expect(parseCommentKey('')).toBeNull();
+  });
+
+  test('returns null rather than NaN for malformed input', () => {
+    // Each of these would become `NaN` under a bare split+Number, and NaN would be
+    // sent into a URL path addressing thread "NaN".
+    for (const bad of ['abc:1', '1:abc', '246397', '246397:', ':1', '1:2:3', '1;2', ' ']) {
+      expect(parseCommentKey(bad)).toBeNull();
+    }
+  });
+
+  test('returns null for non-positive ids', () => {
+    expect(parseCommentKey('0:1')).toBeNull();
+    expect(parseCommentKey('1:0')).toBeNull();
+  });
+
+  test('tolerates surrounding whitespace', () => {
+    expect(parseCommentKey('  246397:1  ')).toEqual({ threadId: 246397, commentId: 1 });
   });
 });
