@@ -402,6 +402,18 @@ describe('buildPriorFindingsBlock', () => {
     expect(findingKey('A.al', 'Error() \\| ErrorInfo() mismatch')).toBe(key);
   });
 
+  test('escaping a pipe is idempotent — a title copied back already escaped does not accrete a second backslash', () => {
+    // The re-review cycle this guards against: the model copies a title verbatim
+    // out of a previous prior-findings row, which already contains `\|`. A naive
+    // `replace(/\|/g, '\\|')` would then escape the pipe a second time on top of
+    // the existing backslash — one extra backslash per re-review, unbounded on a
+    // long-lived PR.
+    const alreadyEscaped = 'Error() \\| ErrorInfo() mismatch'; // one backslash, as printed by a prior row
+    const key = findingKey('A.al', alreadyEscaped);
+    const block = buildPriorFindingsBlock([markerThread({ rawContent: bodyFor(key, '🟠 Major', alreadyEscaped) })]);
+    expect(rowFor(block, 'A.al')).toBe('| A.al | Error() \\| ErrorInfo() mismatch |');
+  });
+
   test('a file reported with a leading slash prints the spelling that hashes back', () => {
     // `findingKey` applies no slash normalisation, and `postInlineThread` tolerates
     // a leading slash — so the key on this thread may have been built from

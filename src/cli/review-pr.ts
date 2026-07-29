@@ -186,27 +186,35 @@ function parseFindingTitle(rawContent: string): string | null {
   return null;
 }
 
-/** Keep a `|` in a title from breaking the markdown table it is printed in. */
+/**
+ * Keep a `|` in a title from breaking the markdown table it is printed in.
+ *
+ * Idempotent: `\?\|` also matches an already-escaped `\|`, so escaping a title
+ * that was itself copied back out of a previous prior-findings row (the model
+ * reuses the row verbatim) does not accrete a second backslash. Safe for the
+ * key either way — `findingKey` collapses every non-alphanumeric run to a
+ * single space, so `\|` and `|` normalise to the same identity.
+ */
 function escapeCell(text: string): string {
-  return text.replace(/\|/g, '\\|');
+  return text.replace(/\\?\|/g, '\\|');
 }
 
 /**
  * Return the `file` spelling that reproduces this thread's own key, or null when
  * neither candidate does.
  *
- * `findingKey` hashes the path the MODEL reported and applies no slash
- * normalisation, so `/App/x.al` and `App/x.al` are different identities. Both are
- * reachable — `postInlineThread` tolerates a leading slash — and ADO stores the
- * anchor with a leading slash either way, so the thread alone does not say which
- * spelling was hashed. Try the repo-relative form first (what the prompt asks the
- * model for) and fall back to the stored form.
+ * `findingKey` now normalises the path itself (strips a leading slash, folds
+ * backslashes to forward slashes), so the two candidates below agree whenever the
+ * title also matches — the slash-spelling ambiguity this function was written for
+ * is closed at the source. It stays a two-candidate check anyway because it has a
+ * second job that path normalisation cannot touch: proving the TITLE on hand is
+ * the one the key was built from. A null still means the pair on hand cannot name
+ * this thread — the comment was hand-edited, or the title spans lines and only
+ * its first line survived parsing — and that case is unaffected by this change.
  *
- * A null means the pair on hand cannot name this thread: the comment was
- * hand-edited, or the title spans lines and only its first line survived parsing.
- * Printing that row would be worse than omitting it — the model would reuse it
- * verbatim and still fork the thread, with the table taking the blame off the
- * model. So the row is dropped, and the caller logs the drop.
+ * Printing an unverified row would be worse than omitting it — the model would
+ * reuse it verbatim and still fork the thread, with the table taking the blame
+ * off the model. So the row is dropped, and the caller logs the drop.
  */
 function fileSpellingMatchingKey(filePath: string, title: string, key: string): string | null {
   for (const candidate of [filePath.replace(/^\/+/, ''), filePath]) {

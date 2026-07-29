@@ -17,6 +17,16 @@ describe('findingKey', () => {
   test('is hex and short enough to embed', () => {
     expect(findingKey('a/B.al', 't')).toMatch(/^[0-9a-f]{16}$/);
   });
+
+  test('a leading slash on the file does not change the identity', () => {
+    // ADO's stored thread anchor and the model's repo-relative report are the
+    // same finding — without this they silently forked into two threads.
+    expect(findingKey('/App/x.al', 't')).toBe(findingKey('App/x.al', 't'));
+  });
+
+  test('backslashes in the file normalise to forward slashes', () => {
+    expect(findingKey('App\\Sub\\x.al', 't')).toBe(findingKey('App/Sub/x.al', 't'));
+  });
 });
 
 describe('marker round-trip', () => {
