@@ -28,6 +28,14 @@ export interface PRReviewParams {
   prTitle?: string;
   prDescription?: string;
   noPost?: boolean;
+  /**
+   * Markdown table of the `file` + `title` pairs that already carry an inline
+   * thread on this PR (built by `buildPriorFindingsBlock`), or '' when there are
+   * none. `buildPrompt` ignores its state and context arguments, so this is the
+   * only channel through which the prompt can learn what a previous review named
+   * its findings — and a finding's identity is its file plus its title.
+   */
+  priorFindingsBlock?: string;
 }
 
 export interface CherryPickInfo {
@@ -184,7 +192,11 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
         );
       }
 
-      return lines.filter(Boolean).join('\n');
+      const body = lines.filter(Boolean).join('\n');
+      // Prepended, not appended: the model needs the titles it must reuse before
+      // it starts naming findings. Omitted entirely when empty — an unconditional
+      // heading over an empty table would assert prior findings that don't exist.
+      return params.priorFindingsBlock ? `${params.priorFindingsBlock}\n\n${body}` : body;
     },
   };
 }

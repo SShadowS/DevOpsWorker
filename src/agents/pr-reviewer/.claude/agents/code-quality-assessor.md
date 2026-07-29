@@ -68,6 +68,9 @@ Always respond with a valid JSON object in this exact structure:
   "findings": [
     {
       "severity": "high|medium|low",
+      "file": "Repo-relative path of the changed file",
+      "line": "Line number on the RIGHT (source-branch) side of the diff",
+      "location": "The enclosing procedure, trigger, or method name — nothing else",
       "explanation": "Clear, specific description of the issue including the exact location in code and why it's problematic",
       "suggestion": "Concrete, actionable fix with code example when helpful"
     }
@@ -113,3 +116,21 @@ prompt told you is available (AL LSP `goToDefinition`/`outgoingCalls`, or the
 `al-symbol` Bash helper). State in the finding's explanation that you confirmed the
 callee's behavior. A real example this prevents: flagging a missing `Commit()` when
 the called insert procedure already commits five calls deep.
+
+## Reporting a location
+
+Give the orchestrator three machine-usable fields for every finding, so it can anchor a
+PR comment to the exact line instead of just the review summary:
+
+- `file` — the **repo-relative path** of a changed file, exactly as it appears in
+  the changed-file list you were given (`App/Cloud/Al/Codeunits/X.Codeunit.al`).
+  Not an AL object name, not a codeunit number.
+- `line` — a line number on the **RIGHT (source-branch) side** of the diff.
+- `location` — the bare name of the enclosing procedure, trigger, or method the
+  finding sits in — `PostDocument`, `OnAfterValidateEvent` — and nothing else.
+  Omit it when the finding is not inside one.
+
+If a finding has no single location — it spans several call sites, or concerns
+something absent such as a missing test — omit `file` and `line`. A guessed line
+anchors a comment to unrelated code and is worse than no anchor; omitting costs
+nothing, because the finding still reaches the author through the review summary.

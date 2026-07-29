@@ -34,8 +34,11 @@ bun run test
 bun test --preload ./tests/setup.ts private/tests   # skip if private/ is absent
 ```
 
-Never point these at the production DB — `tests/db/*` runs TRUNCATE/DELETE. Use a
-throwaway `DATABASE_URL`.
+`tests/db/` holds exactly one pure mapper test with no database connection
+(`package.json`'s `test` script names that file explicitly, not the directory).
+This workspace has already lost production data to a DB test run against the
+live `DATABASE_URL` — if a future test in this gate opens a real connection,
+pin the gate to it by filename, the same way, rather than by directory.
 
 ## 3 — Rebuild the spawned-container image
 
