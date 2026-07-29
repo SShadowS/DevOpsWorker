@@ -83,14 +83,25 @@ describe('fetchReviewThreadsRaw', () => {
 
 describe('postInlineThread', () => {
   test('anchors to the right-hand side of the diff and leaves the thread active', async () => {
+    let method: string | undefined;
+    let url: string | undefined;
     let body: any;
-    globalThis.fetch = mock((_u: string, init: any) => {
+    globalThis.fetch = mock((u: string, init: any) => {
+      url = u;
+      method = init.method;
       body = JSON.parse(init.body);
       return Promise.resolve(new Response(JSON.stringify({ id: 5 }), { status: 200 }));
     }) as unknown as typeof fetch;
 
     await postInlineThread(1, { filePath: 'App/X.al', line: 42, content: 'c' }, config);
 
+    expect(method).toBe('POST');
+    // Full suffix, not a fragment: the thread-creation endpoint has no threadId/comments
+    // segment, unlike appendToThread's and updateThreadComment's URLs — a bare
+    // `.toContain('threads')` would pass even against the wrong endpoint.
+    expect(url).toContain('/pullrequests/1/threads?api-version=7.0');
+    expect(body.comments[0].content).toBe('c');   // the finding's own text must survive
+    expect(body.comments[0].commentType).toBe(1);
     expect(body.threadContext.filePath).toBe('/App/X.al');   // ADO requires a leading slash
     expect(body.threadContext.rightFileStart.line).toBe(42);
     expect(body.threadContext.rightFileEnd.line).toBe(42);
@@ -98,12 +109,18 @@ describe('postInlineThread', () => {
   });
 
   test('does not double the leading slash on an already-absolute path', async () => {
+    let method: string | undefined;
+    let url: string | undefined;
     let body: any;
-    globalThis.fetch = mock((_u: string, init: any) => {
+    globalThis.fetch = mock((u: string, init: any) => {
+      url = u;
+      method = init.method;
       body = JSON.parse(init.body);
       return Promise.resolve(new Response('{}', { status: 200 }));
     }) as unknown as typeof fetch;
     await postInlineThread(1, { filePath: '/App/X.al', line: 1, content: 'c' }, config);
+    expect(method).toBe('POST');
+    expect(url).toContain('/pullrequests/1/threads?api-version=7.0');
     expect(body.threadContext.filePath).toBe('/App/X.al');
   });
 });
