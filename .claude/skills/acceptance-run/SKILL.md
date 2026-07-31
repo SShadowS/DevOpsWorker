@@ -73,6 +73,13 @@ docker volume create "$VOL" >/dev/null
 WS="${CLAUDE_PROJECT_DIR:-$PWD}"
 HOST_PRIVATE_DIR=$(grep -E '^HOST_PRIVATE_DIR=' "$WS/.env" | cut -d= -f2-)
 
+# `.env`'s DATABASE_URL is HOST-oriented (localhost). Inside a container that resolves
+# to the container ITSELF, so the review completes normally and then silently fails to
+# persist — you get a full run and no `pr_reviews` row to inspect. On the compose
+# network the database answers to the service alias instead.
+DB_URL=$(grep -E '^DATABASE_URL=' "$WS/.env" | cut -d= -f2- \
+  | sed -E 's#@(localhost|127\.0\.0\.1):#@postgres:#')
+
 docker run --rm --name "$VOL" \
   --network pipeline-net \
   -v do-pipeline-state:/state \
@@ -85,6 +92,9 @@ docker run --rm --name "$VOL" \
   -e REPO_BRANCH=<default branch> \
   -e SESSION_ROOT=/workspace/session \
   -e PR_REVIEW_NO_POST=1 \
+  -e ANTHROPIC_API_KEY= \
+  -e "DATABASE_URL=$DB_URL" \
+
   devopsworker:latest \
   review-pr --pr-id <PRID> --repo-id <guid> \
     --source-branch "<sourceRef minus refs/heads/>" \
@@ -96,6 +106,18 @@ docker volume rm -f "$VOL"
 
 Run it in the background and watch the output file — a full review takes many minutes.
 
+**Which credential pays.** `ANTHROPIC_API_KEY` takes precedence over
+`CLAUDE_CODE_OAUTH_TOKEN` when both are set, so an `--env-file` carrying both bills
+pay-per-token even though a subscription is configured. The blank `-e ANTHROPIC_API_KEY=`
+above forces the OAuth path; the entrypoint only requires ONE of the two to be
+non-empty, so blanking it is safe. Drop that line to deliberately bill the API key.
+
+Note this is the opposite of what the watcher does for real reviews: it sets
+`PR_REVIEW_ANTHROPIC_API_KEY` precisely to keep production PR reviews on
+pay-per-token and reserve the subscription for the main pipeline. That variable is
+read only by the dispatcher, never inside the container, so it cannot affect a manual
+run either way.
+
 Gotchas that have each cost a run:
 - `--env-file` needs a path the **host** docker CLI can open. `MSYS_NO_PATHCONV=1`
   correctly leaves container-side paths alone but does not translate the host side, so
@@ -103,6 +125,10 @@ Gotchas that have each cost a run:
   (docker-CLI level — nothing was spent).
 - The overlay mount must be set or the repo registry is empty and the key will not
   resolve.
+- A host-oriented `DATABASE_URL` costs you the whole verification step, not the run:
+  the review completes and exits 0, then logs `No database connection — review not
+  persisted` and writes nothing. Grep the log for `could not connect to database`
+  before concluding a row is missing for any more interesting reason.
 - Rebuild first if `devopsworker:latest` predates HEAD, or you are testing old code.
 
 ## Step 4 — Read the result, and kill early if it is not testing anything
