@@ -4,7 +4,16 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-commit.ts\"" }
+          { "type": "command", "command": "bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-commit.ts\"" },
+          { "type": "command", "command": "bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/docker-guard.ts\"" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          { "type": "command", "command": "bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/leak-scan.ts\"" }
         ]
       }
     ],
