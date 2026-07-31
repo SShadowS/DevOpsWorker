@@ -592,6 +592,51 @@ describe('trimSecurityDomains', () => {
     const twice = trimSecurityDomains(once);
     expect(twice).toBe(once);
   });
+
+  // ---------------------------------------------------------------------------
+  // Fix round 1, Critical — the reviewer's own repro. A structurally valid
+  // framework (same headings, same boundaries) whose BC domain has been reworded
+  // matches nothing in the `/Business Central Platform Security/` filter, so the
+  // naive implementation kept only the pre-framework intro and stripped EVERY
+  // domain, including the one this lever exists to preserve. That is silent
+  // corruption: `trimmed !== content` is true, so the hook would have written it
+  // to the tracked file with no error and no distinguishing log line. The fix is
+  // to fail safe — return the original content completely unchanged — rather than
+  // fail silent.
+  // ---------------------------------------------------------------------------
+
+  test('fails safe (changes nothing) when the BC heading has been reworded — the reviewer\'s exact repro', () => {
+    const src = [
+      '## Analysis Framework',
+      '',
+      'For every piece of code or system you analyze, systematically evaluate these security domains:',
+      '',
+      '### 1. Input Validation & Sanitization',
+      '- SQL injection vectors',
+      '',
+      '### 8. BC Platform & Tenant Security',
+      '- Permission sets',
+      '',
+      '## Output Format',
+      'json here',
+    ].join('\n');
+    const out = trimSecurityDomains(src);
+    // The failure mode this guards against: every domain gone, framework empty.
+    // The fix is that NOTHING changes when the BC heading cannot be matched.
+    expect(out).toBe(src);
+  });
+
+  test('fails safe when the framework has no domain matching "Business Central" at all', () => {
+    const src = [
+      '## Analysis Framework',
+      '### 1. Input Validation & Sanitization',
+      '- SQL injection vectors',
+      '### 2. Authentication',
+      '- Session fixation',
+      '## Output Format',
+    ].join('\n');
+    expect(trimSecurityDomains(src)).toBe(src);
+  });
 });
 
 describe('trimSecurityDispatchLine', () => {
@@ -699,6 +744,34 @@ describe('maybeTrimSecurityDomains', () => {
       const updatedPrompt = readFileSync(promptPath, 'utf-8');
       expect(updatedPrompt).toContain('Focus areas: Business Central platform security');
       expect(updatedPrompt).not.toContain('Focus areas: input validation, authorization gaps, data protection, information disclosure');
+    });
+
+    // -------------------------------------------------------------------------
+    // Fix round 1, Critical — the reviewer's own repro, at the hook level. If the
+    // real sub-agent file's BC heading were ever reworded, the fix must make the
+    // WHOLE hook report 0 and write NEITHER file — not just leave the sub-agent
+    // file untouched while still rewriting the orchestrator's dispatch line to
+    // say "BC only" (a half-pulled lever in the other direction).
+    // -------------------------------------------------------------------------
+    test('reports 0 and writes neither file when the sub-agent BC heading has drifted', () => {
+      process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '1';
+      const drifted = originalAgent.replace(
+        '### 8. Business Central Platform Security',
+        '### 8. BC Platform & Tenant Security',
+      );
+      expect(drifted).not.toBe(originalAgent); // sanity: the replace actually matched something
+      writeFileSync(agentPath, drifted);
+
+      const result = maybeTrimSecurityDomains();
+      expect(result).toBe(0);
+
+      // The drifted sub-agent file is left exactly as it was handed in — not
+      // corrupted, not silently "fixed".
+      expect(readFileSync(agentPath, 'utf-8')).toBe(drifted);
+      // The orchestrator's dispatch line must ALSO be left alone: narrowing it
+      // while the sub-agent's own framework still lists every domain would be a
+      // half-pulled lever the other way around.
+      expect(readFileSync(promptPath, 'utf-8')).toBe(originalPrompt);
     });
 
     test('surgery only — everything outside the targeted section survives untouched', () => {

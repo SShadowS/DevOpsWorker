@@ -515,6 +515,17 @@ export function maybeInjectScopedPayload(): number {
  * the real prompt file. Idempotent by construction: run on an already-trimmed
  * framework, the filter keeps the same single (already-renumbered) section and
  * the renumbering replace is a no-op on text that already reads `1.`.
+ *
+ * Fails SAFE, not silent: the filter keys off the literal heading text
+ * `Business Central Platform Security`. If that heading is ever reworded, the
+ * filter matches nothing and — left uncorrected — would strip every domain
+ * from the framework, including the one this lever exists to keep. That is
+ * worse than doing nothing: it ships a security sub-agent with zero analysis
+ * domains while looking, from the return value alone, like a successful trim.
+ * So when zero domain sections survive the filter, this returns `content`
+ * completely unchanged and logs loudly — the caller (`maybeTrimSecurityDomains`)
+ * then correctly reports that this run's trim did not apply, exactly the same
+ * honesty its own return-value fix already established.
  */
 export function trimSecurityDomains(content: string): string {
   const frameworkStart = content.indexOf('## Analysis Framework');
@@ -524,9 +535,22 @@ export function trimSecurityDomains(content: string): string {
   if (afterFramework === -1) return content;
 
   const framework = content.slice(frameworkStart, afterFramework);
-  const kept = framework
-    .split(/^### /m)
-    .filter((section, i) => i === 0 || /Business Central Platform Security/.test(section))
+  const sections = framework.split(/^### /m);
+  const survivors = sections.filter((section, i) => i === 0 || /Business Central Platform Security/.test(section));
+
+  // survivors.length <= 1 means only the pre-framework intro (index 0) matched —
+  // no domain heading contains "Business Central Platform Security" any more, so
+  // the naive result would delete every domain rather than keep the one intended.
+  if (survivors.length <= 1) {
+    console.warn(
+      '[eval] trimSecurityDomains: no "Business Central Platform Security" domain heading survived the ' +
+      'filter — leaving the Analysis Framework untouched rather than stripping every domain (the BC ' +
+      'heading text may have drifted)',
+    );
+    return content;
+  }
+
+  const kept = survivors
     // Renumber to 1. Leaving it as "### 8." after deleting 1-7 reads as a truncated
     // document, and a model may helpfully reconstruct the "missing" domains from the
     // numbering gap — which would un-pull the very lever this arm is measuring.
@@ -534,6 +558,30 @@ export function trimSecurityDomains(content: string): string {
     .join('### ');
 
   return content.slice(0, frameworkStart) + kept + content.slice(afterFramework);
+}
+
+/**
+ * True when a security-edge-case-analyzer.md's Analysis Framework already holds
+ * exactly one domain — the state a successful `trimSecurityDomains` call leaves
+ * it in, whether the narrowing happened just now or on an earlier call.
+ *
+ * Purely structural (counts `### ` headings) rather than keying off the BC
+ * heading's literal text, so it stays correct even when that text is the exact
+ * thing that drifted. Used to decide whether it is safe to also narrow the
+ * orchestrator's dispatch line for this agent: doing so while the sub-agent's
+ * own framework still lists every domain would create a half-pulled lever in
+ * the OTHER direction from the one `trimSecurityDispatchLine` exists to close —
+ * the orchestrator would tell the model "BC only" while the agent's own system
+ * prompt still says "evaluate all eight."
+ */
+function isSecurityFrameworkNarrowed(content: string): boolean {
+  const frameworkStart = content.indexOf('## Analysis Framework');
+  if (frameworkStart === -1) return false;
+  const afterFramework = content.indexOf('## Output Format', frameworkStart);
+  if (afterFramework === -1) return false;
+  const framework = content.slice(frameworkStart, afterFramework);
+  const domainCount = (framework.match(/^### /gm) ?? []).length;
+  return domainCount === 1;
 }
 
 /**
@@ -578,8 +626,9 @@ export function trimSecurityDispatchLine(content: string): string {
  * Guarded so this is a TRUE NO-OP unless `PR_REVIEW_SECURITY_BC_ONLY=1`.
  *
  * Returns the number of files actually modified (0 when the env var is not `1`,
- * when the active set excludes the agent, or when both files already read as
- * trimmed — e.g. a second call).
+ * when the active set excludes the agent, when both files already read as
+ * trimmed — e.g. a second call — or when the sub-agent's BC heading could not
+ * be matched and the fail-safe in `trimSecurityDomains` declined to touch it).
  */
 export function maybeTrimSecurityDomains(): number {
   if (process.env['PR_REVIEW_SECURITY_BC_ONLY'] !== '1') return 0;
@@ -592,6 +641,7 @@ export function maybeTrimSecurityDomains(): number {
   }
 
   let modified = 0;
+  let agentNarrowed = false;
   const cliDir = dirname(fileURLToPath(import.meta.url));
 
   const agentPath = resolve(cliDir, '..', 'agents', 'pr-reviewer', '.claude', 'agents', 'security-edge-case-analyzer.md');
@@ -604,12 +654,22 @@ export function maybeTrimSecurityDomains(): number {
       writeFileSync(agentPath, trimmed);
       modified++;
     }
+    agentNarrowed = isSecurityFrameworkNarrowed(trimmed);
   }
 
   // Also narrow the ORCHESTRATOR's dispatch text, or it hands the removed domains
-  // straight back on every dispatch and this arm measures nothing.
+  // straight back on every dispatch and this arm measures nothing — but ONLY when
+  // the sub-agent's own framework is actually narrowed (just now, or already, from
+  // an earlier call). Rewriting Agent 3's Focus areas to "BC only" while the
+  // sub-agent's own prompt still lists every domain would be the half-pulled-lever
+  // failure in the other direction — see `isSecurityFrameworkNarrowed`'s doc.
   const promptPath = resolve(cliDir, '..', 'agents', 'pr-reviewer', 'CLAUDE.md');
-  if (existsSync(promptPath)) {
+  if (!agentNarrowed) {
+    console.warn(
+      '[eval] PR_REVIEW_SECURITY_BC_ONLY set but the sub-agent framework is not narrowed (missing file, or ' +
+      'its BC domain heading did not match) — leaving the orchestrator dispatch line untouched too',
+    );
+  } else if (existsSync(promptPath)) {
     const p = readFileSync(promptPath, 'utf-8');
     const np = trimSecurityDispatchLine(p);
     if (np !== p) {
