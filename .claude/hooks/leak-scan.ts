@@ -47,8 +47,15 @@ const proj = (process.env.CLAUDE_PROJECT_DIR || process.cwd()).replace(/\\/g, "/
 
 // Only gate files inside this project (the public core). Relative paths are
 // resolved against it, so they are in scope by construction.
+//
+// The prefix test MUST be separator-aware. A bare `startsWith` also matches SIBLING
+// checkouts whose directory names merely EXTEND this one's (`<repo>` vs `<repo>-xyz`
+// under the same parent), so the scan reached into an unrelated repository and
+// blocked an edit there. Caught by this hook doing exactly that to a sibling repo.
 if (norm.startsWith("/") || /^[A-Za-z]:/.test(norm)) {
-  if (!norm.toLowerCase().startsWith(proj.toLowerCase())) process.exit(0);
+  const n = norm.toLowerCase();
+  const p = proj.toLowerCase().replace(/\/+$/, "");
+  if (n !== p && !n.startsWith(p + "/")) process.exit(0);
 }
 
 // Confirm this really is the public core before applying a public-core rule.
