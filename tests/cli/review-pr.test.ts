@@ -1,11 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   maybeInjectToolRule,
   maybeOverrideSubAgentModel,
   maybeRestrictAgentSet,
   buildAgentSetBlock,
+  AGENT_SET_MARKER,
   SUBAGENT_TOOL_RULE,
   applyInlineFindings,
   buildPriorFindingsBlock,
@@ -85,6 +86,69 @@ describe('maybeRestrictAgentSet', () => {
     const block = buildAgentSetBlock([' code-review-validator ', '', 'al-performance-analyzer']);
     expect(block).toContain('1. `code-review-validator`');
     expect(block).toContain('2. `al-performance-analyzer`');
+  });
+
+  // -------------------------------------------------------------------------
+  // The apply branch — actually writes to the TRACKED orchestrator prompt at
+  // src/agents/pr-reviewer/CLAUDE.md. Every test here snapshots the file's real
+  // content before mutating it and restores that exact content in afterEach, so
+  // the suite leaves the working tree exactly as clean as it found it — this is
+  // deliberately the real file, not a temp copy, because `maybeRestrictAgentSet`
+  // resolves the path from `import.meta.url` with no injection point; pointing
+  // it elsewhere would mean these tests exercise a path the production code
+  // never takes.
+  // -------------------------------------------------------------------------
+  describe('the write path (mutates the real orchestrator prompt, restored after each test)', () => {
+    const promptPath = fileURLToPath(new URL('../../src/agents/pr-reviewer/CLAUDE.md', import.meta.url));
+    let original: string;
+
+    beforeEach(() => { original = readFileSync(promptPath, 'utf-8'); });
+    afterEach(() => { writeFileSync(promptPath, original); });
+
+    test('applies the block and reports 1 file modified', () => {
+      // Fails if the final `return 1` were flipped to `return 0` — the write
+      // would still happen but the caller would be told it didn't.
+      process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator,al-performance-analyzer';
+      const result = maybeRestrictAgentSet();
+      expect(result).toBe(1);
+
+      const updated = readFileSync(promptPath, 'utf-8');
+      expect(updated).toContain(AGENT_SET_MARKER);
+      expect(updated).toContain('code-review-validator');
+      expect(updated).toContain('al-performance-analyzer');
+    });
+
+    test('appends after the existing prompt instead of clobbering it', () => {
+      // Fails if `writeFileSync(promptPath, \`${content.trimEnd()}\n...\`)` lost
+      // the `content.trimEnd()}\n` prefix and wrote only the new block — the
+      // exact regression the reviewer named (deleting that prefix would pass
+      // every other test in this suite undetected).
+      process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator';
+      maybeRestrictAgentSet();
+
+      const updated = readFileSync(promptPath, 'utf-8');
+      expect(original).toContain('Phase 4: Parallel Analysis with Specialized Agents');
+      expect(updated).toContain('Phase 4: Parallel Analysis with Specialized Agents');
+      // The pre-existing content must still come BEFORE the appended block —
+      // proof this is an append, not a same-position overwrite.
+      expect(updated.indexOf('Phase 4: Parallel Analysis with Specialized Agents'))
+        .toBeLessThan(updated.indexOf(AGENT_SET_MARKER));
+    });
+
+    test('a second call is idempotent — the marker appears exactly once and the second call reports 0', () => {
+      // Fails if the `if (content.includes(AGENT_SET_MARKER)) return 0;` guard
+      // were removed or broken — the second call would append a duplicate block
+      // and report 1 again instead of 0.
+      process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator';
+      const first = maybeRestrictAgentSet();
+      const second = maybeRestrictAgentSet();
+      expect(first).toBe(1);
+      expect(second).toBe(0);
+
+      const updated = readFileSync(promptPath, 'utf-8');
+      const occurrences = updated.split(AGENT_SET_MARKER).length - 1;
+      expect(occurrences).toBe(1);
+    });
   });
 });
 
