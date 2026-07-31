@@ -1,15 +1,23 @@
 // scripts/pr-review-tooling-ab.ts
 /**
- * 2×2 A/B over the two levers behind PR-review cost:
+ * 8-arm A/B over the four prompt/roster levers behind PR-review cost:
  *
- *   model      opus (baseline, pinned in sub-agent frontmatter) vs sonnet-5
- *   tool rule  absent (baseline) vs a routing block steering Read/Grep/LSP
+ *   agent set     full 7-agent roster (baseline) vs `code-quality-assessor` excluded (`no-cqa`)
+ *   routing       diff-trigger-gated dispatch (`PR_REVIEW_AGENT_ROUTING`) vs unconditional
+ *   scoped payload per-agent full-source scoping (`PR_REVIEW_SCOPED_PAYLOAD`) vs the whole diff to every agent
+ *   BC security   BC-only security domains (`PR_REVIEW_SECURITY_BC_ONLY`) vs the full 8-domain framework
  *
- * Measured on PR 52081 (2-file diff, $16.53): the 7 sub-agents made 207 Bash
- * calls of which 168 were sed/cat/head/tail file reads, 23 Read calls, and ZERO
- * LSP calls — 10.0M cache-read tokens. Both levers target that directly, and
- * they may interact: memory says Sonnet follows tool steering far better than
- * Opus, so "sonnet + rule" could beat the sum of its parts.
+ * `ARMS` below composes these into 8 cells (baseline, no-cqa, routed, scoped, bc-security,
+ * routed+no-cqa, routed+scoped, lean=all four). `model`/`toolRule` are carried over from an
+ * earlier 2x2 (opus-vs-sonnet, tool-rule-vs-none) and are unset on all 8 arms today — see
+ * `expectedModelFor` for why that must never collapse to a `null` compliance check.
+ *
+ * KNOWN LIMITATION (carry this into any write-up): production repeats of the SAME arm showed a
+ * critical finding appearing in 1 of 3 identical runs, and a diff-only judge cannot verify a
+ * finding whose truth lives outside the diff (see `scripts/pr-review-eval/judge.ts`). The QUALITY
+ * ranking from this matrix is not reliable at n=1 per PR. The COST ranking is: repeats of one
+ * config varied only ~15%. Report cost with confidence; report quality only alongside its
+ * uncertainty, never alone as if it settles anything.
  *
  * Spawns review containers DIRECTLY rather than enqueuing watcher actions. The
  * watcher reads PR_REVIEW_NO_POST from its own compose env, so steering it
@@ -19,49 +27,320 @@
  * lets each arm carry its own env.
  *
  * Usage:
- *   bun scripts/pr-review-tooling-ab.ts --pr 52081                     # dry-run plan
- *   bun scripts/pr-review-tooling-ab.ts --pr 52081 --go                # execute (1 run/arm)
+ *   bun scripts/pr-review-tooling-ab.ts --prs 49388,45792,43408,48617           # dry-run plan
+ *   bun scripts/pr-review-tooling-ab.ts --prs 49388,45792,43408,48617 --go      # execute
+ *   bun scripts/pr-review-tooling-ab.ts --arms lean --prs 49388 --go           # single-arm smoke
  *   bun scripts/pr-review-tooling-ab.ts --pr 52081 --collect --since <iso>
  *
  * Posting is OFF unless --post is passed. Nothing reaches the PR by default.
+ * Nothing is SPENT unless --go is passed — every other flag (including the
+ * bare presence of --dry-run, which is accepted but purely cosmetic) is a
+ * no-op with respect to spending. Run `--help` for the full flag list.
  */
+import { appendFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 import { connectStores } from '../src/db/connect-stores.ts';
 import { loadManifest, applyOverlayRegistries } from '../src/overlay/index.ts';
-import { findRepoByRepositoryId, repos, getRepoConfig } from '../src/config/repos.ts';
+import { repos, getRepoConfig } from '../src/config/repos.ts';
 import { buildConfigFromRepo } from '../src/cli/config.ts';
 import { buildDockerArgs, createVolume, removeContainer, spawnContainer, containerDatabaseUrl } from '../src/sdk/docker.ts';
 import { getPrReviewContainerEnv } from '../src/cli/watch/container-dispatcher.ts';
 import { summarizeSubAgents, isAtOrAfter, type SubAgentRunUsage } from '../src/cli/pr-review-metrics.ts';
+import {
+  checkArmCompliance,
+  type ComplianceVerdict,
+  type LeverFlags,
+  type SubAgentTelemetryEntry,
+  type AppliedLevers,
+} from './pr-review-eval/compliance.ts';
 
-function arg(name: string, def = ''): string {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? (process.argv[i + 1] ?? def) : def;
+// ---------------------------------------------------------------------------
+// Pure argument-parsing helpers. Exported so tests can exercise them without
+// touching `process.argv` or triggering any of the side effects below —
+// nothing in this section opens a DB connection, spawns a container, or
+// spends a token.
+// ---------------------------------------------------------------------------
+
+export function argFrom(argv: string[], name: string, def = ''): string {
+  const i = argv.indexOf(`--${name}`);
+  return i >= 0 ? (argv[i + 1] ?? def) : def;
 }
-const has = (name: string) => process.argv.includes(`--${name}`);
 
-const prId = parseInt(arg('pr', '0'), 10);
+export function hasFrom(argv: string[], name: string): boolean {
+  return argv.includes(`--${name}`);
+}
+
+/** Parse a comma-separated PR id list. Non-numeric / blank entries are dropped, never crash the parse. */
+export function parsePrIds(raw: string): number[] {
+  return raw.split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isFinite);
+}
+
+/** `--prs` is the matrix form; `--pr` (singular) is also accepted and wins only when `--prs` is absent. */
+export function resolvePrIds(argv: string[]): number[] {
+  const raw = argFrom(argv, 'prs') || argFrom(argv, 'pr');
+  return parsePrIds(raw);
+}
+
+/**
+ * C4: fail fast rather than silently running on the wrong credential. `--oauth`
+ * with no `CLAUDE_CODE_OAUTH_TOKEN` present is refused outright, never
+ * defaulted to pay-per-token — that silent fallback is exactly the failure
+ * mode this flag exists to make visible.
+ */
+export function validateOauthToken(oauth: boolean, token: string): { ok: true } | { ok: false; message: string } {
+  if (oauth && !token) {
+    return {
+      ok: false,
+      message: '--oauth was passed but CLAUDE_CODE_OAUTH_TOKEN is not set in the environment. Refusing to run on an unknown credential.',
+    };
+  }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Arm table — pure data. See task-7-brief.md Step 1 for the matrix rationale.
+// ---------------------------------------------------------------------------
+
+const SEVEN = [
+  'code-review-validator', 'code-quality-assessor', 'security-edge-case-analyzer',
+  'al-performance-analyzer', 'al-architecture-analyzer', 'al-error-pattern-analyzer',
+  'al-integration-analyzer',
+];
+export const NO_CQA = SEVEN.filter((a) => a !== 'code-quality-assessor');
+
+export interface Arm {
+  name: string;
+  agentSet: string[] | null; // null = full roster, no PR_REVIEW_AGENT_SET
+  routing: boolean;
+  scoped: boolean;
+  bcSecurity: boolean;
+  model?: string; // carried from an earlier 2x2; '' or unset = inherit the frontmatter pin
+  toolRule?: boolean; // ditto
+}
+
+export const ARMS: Arm[] = [
+  { name: 'baseline', agentSet: null, routing: false, scoped: false, bcSecurity: false },
+  { name: 'no-cqa', agentSet: NO_CQA, routing: false, scoped: false, bcSecurity: false },
+  { name: 'routed', agentSet: null, routing: true, scoped: false, bcSecurity: false },
+  { name: 'scoped', agentSet: null, routing: false, scoped: true, bcSecurity: false },
+  { name: 'bc-security', agentSet: null, routing: false, scoped: false, bcSecurity: true },
+  { name: 'routed+no-cqa', agentSet: NO_CQA, routing: true, scoped: false, bcSecurity: false },
+  { name: 'routed+scoped', agentSet: null, routing: true, scoped: true, bcSecurity: false },
+  { name: 'lean', agentSet: NO_CQA, routing: true, scoped: true, bcSecurity: true },
+];
+
+/**
+ * Select arms by name for `--arms` (C6: arms are named `Arm.name`, not the
+ * old 2x2's `Arm.label`). An empty/omitted filter selects every arm. Matching
+ * is exact and case-sensitive against `arm.name` — `--arms lean` must resolve
+ * to exactly `ARMS[7]`.
+ */
+export function selectArms(filterCsv: string, arms: Arm[] = ARMS): Arm[] {
+  const only = filterCsv.split(',').map((a) => a.trim()).filter(Boolean);
+  if (only.length === 0) return arms;
+  return arms.filter((a) => only.includes(a.name));
+}
+
+// ---------------------------------------------------------------------------
+// Compliance wiring — pure translation from an Arm's config to the shape
+// `checkArmCompliance` expects (signature pinned by Task 9, see
+// task-9-report.md: `(armName, expected, expectedModel, subAgents,
+// expectedLevers, appliedLevers)`).
+// ---------------------------------------------------------------------------
+
+/**
+ * C1 — the model every sub-agent is expected to run on for THIS arm.
+ *
+ * All 7 sub-agent frontmatter files pin `model: claude-sonnet-5`, and
+ * `Arm.model` is unset on all 8 arms in the table above (it is a leftover
+ * field from an earlier opus-vs-sonnet 2x2). The reflexive fix at the call
+ * site — `arm.model ?? null` — would therefore pass `null` for every arm,
+ * and `checkArmCompliance` treats `expectedModel === null` as "skip the model
+ * check entirely". That silently disarms the exact gate that exists because
+ * a frontmatter model pin was ignored in production once already (all 7
+ * sub-agents ran on opus, ~2x cost, undetected until a live-data audit).
+ *
+ * `||`, not `??`: an empty string must ALSO fall through to the sonnet
+ * default. `normalizeModel('')` matches nothing, so `''` reaching
+ * `expectedModel` would VOID every arm on the model check instead of skipping
+ * it — a different failure, but still a total-loss one.
+ */
+export function expectedModelFor(arm: Arm): string {
+  return arm.model || 'claude-sonnet-5';
+}
+
+/**
+ * C2 — translate an arm's own config fields to `LeverFlags`'s key names.
+ * `LeverFlags`/`AppliedLevers` deliberately share one naming scheme
+ * (`scopedPayload`/`securityBcOnly`), NOT the arm table's own
+ * `scoped`/`bcSecurity` — the translation happens here, once, so there is
+ * exactly one place that could get it backwards.
+ */
+export function leverFlagsFor(arm: Arm): LeverFlags {
+  return {
+    agentSet: arm.agentSet !== null,
+    routing: arm.routing,
+    scopedPayload: arm.scoped,
+    securityBcOnly: arm.bcSecurity,
+  };
+}
+
+/**
+ * The actual compliance call this runner makes for one recorded run —
+ * exported so tests exercise the REAL call site (not a re-implementation of
+ * it) end to end: a wrong model or a lever that never applied must VOID, and
+ * that only holds if `expectedModelFor`/`leverFlagsFor` are wired in here,
+ * not bypassed.
+ */
+export function buildComplianceVerdict(
+  arm: Arm,
+  subAgents: Record<string, SubAgentTelemetryEntry> | null,
+  appliedLevers: AppliedLevers | null,
+): ComplianceVerdict {
+  return checkArmCompliance(arm.name, arm.agentSet, expectedModelFor(arm), subAgents, leverFlagsFor(arm), appliedLevers);
+}
+
+// ---------------------------------------------------------------------------
+// Env assembly — pure given an already-resolved base env. `base` is normally
+// `getPrReviewContainerEnv()` (production parity — see C3: the runner DOES go
+// through it, it is not built from scratch), injected here so this function
+// itself needs neither `process.env` nor the container-dispatcher import
+// chain to be testable.
+// ---------------------------------------------------------------------------
+
+export interface ArmEnvOptions {
+  post: boolean;
+  containerDbUrl: string;
+  /** C4: run this cell on the OAuth subscription instead of the pay-per-token key. */
+  oauth: boolean;
+  /** The real `CLAUDE_CODE_OAUTH_TOKEN`, read by the caller — only used when `oauth` is true. */
+  oauthToken: string;
+}
+
+export function buildArmEnv(base: Record<string, string>, arm: Arm, opts: ArmEnvOptions): Record<string, string> {
+  return {
+    ...base,
+    // Must be the compose-internal host: see containerDatabaseUrl.
+    DATABASE_URL: opts.containerDbUrl,
+    PR_REVIEW_NO_POST: opts.post ? '' : '1',
+    PR_REVIEW_SUBAGENT_MODEL: arm.model ?? '',
+    PR_REVIEW_SUBAGENT_TOOL_RULE: arm.toolRule ? '1' : '',
+    PR_REVIEW_AGENT_SET: arm.agentSet ? arm.agentSet.join(',') : '',
+    PR_REVIEW_AGENT_ROUTING: arm.routing ? '1' : '',
+    PR_REVIEW_SCOPED_PAYLOAD: arm.scoped ? '1' : '',
+    PR_REVIEW_SECURITY_BC_ONLY: arm.bcSecurity ? '1' : '',
+    // C4: `base` (getPrReviewContainerEnv()) keys off PR_REVIEW_ANTHROPIC_API_KEY
+    // and, when set, explicitly blanks CLAUDE_CODE_OAUTH_TOKEN — that is the
+    // pay-per-token default every arm bills against today. Applied AFTER the
+    // spread so --oauth always wins when passed.
+    ...(opts.oauth ? { ['ANTHROPIC_API_KEY']: '', ['CLAUDE_CODE_OAUTH_TOKEN']: opts.oauthToken } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Row attribution — pure predicate. C10: a NO-POST arm row must never be
+// confused with a concurrent production/watcher review of the SAME PR, which
+// would carry a non-null commentId. Matching on PR id + time alone silently
+// poisons scoring by attributing a foreign row to an arm.
+// ---------------------------------------------------------------------------
+
+export interface AttributableRow {
+  prId: number;
+  commentId: number | null;
+  createdAt: string;
+}
+
+export function matchesArmRow(row: AttributableRow, prId: number, since: string): boolean {
+  return row.prId === prId && row.commentId == null && isAtOrAfter(row.createdAt, since);
+}
+
+// ---------------------------------------------------------------------------
+// JSONL result-line assembly (C9) — pure given the row/verdict data needed.
+// Written after EACH cell (never batched at the end): 32 sequential container
+// runs is hours, and a crash at run 30 must not forfeit attribution for the
+// 29 that already finished.
+// ---------------------------------------------------------------------------
+
+export interface ResultRow {
+  id: number;
+  createdAt: string;
+  appliedLevers: AppliedLevers | null;
+}
+
+export function buildResultLine(arm: Arm, prId: number, row: ResultRow, verdict: ComplianceVerdict): string {
+  return JSON.stringify({
+    arm: arm.name,
+    prId,
+    rowId: row.id,
+    createdAt: row.createdAt,
+    // A soft WARN (e.g. "ran all 7 — verify this arm's instruction took
+    // effect") is easy to miss scrolling past across 32 sequential runs on a
+    // console; it must survive in the record, not just the terminal.
+    verdict: verdict.compliant ? 'compliant' : 'void',
+    reason: verdict.reason ?? null,
+    note: verdict.note ?? null,
+    appliedLevers: row.appliedLevers ?? null,
+  }) + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Main (only runs when executed directly, not when imported by tests). Every
+// side effect — DB connection, ADO/network probing, docker spawn — lives in
+// here, gated ultimately by --go for anything that spends money.
+// ---------------------------------------------------------------------------
+
+if (import.meta.main) {
+
+const argv = process.argv;
+const arg = (name: string, def = '') => argFrom(argv, name, def);
+const has = (name: string) => hasFrom(argv, name);
+
+if (has('help')) {
+  console.log(
+    'Usage:\n' +
+    '  bun scripts/pr-review-tooling-ab.ts --prs <id,id,...> [--pr <id>] [--runs N] [--arms a,b,c] [--oauth] [--go]\n' +
+    '  bun scripts/pr-review-tooling-ab.ts --pr <id> --collect --since <iso>\n\n' +
+    '  --prs <ids>          Comma-separated PR ids (the matrix form). --pr <id> also accepted (single PR); --prs wins if both given.\n' +
+    '  --runs N             Repeats per arm per PR (default 1).\n' +
+    '  --arms a,b,c         Restrict to named arms. Default: all 8. Known: ' + ARMS.map((a) => a.name).join(', ') + '\n' +
+    '  --oauth              Bill this run against the Claude MAX subscription (CLAUDE_CODE_OAUTH_TOKEN) instead of\n' +
+    '                       the pay-per-token key getPrReviewContainerEnv() defaults every arm to today. Fails fast\n' +
+    '                       if CLAUDE_CODE_OAUTH_TOKEN is not set. CAVEAT: a usage-limit hit mid-matrix can VOID\n' +
+    '                       arms on the subscription (no retry here) — pay-per-token has no such throttle.\n' +
+    '  --go                 Actually spend money and spawn containers. Its ABSENCE is what makes every other\n' +
+    '                       invocation a dry run. --dry-run is accepted but purely cosmetic — there is no separate\n' +
+    '                       switch with different gating semantics; only --go gates spending.\n' +
+    '  --post               Post the review to the PR (default: NO_POST). Never use this for the matrix.\n' +
+    '  --image, --state-volume   Overrides for the container image / state volume names.\n',
+  );
+  process.exit(0);
+}
+
+const prIds = resolvePrIds(argv);
+if (prIds.length === 0) { console.error('Need --pr <id> or --prs <id,id,...>'); process.exit(1); }
+
 const runs = parseInt(arg('runs', '1'), 10);
 const post = has('post');
+const oauth = has('oauth');
 const imageName = arg('image', 'devopsworker:latest');
 const stateVolume = arg('state-volume', 'do-pipeline-state');
 
-if (!prId) { console.error('Need --pr <id>'); process.exit(1); }
+if (has('dry-run')) {
+  console.log('[ab] note: --dry-run is a no-op label. Omitting --go is what already prevents spending.');
+}
 
-interface Arm { label: string; model: string; toolRule: boolean; }
-const ARMS: Arm[] = [
-  { label: 'baseline',       model: '',                toolRule: false },
-  { label: 'sonnet',         model: 'claude-sonnet-5', toolRule: false },
-  { label: 'rule',           model: '',                toolRule: true  },
-  { label: 'sonnet+rule',    model: 'claude-sonnet-5', toolRule: true  },
-];
+const oauthToken = process.env['CLAUDE_CODE_OAUTH_TOKEN'] ?? '';
+const oauthCheck = validateOauthToken(oauth, oauthToken);
+if (!oauthCheck.ok) { console.error(`[ab] ${oauthCheck.message}`); process.exit(1); }
 
-// --arms lets a canary run ONE arm, confirm it recorded, then continue with the
-// rest. The post-run gate would catch a failure anyway, but on a first outing
-// after a recording bug, proving it by hand costs one run and settles it.
-const onlyArms = arg('arms').split(',').map(a => a.trim()).filter(Boolean);
-const SELECTED = onlyArms.length > 0 ? ARMS.filter(a => onlyArms.includes(a.label)) : ARMS;
+// --arms lets a canary run ONE arm, confirm it recorded, then continue with
+// the rest. The post-run compliance gate would catch a failure anyway, but on
+// a first outing after a recording bug, proving it by hand costs one run and
+// settles it.
+const onlyArmsRaw = arg('arms');
+const SELECTED = selectArms(onlyArmsRaw, ARMS);
 if (SELECTED.length === 0) {
-  console.error(`No arm matched --arms "${onlyArms.join(',')}". Known: ${ARMS.map(a => a.label).join(', ')}`);
+  console.error(`No arm matched --arms "${onlyArmsRaw}". Known: ${ARMS.map((a) => a.name).join(', ')}`);
   process.exit(1);
 }
 
@@ -75,40 +354,46 @@ if (has('collect')) {
   const since = arg('since');
   if (!since) { console.error('--collect requires --since <iso>'); process.exit(1); }
 
-  const rows = await prReviewStore.listRecent(200);
-  const mine = rows.filter(r => r.prId === prId && isAtOrAfter(r.createdAt, since));
-  if (mine.length === 0) { console.log('No rows yet.'); process.exit(0); }
-
   // Arm identity is not stored on the row, so recover it from what the arm
-  // actually did: model_usage names the model the sub-agents ran on.
-  const armOf = (r: typeof mine[number]): string => {
+  // actually did: model_usage names the model the sub-agents ran on. This
+  // heuristic predates JSONL attribution (see the main matrix loop below) and
+  // cannot distinguish arms that share model config — which is every arm in
+  // the 8-arm table. Kept for ad-hoc single-PR inspection; the matrix itself
+  // is attributed via `scripts/ab-results/matrix-*.jsonl`.
+  const armOf = (r: { modelUsage: Record<string, unknown> | null }): string => {
     const models = Object.keys(r.modelUsage ?? {});
-    return models.some(m => m.includes('sonnet')) ? 'sonnet*' : 'opus*';
+    return models.some((m) => m.includes('sonnet')) ? 'sonnet*' : 'opus*';
   };
 
-  console.log(`\nPR #${prId} — ${mine.length} runs since ${since}\n`);
-  console.log('  arm       cost    turns   bash   read    lsp   findings  rec');
-  console.log('  ' + '-'.repeat(72));
-  for (const r of mine) {
-    const t = r.toolCalls ?? {};
-    const lsp = Object.entries(t).filter(([k]) => k === 'LSP').reduce((a, [, v]) => a + v, 0);
-    console.log(
-      '  ' + armOf(r).padEnd(10) +
-      `$${(r.costUsd ?? 0).toFixed(2)}`.padStart(6) +
-      String(r.turns ?? 0).padStart(8) +
-      String(t['Bash'] ?? 0).padStart(7) +
-      String(t['Read'] ?? 0).padStart(7) +
-      String(lsp).padStart(7) +
-      String(r.findingsCount ?? 0).padStart(10) +
-      '  ' + (r.recommendation ?? '').slice(0, 20),
-    );
-  }
+  for (const prId of prIds) {
+    const rows = await prReviewStore.listRecent(200);
+    const mine = rows.filter((r) => matchesArmRow(r, prId, since));
+    if (mine.length === 0) { console.log(`\nPR #${prId}: no rows yet.`); continue; }
 
-  const withSub = mine.filter(r => r.subAgents).map(r => r.subAgents as Record<string, SubAgentRunUsage>);
-  if (withSub.length > 0) {
-    console.log('\n  per sub-agent (all runs pooled):');
-    for (const s of summarizeSubAgents(withSub)) {
-      console.log(`    ${s.name.padEnd(30)} runs=${String(s.runs).padStart(2)}  $${s.totalCostUsd.toFixed(2).padStart(6)}  medTurns=${s.medianTurns}`);
+    console.log(`\nPR #${prId} — ${mine.length} runs since ${since}\n`);
+    console.log('  arm       cost    turns   bash   read    lsp   findings  rec');
+    console.log('  ' + '-'.repeat(72));
+    for (const r of mine) {
+      const t = r.toolCalls ?? {};
+      const lsp = Object.entries(t).filter(([k]) => k === 'LSP').reduce((a, [, v]) => a + v, 0);
+      console.log(
+        '  ' + armOf(r).padEnd(10) +
+        `$${(r.costUsd ?? 0).toFixed(2)}`.padStart(6) +
+        String(r.turns ?? 0).padStart(8) +
+        String(t['Bash'] ?? 0).padStart(7) +
+        String(t['Read'] ?? 0).padStart(7) +
+        String(lsp).padStart(7) +
+        String(r.findingsCount ?? 0).padStart(10) +
+        '  ' + (r.recommendation ?? '').slice(0, 20),
+      );
+    }
+
+    const withSub = mine.filter((r) => r.subAgents).map((r) => r.subAgents as Record<string, SubAgentRunUsage>);
+    if (withSub.length > 0) {
+      console.log('\n  per sub-agent (all runs pooled):');
+      for (const s of summarizeSubAgents(withSub)) {
+        console.log(`    ${s.name.padEnd(30)} runs=${String(s.runs).padStart(2)}  $${s.totalCostUsd.toFixed(2).padStart(6)}  medTurns=${s.medianTurns}`);
+      }
     }
   }
   process.exit(0);
@@ -120,14 +405,17 @@ if (has('collect')) {
  * Polls rather than reading once: the container's own DB write races the
  * `docker run` exit by a moment. Returns the row, or null once the window
  * closes — which the caller treats as fatal, not as something to retry past.
+ * C10: `matchesArmRow` requires `commentId == null` so a concurrent
+ * production/watcher review of the same PR (which WOULD post, and so carries
+ * a commentId) can never be misattributed to this arm.
  */
 async function waitForRow(pr: number, since: string, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const rows = await prReviewStore.listRecent(20);
-    const hit = rows.find(r => r.prId === pr && isAtOrAfter(r.createdAt, since));
+    const hit = rows.find((r) => matchesArmRow(r, pr, since));
     if (hit) return hit;
-    await new Promise(res => setTimeout(res, 2000));
+    await new Promise((res) => setTimeout(res, 2000));
   }
   return null;
 }
@@ -165,36 +453,21 @@ async function preflightDb(dbUrl: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 // plan / execute
 // ---------------------------------------------------------------------------
-const repoKeys = Object.keys(repos);
-let repo: { key: string; config: ReturnType<typeof getRepoConfig> } | undefined;
-let repositoryId = '';
-for (const k of repoKeys) {
-  const rc = getRepoConfig(k);
-  const cfg = buildConfigFromRepo(rc, process.env as Record<string, string>);
-  try {
-    const r: any = await (await import('../src/sdk/ado/http.ts')).adoFetch(
-      cfg.azureDevOps,
-      `git/repositories/${cfg.azureDevOps.repositoryId}/pullrequests/${prId}?api-version=7.0`,
-    );
-    if (r?.pullRequestId === prId) {
-      repo = { key: k, config: rc };
-      repositoryId = cfg.azureDevOps.repositoryId;
-      console.log(`[ab] PR #${prId} → repo "${k}" (${r.title})`);
-      break;
-    }
-  } catch { /* not this repo */ }
-}
-if (!repo) { console.error(`Could not locate PR #${prId} in any registered repo`); process.exit(1); }
 
-const total = SELECTED.length * runs;
-console.log(`[ab] ${SELECTED.length} arm(s) × ${runs} run(s) = ${total} reviews`);
+const total = SELECTED.length * runs * prIds.length;
+console.log(`[ab] ${SELECTED.length} arm(s) x ${prIds.length} PR(s) x ${runs} run(s) = ${total} reviews`);
 console.log(`[ab] posting to the PR: ${post ? 'YES' : 'no (PR_REVIEW_NO_POST=1)'}`);
+console.log(`[ab] credential: ${oauth ? 'OAuth subscription (CLAUDE_CODE_OAUTH_TOKEN)' : 'pay-per-token (getPrReviewContainerEnv default)'}`);
 for (const a of SELECTED) {
-  console.log(`       ${a.label.padEnd(14)} model=${a.model || '(pinned opus)'} toolRule=${a.toolRule}`);
+  console.log(
+    `       ${a.name.padEnd(15)} agentSet=${a.agentSet ? `${a.agentSet.length}/7` : 'all-7'}  ` +
+    `routing=${a.routing}  scoped=${a.scoped}  bcSecurity=${a.bcSecurity}  ` +
+    `model=${a.model || '(pinned sonnet-5)'}  toolRule=${!!a.toolRule}`,
+  );
 }
 
 if (!has('go')) {
-  console.log('\n[ab] dry run — re-run with --go to execute.');
+  console.log('\n[ab] dry run — re-run with --go to execute. (--go is the only thing that gates spending.)');
   process.exit(0);
 }
 
@@ -209,78 +482,119 @@ if (!await preflightDb(containerDbUrl)) {
 const cutoff = new Date().toISOString();
 console.log(`[ab] cutoff=${cutoff}\n`);
 
+const resultsPath = `scripts/ab-results/matrix-${cutoff.replace(/[:.]/g, '-')}.jsonl`;
+mkdirSync(dirname(resultsPath), { recursive: true });
+
 let n = 0;
-for (let r = 0; r < runs; r++) {
-  for (const armCfg of SELECTED) {
-    n++;
-    const container = `pr-ab-${prId}-${armCfg.label.replace(/\W+/g, '')}-${r}`;
-    const volume = `pr-ab-${prId}-${r}-${armCfg.label.replace(/\W+/g, '')}`;
-    console.log(`[ab] (${n}/${total}) ${armCfg.label} run ${r + 1}`);
-
-    await createVolume(volume).catch(() => {});
-    await removeContainer(container);
-
-    const env = {
-      ...getPrReviewContainerEnv(),
-      // Must be the compose-internal host: see containerDatabaseUrl.
-      DATABASE_URL: containerDbUrl,
-      PR_REVIEW_NO_POST: post ? '' : '1',
-      PR_REVIEW_SUBAGENT_MODEL: armCfg.model,
-      PR_REVIEW_SUBAGENT_TOOL_RULE: armCfg.toolRule ? '1' : '',
-    };
-
-    const args = buildDockerArgs({
-      workItemId: 0,
-      repoKey: repo.key,
-      repo: repo.config,
-      command: 'review-pr',
-      env,
-      stateVolume,
-      workspaceVolume: volume,
-      imageName,
-      // `--full` pins every arm to the seven-agent reviewer. Since the cherry-pick
-      // sanity path shipped, `review-pr` routes on the PR's own title/description,
-      // which it reads from the API — so it fires even though this runner passes no
-      // `--pr-title`. A subject PR carrying a cherry-pick trailer would silently run
-      // a DIFFERENT agent, single-model, at roughly a twentieth of the cost, in EVERY
-      // arm.
-      //
-      // That is the shape worth guarding against: the arms would still differ from
-      // one another, so nothing would look broken — the numbers would just stop
-      // measuring the levers under test. `forceFull` is the first check in
-      // `chooseReviewPath`, so this short-circuits detection rather than depending on
-      // which PRs are in the subject set today.
-      extraArgs: ['--pr-id', String(prId), '--repo-id', repositoryId, '--full'],
-    });
-    const nameIdx = args.indexOf('--name');
-    if (nameIdx !== -1 && args[nameIdx + 1]) args[nameIdx + 1] = container;
-
-    const startedAt = new Date().toISOString();
-    const code = await spawnContainer(args);
-
-    // HARD GATE. A review that finishes but records nothing is worse than one
-    // that fails: it costs the same and yields nothing, and the store swallows
-    // connection errors so it looks like success. Eight arms once ran to
-    // completion against an unreachable DB — ~$60, zero rows. Never spend a
-    // second run without proof the first was recorded.
-    const recorded = await waitForRow(prId, startedAt);
-    if (!recorded) {
-      console.error(
-        `\n[ab] ABORTING after run ${n}/${total} (${armCfg.label}, exit=${code}).\n` +
-        `[ab] The container finished but no pr_reviews row appeared for PR ${prId}.\n` +
-        `[ab] Fix the recording path before spending another run — check DATABASE_URL\n` +
-        `[ab] inside the container resolves to the compose service, not localhost.`,
+// C5: PR loop OUTER, arms INNER. A mid-matrix abort (usage limit, crash)
+// leaves complete 8-arm pools for the PRs that already finished, instead of
+// eight half-pools that cannot be scored at all.
+for (const prId of prIds) {
+  const repoKeys = Object.keys(repos);
+  let repo: { key: string; config: ReturnType<typeof getRepoConfig> } | undefined;
+  let repositoryId = '';
+  for (const k of repoKeys) {
+    const rc = getRepoConfig(k);
+    const cfg = buildConfigFromRepo(rc, process.env as Record<string, string>);
+    try {
+      const r: any = await (await import('../src/sdk/ado/http.ts')).adoFetch(
+        cfg.azureDevOps,
+        `git/repositories/${cfg.azureDevOps.repositoryId}/pullrequests/${prId}?api-version=7.0`,
       );
-      process.exit(1);
+      if (r?.pullRequestId === prId) {
+        repo = { key: k, config: rc };
+        repositoryId = cfg.azureDevOps.repositoryId;
+        console.log(`[ab] PR #${prId} -> repo "${k}" (${r.title})`);
+        break;
+      }
+    } catch { /* not this repo */ }
+  }
+  if (!repo) { console.error(`Could not locate PR #${prId} in any registered repo`); process.exit(1); }
+
+  for (let r = 0; r < runs; r++) {
+    for (const arm of SELECTED) {
+      n++;
+      const container = `pr-ab-${prId}-${arm.name.replace(/\W+/g, '')}-${r}`;
+      const volume = `pr-ab-${prId}-${r}-${arm.name.replace(/\W+/g, '')}`;
+      console.log(`[ab] (${n}/${total}) PR ${prId} ${arm.name} run ${r + 1}`);
+
+      await createVolume(volume).catch(() => {});
+      await removeContainer(container);
+
+      const env = buildArmEnv(getPrReviewContainerEnv(), arm, { post, containerDbUrl, oauth, oauthToken });
+
+      const args = buildDockerArgs({
+        workItemId: 0,
+        repoKey: repo.key,
+        repo: repo.config,
+        command: 'review-pr',
+        env,
+        stateVolume,
+        workspaceVolume: volume,
+        imageName,
+        // `--full` pins every arm to the seven-agent reviewer. Since the cherry-pick
+        // sanity path shipped, `review-pr` routes on the PR's own title/description,
+        // which it reads from the API — so it fires even though this runner passes no
+        // `--pr-title`. A subject PR carrying a cherry-pick trailer would silently run
+        // a DIFFERENT agent, single-model, at roughly a twentieth of the cost, in EVERY
+        // arm.
+        //
+        // That is the shape worth guarding against: the arms would still differ from
+        // one another, so nothing would look broken — the numbers would just stop
+        // measuring the levers under test. `forceFull` is the first check in
+        // `chooseReviewPath`, so this short-circuits detection rather than depending on
+        // which PRs are in the subject set today.
+        extraArgs: ['--pr-id', String(prId), '--repo-id', repositoryId, '--full'],
+      });
+      const nameIdx = args.indexOf('--name');
+      if (nameIdx !== -1 && args[nameIdx + 1]) args[nameIdx + 1] = container;
+
+      const startedAt = new Date().toISOString();
+      const code = await spawnContainer(args);
+
+      // HARD GATE. A review that finishes but records nothing is worse than one
+      // that fails: it costs the same and yields nothing, and the store swallows
+      // connection errors so it looks like success. Eight arms once ran to
+      // completion against an unreachable DB — ~$60, zero rows. Never spend a
+      // second run without proof the first was recorded.
+      const recorded = await waitForRow(prId, startedAt);
+      if (!recorded) {
+        console.error(
+          `\n[ab] ABORTING after run ${n}/${total} (${arm.name}, PR ${prId}, exit=${code}).\n` +
+          `[ab] The container finished but no pr_reviews row appeared for PR ${prId}.\n` +
+          `[ab] Fix the recording path before spending another run — check DATABASE_URL\n` +
+          `[ab] inside the container resolves to the compose service, not localhost.`,
+        );
+        process.exit(1);
+      }
+
+      // Report compliance BEFORE any scoring. A void cell is not a zero — it is
+      // a missing measurement (its lever, or its roster, never actually took
+      // effect this run) and must be excluded from the scoring table, reported
+      // separately, rather than averaged in as if the arm produced nothing.
+      const verdict = buildComplianceVerdict(arm, recorded.subAgents, recorded.appliedLevers);
+      if (!verdict.compliant) {
+        console.log(`  VOID  ${arm.name} PR ${prId}: ${verdict.reason}`);
+      } else if (verdict.note) {
+        console.log(`  WARN  ${arm.name} PR ${prId}: ${verdict.note}`);
+      }
+
+      // Persist arm identity + verdict per run, written after EACH cell (never
+      // batched at the end) — see the module-level comment on buildResultLine.
+      appendFileSync(resultsPath, buildResultLine(arm, prId, recorded, verdict));
+
+      console.log(
+        `[ab]     exit=${code}  recorded id=${recorded.id}  $${(recorded.costUsd ?? 0).toFixed(2)}  ` +
+        `turns=${recorded.turns}  bash=${recorded.toolCalls?.['Bash'] ?? 0}  ` +
+        `read=${recorded.toolCalls?.['Read'] ?? 0}  lsp=${recorded.toolCalls?.['LSP'] ?? 0}`,
+      );
     }
-    console.log(
-      `[ab]     exit=${code}  recorded id=${recorded.id}  $${(recorded.costUsd ?? 0).toFixed(2)}  ` +
-      `turns=${recorded.turns}  bash=${recorded.toolCalls?.['Bash'] ?? 0}  ` +
-      `read=${recorded.toolCalls?.['Read'] ?? 0}  lsp=${recorded.toolCalls?.['LSP'] ?? 0}`,
-    );
   }
 }
 
-console.log(`\n[ab] done. Collect with:`);
-console.log(`  bun scripts/pr-review-tooling-ab.ts --pr ${prId} --collect --since ${cutoff}`);
+console.log(`\n[ab] done. Results: ${resultsPath}`);
+console.log(`[ab] Collect one PR's rows with:`);
+console.log(`  bun scripts/pr-review-tooling-ab.ts --pr ${prIds[0]} --collect --since ${cutoff}`);
 process.exit(0);
+
+} // end if (import.meta.main)
