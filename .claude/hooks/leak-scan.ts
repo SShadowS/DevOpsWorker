@@ -63,6 +63,18 @@ const origin = Bun.spawnSync({ cmd: ["git", "-C", proj, "remote", "get-url", "or
   .stdout?.toString().trim() ?? "";
 if (!/SShadowS\/DevOpsWorker(\.git)?$/i.test(origin)) process.exit(0);
 
+// A file git already ignores cannot reach the public repo, so scanning it is pure
+// noise — and noise that trains people to click past a leak warning. This covers
+// the scratch/working directories that legitimately discuss internal repos by name
+// (planning ledgers, task briefs, agent reports), without hardcoding any of their
+// paths here. `check-ignore` honours .gitignore AND .git/info/exclude, which is
+// where this repo hides its internal-tooling entries precisely so they never appear
+// in a tracked, public ignore file.
+const ignored = Bun.spawnSync({
+  cmd: ["git", "-C", proj, "check-ignore", "-q", "--", norm],
+}).exitCode === 0;
+if (ignored) process.exit(0);
+
 const bl = Bun.file(`${proj}/private/internal-docs/leak-blocklist.txt`);
 if (!(await bl.exists())) process.exit(0); // generic clone, no overlay — nothing to check
 
