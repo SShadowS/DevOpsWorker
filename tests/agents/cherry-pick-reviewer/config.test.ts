@@ -78,8 +78,19 @@ describe('cherry-pick-reviewer config', () => {
     expect(c.disallowedTools).toContain('Task');
   });
 
-  test('caps turns well below the full reviewer', () => {
-    expect(createBackportReviewConfig(config, params).maxTurns).toBe(30);
+  test('caps turns below the full reviewer, but above the work it replaces', () => {
+    // Measured: 30 was too tight. Two acceptance runs on the same PR took 25 and 31
+    // turns; the 31-turn run hit the cap, returned NULL structured output
+    // (`subtype=error_max_turns`) and errored the review out entirely — leaving a
+    // cherry-pick PR with NO review, worse than the full review this path replaces.
+    // The full reviews it stands in for run a median of 33 turns (p90 43, max 56,
+    // n=310), so the old cap sat below the median of that work.
+    const turns = createBackportReviewConfig(config, params).maxTurns;
+    expect(turns).toBe(60);
+    // Both bounds matter: comfortably above the observed 31, still cheaper than the
+    // full reviewer's 100.
+    expect(turns).toBeGreaterThan(43); // p90 of the full reviews this replaces
+    expect(turns).toBeLessThan(100); // pr-reviewer's cap
   });
 
   test('pins the model explicitly rather than inheriting', () => {
@@ -165,7 +176,7 @@ describe('cherry-pick-reviewer config — buildPrompt', () => {
     // config.paths.sessionRoot itself, when the entrypoint actually clones the repo one
     // level down (${SESSION_ROOT}/${REPO_KEY}). The prompt must not repeat that false
     // claim — an agent told the repo is at its cwd, when it is one level down, burns
-    // turns discovering that, and this agent has maxTurns 30 with no retry.
+    // turns discovering that, and this agent has a bounded turn budget (60) with no retry.
     const p = createBackportReviewConfig(config, params).buildPrompt(NO_STATE, NO_CTX);
     expect(p).toContain(`\`${params.repoKey}\` subdirectory`);
     expect(p).not.toMatch(/cloned at the current working directory/i);

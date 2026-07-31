@@ -132,7 +132,17 @@ export function createBackportReviewConfig(
     // $10.06 to $18.77 on an identical image.
     model: 'claude-sonnet-5',
 
-    maxTurns: 30,
+    // 30 was too tight and was measured failing. Two acceptance runs on the same PR
+    // took 25 and 31 turns; the 31-turn run hit the cap, returned
+    // `subtype=error_max_turns` with NULL structured output, and the review errored
+    // out entirely — a cherry-pick PR then gets NO review, which is worse than the
+    // expensive full review this path replaces.
+    //
+    // 60 is ~2x the observed maximum, still well under `pr-reviewer`'s 100. For
+    // calibration, the full reviews this path replaces run a median of 33 turns
+    // (p90 43, max 56, n=310 over 30 days) — the old cap sat below the median of the
+    // work it was standing in for.
+    maxTurns: 60,
     maxRetries: 1, // posts PR comments; not idempotent
 
     buildPrompt(_state: PipelineState, _ctx: PipelineContext): string {

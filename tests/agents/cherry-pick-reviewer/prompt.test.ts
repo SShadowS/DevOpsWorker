@@ -108,7 +108,7 @@ describe('cherry-pick-reviewer prompt — the three checks', () => {
   test('check 2 states the checked-out tree lives in a subdirectory, not at the top of the working directory', () => {
     // The session root (this agent's cwd) is not itself the checked-out tree — the
     // entrypoint clones one level down. A prompt implying otherwise costs the agent
-    // turns discovering the true layout, with no retry to absorb it (maxTurns 30).
+    // turns discovering the true layout, with no retry to absorb it (maxTurns 60).
     const s = section(/^2\./);
     expect(s).toMatch(/subdirectory/i);
   });
