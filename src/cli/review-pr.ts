@@ -606,6 +606,15 @@ export async function reviewPR(args: string[]): Promise<void> {
   try {
     let result: AgentResult<PRReviewResult> | AgentResult<BackportReview>;
 
+    // Named so the sanity path can fall back to it. Declared once rather than
+    // duplicated at the two call sites — the argument list is long enough that two
+    // copies would drift.
+    const runFullReview = () => runPRReview(
+      { prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId, project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl, prTitle: resolvedTitle, prDescription: resolvedDescription, noPost, priorFindingsBlock },
+      config,
+      logger,
+    );
+
     // A failed checkout falls back to the full review: at this point the diffs
     // above are already fetched but no agent has run, so falling back is still
     // free — see the brief's note on why this ordering is the one that matters.
@@ -692,7 +701,19 @@ export async function reviewPR(args: string[]): Promise<void> {
         ? false
         : !prMetadata?.lastMergeTargetCommit || !targetTip || targetTip !== prMetadata.lastMergeTargetCommit;
 
-      const backportResult = await runBackportReview(
+      // A sanity-agent failure must not leave the PR with NO review. Measured: two
+      // runs of the same PR took 25 and 31 turns, and the 31-turn one exhausted the
+      // budget, returned NULL structured output and threw — before this, that threw
+      // straight out of `reviewPR` and the PR got nothing, which is strictly worse
+      // than the expensive full review this path replaces.
+      //
+      // Unlike the checkout and port-diff fallbacks above, this one is NOT free: the
+      // sanity attempt has already spent its turns, so a fallback pays for both. That
+      // is still the right trade against no review at all, but it means the fallback
+      // rate is a cost signal worth watching — hence recording it in `review_path`
+      // rather than only logging it.
+      try {
+        const backportResult = await runBackportReview(
         {
           prId,
           sourcePrId: route.sourcePrId,
@@ -714,43 +735,54 @@ export async function reviewPR(args: string[]): Promise<void> {
         },
         config,
         logger,
-      );
+        );
 
-      // `sourcePrId`, `sourceReviewStatus`, `sourceRecommendation`, `checkoutOk` and
-      // `mergePreviewStale` are already known to TypeScript before the agent ran —
-      // overwrite the model's echo of them rather than trust it. A transcription
-      // slip on any of the first four is cosmetic; a slip on `mergePreviewStale`
-      // flips the verdict on its own (it is read inverted from the prompt's `Merge
-      // preview current` line — see cherry-pick-reviewer/CLAUDE.md).
-      //
-      // The overwrite below is silent by construction — logged here instead, since
-      // it is the only thing that would ever tell anyone the model misread that
-      // inverted line. `checkoutOk` can only ever mismatch as `false` (this branch
-      // is unreachable otherwise), so it is a weaker signal than `mergePreviewStale`,
-      // but cheap to log alongside it.
-      if (backportResult.output.mergePreviewStale !== mergePreviewStale) {
-        console.warn(`[backport] model reported mergePreviewStale=${backportResult.output.mergePreviewStale} but the computed value is ${mergePreviewStale} — likely misread the inverted "Merge preview current" prompt line. Using the computed value.`);
+        // `sourcePrId`, `sourceReviewStatus`, `sourceRecommendation`, `checkoutOk` and
+        // `mergePreviewStale` are already known to TypeScript before the agent ran —
+        // overwrite the model's echo of them rather than trust it. A transcription
+        // slip on any of the first four is cosmetic; a slip on `mergePreviewStale`
+        // flips the verdict on its own (it is read inverted from the prompt's `Merge
+        // preview current` line — see cherry-pick-reviewer/CLAUDE.md).
+        //
+        // The overwrite below is silent by construction — logged here instead, since
+        // it is the only thing that would ever tell anyone the model misread that
+        // inverted line. `checkoutOk` can only ever mismatch as `false` (this branch
+        // is unreachable otherwise), so it is a weaker signal than `mergePreviewStale`,
+        // but cheap to log alongside it.
+        //
+        // Inside the `try` deliberately: it reads `backportResult`, and keeping it
+        // here is what lets TypeScript see `result` assigned on BOTH paths — the try
+        // and the catch — without a non-null assertion.
+        if (backportResult.output.mergePreviewStale !== mergePreviewStale) {
+          console.warn(`[backport] model reported mergePreviewStale=${backportResult.output.mergePreviewStale} but the computed value is ${mergePreviewStale} — likely misread the inverted "Merge preview current" prompt line. Using the computed value.`);
+        }
+        if (backportResult.output.checkoutOk !== true) {
+          console.warn(`[backport] model reported checkoutOk=${backportResult.output.checkoutOk}, but checkout had already succeeded by construction to reach this branch. Using true.`);
+        }
+        result = {
+          ...backportResult,
+          output: {
+            ...backportResult.output,
+            sourcePrId: route.sourcePrId,
+            sourceReviewStatus,
+            sourceRecommendation,
+            checkoutOk: true,
+            mergePreviewStale,
+          },
+        };
+      } catch (err) {
+        // The agent may have posted a partial comment before failing. The full review
+        // that follows posts its own; inline findings reconcile by key, so duplicate
+        // THREADS are not created, but a second summary comment is possible. That is
+        // the accepted cost of guaranteeing a review.
+        const why = err instanceof Error ? err.message : String(err);
+        console.log(`[backport] sanity review failed, falling back to the full review: ${why}`);
+        route = { path: 'full', reason: `sanity review failed: ${why.slice(0, 200)}` };
+        reviewPath = `full:${route.reason}`;
+        result = await runFullReview();
       }
-      if (backportResult.output.checkoutOk !== true) {
-        console.warn(`[backport] model reported checkoutOk=${backportResult.output.checkoutOk}, but checkout had already succeeded by construction to reach this branch. Using true.`);
-      }
-      result = {
-        ...backportResult,
-        output: {
-          ...backportResult.output,
-          sourcePrId: route.sourcePrId,
-          sourceReviewStatus,
-          sourceRecommendation,
-          checkoutOk: true,
-          mergePreviewStale,
-        },
-      };
     } else {
-      result = await runPRReview(
-        { prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId, project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl, prTitle: resolvedTitle, prDescription: resolvedDescription, noPost, priorFindingsBlock },
-        config,
-        logger,
-      );
+      result = await runFullReview();
     }
 
     // The likeliest way this feature silently does nothing on a real PR: the

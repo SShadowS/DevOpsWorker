@@ -555,17 +555,29 @@ describe('reviewPR call site — the prior-findings block reaches the agent', ()
   });
 
   test('the read happens before the agent runs, not after', () => {
+    // `runPRReview` is now wrapped in a `runFullReview` closure so the sanity path can
+    // fall back to it; the closure is DEFINED before the read but INVOKED after, so
+    // anchor on the definition — that is where the argument list, and therefore the
+    // block, is actually captured.
     const readAt = src.indexOf('priorFindingsBlock = buildPriorFindingsBlock(');
-    const runAt = src.indexOf('await runPRReview(');
+    const defAt = src.indexOf('const runFullReview = () => runPRReview(');
     expect(readAt).toBeGreaterThan(-1);
-    expect(runAt).toBeGreaterThan(-1);
-    expect(readAt).toBeLessThan(runAt);
+    expect(defAt).toBeGreaterThan(-1);
+    // Both call sites go through the closure, so no invocation can precede the read.
+    const invocations = src.match(/runFullReview\(\)/g) ?? [];
+    expect(invocations.length).toBeGreaterThanOrEqual(2);
+    for (const m of src.matchAll(/runFullReview\(\)/g)) {
+      expect(m.index!).toBeGreaterThan(readAt);
+    }
   });
 
-  test('the block is passed into runPRReview', () => {
-    const call = src.match(/await runPRReview\(\s*\{([\s\S]*?)\},/);
+  test('the block is passed into the full review', () => {
+    const call = src.match(/const runFullReview = \(\) => runPRReview\(\s*\{([\s\S]*?)\},/);
     expect(call).not.toBeNull();
     expect(call![1]).toContain('priorFindingsBlock');
+    // Exactly one runPRReview call site: two would let the fallback path drift from
+    // the primary one, which is the whole reason it was extracted.
+    expect((src.match(/runPRReview\(/g) ?? []).length).toBe(1);
   });
 
   test('the block also reaches runBackportReview — the sanity path forks threads too without it', () => {
@@ -725,9 +737,20 @@ describe('reviewPR routes before spending and records which path ran', () => {
     const fullBody = src.slice(elseAt, likeliestAt);
 
     expect(sanityBody).toContain('runBackportReview(');
-    expect(sanityBody).not.toContain('runPRReview(');
-    expect(fullBody).toContain('runPRReview(');
+    expect(fullBody).toContain('runFullReview(');
     expect(fullBody).not.toContain('runBackportReview(');
+
+    // The sanity branch MAY reach the full reviewer, but only as a failure fallback:
+    // a sanity-agent throw used to leave the PR with no review at all, which is worse
+    // than the expensive review this path replaces. So the invariant is no longer
+    // "never" — it is "only inside the catch".
+    //
+    // Assert the position, not merely the presence: on the SUCCESS path the sanity
+    // branch must still never call it, or the cost saving is gone.
+    const catchAt = sanityBody.indexOf('} catch (err) {');
+    expect(catchAt).toBeGreaterThan(-1);
+    expect(sanityBody.slice(0, catchAt)).not.toContain('runFullReview(');
+    expect(sanityBody.slice(catchAt)).toContain('runFullReview(');
   });
 
   test('checkoutBranch and resolveRef target the repo subdirectory, not the bare session root', () => {
@@ -744,6 +767,21 @@ describe('reviewPR routes before spending and records which path ran', () => {
     // And the bug's exact shape must not reappear at either call site.
     expect(src).not.toMatch(/checkoutBranch\(config\.paths\.sessionRoot,/);
     expect(src).not.toMatch(/resolveRef\(config\.paths\.sessionRoot,/);
+  });
+
+  test('a sanity-agent failure falls back to a full review and records it as a cost signal', () => {
+    // Measured: the sanity agent exhausted its turn budget on 1 of 2 runs of the same
+    // PR, returned NULL structured output and threw — and the throw left the PR with
+    // NO review at all, strictly worse than the expensive review this path replaces.
+    //
+    // Unlike the checkout and port-diff fallbacks, this one is not free: the sanity
+    // attempt has already spent its turns, so falling back pays twice. That makes the
+    // fallback RATE something to watch, which is why it must land in `review_path`
+    // and not only in a log line nobody queries.
+    expect(src).toMatch(/sanity review failed, falling back to the full review/);
+    expect(src).toMatch(/reason: `sanity review failed: \$\{why\.slice\(0, 200\)\}`/);
+    // Persisted, not just logged.
+    expect(src).toMatch(/reviewPath = `full:\$\{route\.reason\}`/);
   });
 
   test('the checkout is offered lastMergeCommit, so a completed PR still takes the sanity path', () => {
