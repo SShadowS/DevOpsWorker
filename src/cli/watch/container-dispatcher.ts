@@ -75,6 +75,7 @@ export function getContainerEnv(): Record<string, string> {
     // hooks read but that is not listed silently does nothing, with no error.
     PR_REVIEW_SUBAGENT_MODEL: process.env['PR_REVIEW_SUBAGENT_MODEL'] ?? '',
     PR_REVIEW_SUBAGENT_TOOL_RULE: process.env['PR_REVIEW_SUBAGENT_TOOL_RULE'] ?? '',
+    PR_REVIEW_AGENT_SET: process.env['PR_REVIEW_AGENT_SET'] ?? '',
     // Git identity inside pipeline containers. Email must be authorized in the
     // AL Object ID Ninja backend app pool; name marks commits as AI-made.
     GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',

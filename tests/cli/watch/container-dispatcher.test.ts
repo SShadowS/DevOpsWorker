@@ -363,4 +363,10 @@ describe('container env allowlist', () => {
     delete process.env['PR_REVIEW_ANTHROPIC_API_KEY'];
     expect(getPrReviewContainerEnv()).toEqual(getContainerEnv());
   });
+
+  test('forwards PR_REVIEW_AGENT_SET into the container env', () => {
+    process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator';
+    const env = getPrReviewContainerEnv();
+    expect(env['PR_REVIEW_AGENT_SET']).toBe('code-review-validator');
+  });
 });

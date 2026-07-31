@@ -204,6 +204,66 @@ export function maybeInjectToolRule(): number {
   return modified;
 }
 
+/** Marker identifying the agent-set override block, for idempotency. */
+export const AGENT_SET_MARKER = '## Active sub-agent set (overrides Phase 4)';
+
+/**
+ * Build the orchestrator directive naming the sub-agents this run may dispatch.
+ *
+ * Positive framing only: it states which agents exist for this run rather than
+ * forbidding the others. Prohibition wording is measured on this codebase to
+ * suppress behaviour outright instead of redirecting it.
+ */
+export function buildAgentSetBlock(agents: string[]): string {
+  const clean = agents.map((a) => a.trim()).filter(Boolean);
+  const numbered = clean.map((a, i) => `${i + 1}. \`${a}\``).join('\n');
+  return `
+${AGENT_SET_MARKER}
+
+For THIS run the available sub-agent set is exactly these ${clean.length}:
+
+${numbered}
+
+Phase 4 describes the full seven-agent roster; this run ships a subset of it, so
+dispatch these ${clean.length} in parallel and synthesise from their findings. Every
+other instruction in Phase 4, 5 and 6 applies unchanged — severity mapping,
+deduplication, the recommendation rule and the posting flow are all identical.
+A domain with no agent in this list simply has no findings this run; treat it the
+same way Phase 5 step 6 treats an agent that returned nothing.
+`;
+}
+
+/**
+ * EVAL-ONLY: restrict which sub-agents the orchestrator dispatches.
+ *
+ * Guarded so this is a TRUE NO-OP unless `PR_REVIEW_AGENT_SET` is set and
+ * non-empty. Appends to the orchestrator's CLAUDE.md rather than editing Phase 4
+ * in place — appending is idempotent and cannot corrupt the surrounding prompt.
+ *
+ * Returns the number of files modified (0 when the env var is unset).
+ */
+export function maybeRestrictAgentSet(): number {
+  const raw = process.env['PR_REVIEW_AGENT_SET'];
+  if (!raw || raw.trim() === '') return 0;
+
+  const agents = raw.split(',').map((a) => a.trim()).filter(Boolean);
+  if (agents.length === 0) return 0;
+
+  const cliDir = dirname(fileURLToPath(import.meta.url));
+  const promptPath = resolve(cliDir, '..', 'agents', 'pr-reviewer', 'CLAUDE.md');
+  if (!existsSync(promptPath)) {
+    console.log(`[eval] PR_REVIEW_AGENT_SET set but orchestrator prompt not found at ${promptPath} — skipping`);
+    return 0;
+  }
+
+  const content = readFileSync(promptPath, 'utf-8');
+  if (content.includes(AGENT_SET_MARKER)) return 0;
+  writeFileSync(promptPath, `${content.trimEnd()}\n${buildAgentSetBlock(agents)}`);
+
+  console.log(`[eval] restricted sub-agent set to ${agents.length}: ${agents.join(', ')}`);
+  return 1;
+}
+
 /**
  * Render the marker + severity-labeled body shared by a thread's creation and
  * its later update — the only difference between the two call sites is which
@@ -433,6 +493,7 @@ export async function reviewPR(args: string[]): Promise<void> {
   // No-op by default — production runs leave this unset.
   maybeOverrideSubAgentModel();
   maybeInjectToolRule();
+  maybeRestrictAgentSet();
 
   const repo = findRepoByRepositoryId(repoId);
   if (!repo) {

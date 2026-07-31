@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import {
   maybeInjectToolRule,
   maybeOverrideSubAgentModel,
+  maybeRestrictAgentSet,
+  buildAgentSetBlock,
   SUBAGENT_TOOL_RULE,
   applyInlineFindings,
   buildPriorFindingsBlock,
@@ -53,6 +55,36 @@ describe('maybeOverrideSubAgentModel', () => {
   test('is a no-op for an empty or whitespace value', () => {
     process.env['PR_REVIEW_SUBAGENT_MODEL'] = '   ';
     expect(maybeOverrideSubAgentModel()).toBe(0);
+  });
+});
+
+describe('maybeRestrictAgentSet', () => {
+  withEnv('PR_REVIEW_AGENT_SET');
+
+  test('is a no-op when unset', () => {
+    delete process.env['PR_REVIEW_AGENT_SET'];
+    expect(maybeRestrictAgentSet()).toBe(0);
+  });
+
+  test('is a no-op when blank', () => {
+    process.env['PR_REVIEW_AGENT_SET'] = '   ';
+    expect(maybeRestrictAgentSet()).toBe(0);
+  });
+
+  test('builds a positive directive naming only the selected agents', () => {
+    const block = buildAgentSetBlock(['code-review-validator', 'al-performance-analyzer']);
+    expect(block).toContain('code-review-validator');
+    expect(block).toContain('al-performance-analyzer');
+    expect(block).not.toContain('al-integration-analyzer');
+    // Positive framing only — no prohibition language.
+    expect(block.toLowerCase()).not.toContain('never');
+    expect(block.toLowerCase()).not.toContain('do not dispatch');
+  });
+
+  test('trims whitespace and drops empty entries', () => {
+    const block = buildAgentSetBlock([' code-review-validator ', '', 'al-performance-analyzer']);
+    expect(block).toContain('1. `code-review-validator`');
+    expect(block).toContain('2. `al-performance-analyzer`');
   });
 });
 
