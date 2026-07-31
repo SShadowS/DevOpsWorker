@@ -1,5 +1,10 @@
 import { describe, test, expect } from 'bun:test';
-import { checkArmCompliance, type SubAgentTelemetryEntry } from '../../../scripts/pr-review-eval/compliance.ts';
+import {
+  checkArmCompliance,
+  type SubAgentTelemetryEntry,
+  type LeverFlags,
+  type AppliedLevers,
+} from '../../../scripts/pr-review-eval/compliance.ts';
 
 describe('checkArmCompliance', () => {
   const AGENT_NAMES = ['code-review-validator', 'code-quality-assessor', 'security-edge-case-analyzer',
@@ -128,5 +133,100 @@ describe('checkArmCompliance', () => {
     );
     const v = checkArmCompliance('sonnet-pin', null, 'claude-sonnet-5', subAgents);
     expect(v.compliant).toBe(false);
+  });
+
+  // --- Applied-lever gate (task 9) ---
+  //
+  // Two of the arm's levers — scoped payload and BC-only security — are
+  // prompt-CONTENT edits: they change what an agent is TOLD, not which agents
+  // dispatch, so a silent no-op produces `sub_agents` telemetry IDENTICAL to a
+  // working run. Every check above this point is blind to that failure mode;
+  // these tests are the ones that would actually catch it.
+  describe('applied-lever gate', () => {
+    test('baseline (no lever enabled) is compliant even with null appliedLevers', () => {
+      // C2: the runner passes every PR_REVIEW_* var with '' for a disabled
+      // lever, so a naive "!== undefined" upstream would have recorded an
+      // all-zeros map here instead of null — this proves the gate itself does
+      // not treat "no levers configured" as something requiring evidence.
+      const v = checkArmCompliance('baseline', null, null, seven, null, null);
+      expect(v.compliant).toBe(true);
+    });
+
+    test('baseline is compliant even with an empty appliedLevers object', () => {
+      const v = checkArmCompliance('baseline', null, null, seven, {}, {});
+      expect(v.compliant).toBe(true);
+    });
+
+    test('an arm enabling a lever VOIDs when appliedLevers is entirely null', () => {
+      const expectedLevers: LeverFlags = { scopedPayload: true };
+      const v = checkArmCompliance('scoped', null, null, seven, expectedLevers, null);
+      expect(v.compliant).toBe(false);
+      expect(v.reason).toContain('scopedPayload');
+      expect(v.reason).toContain('no applied_levers telemetry was recorded');
+    });
+
+    test('an arm enabling a lever VOIDs when that lever\'s key is absent from appliedLevers', () => {
+      const expectedLevers: LeverFlags = { routing: true, scopedPayload: true };
+      // routing recorded, scopedPayload never even attempted (key absent).
+      const applied: AppliedLevers = { routing: 1 };
+      const v = checkArmCompliance('routed-scoped', null, null, seven, expectedLevers, applied);
+      expect(v.compliant).toBe(false);
+      expect(v.reason).toContain('scopedPayload');
+      expect(v.reason).toContain('no application was recorded');
+    });
+
+    test('an arm enabling scopedPayload VOIDs when it applied to 0 files', () => {
+      const expectedLevers: LeverFlags = { scopedPayload: true };
+      const v = checkArmCompliance('scoped', null, null, seven, expectedLevers, { scopedPayload: 0 });
+      expect(v.compliant).toBe(false);
+      expect(v.reason).toContain('scopedPayload');
+      expect(v.reason).toContain('applied to 0 file');
+    });
+
+    // C1 — the defect a naive "value === 0 -> VOID" check would miss entirely.
+    // maybeTrimSecurityDomains can return exactly 1 in a genuinely half-pulled
+    // state: the sub-agent file trims (+1) but the orchestrator's dispatch
+    // line never gets rewritten (its regex missed drifted BC heading text),
+    // so the sub-agent narrows while the orchestrator still hands back every
+    // domain it just removed. That is 1, not 0 — a "non-zero" check reads it
+    // as fully compliant.
+    test('securityBcOnly of exactly 1 (half-applied) VOIDs, not just 0', () => {
+      const expectedLevers: LeverFlags = { securityBcOnly: true };
+      const v = checkArmCompliance('bc-security', null, null, seven, expectedLevers, { securityBcOnly: 1 });
+      expect(v.compliant).toBe(false);
+      expect(v.reason).toContain('securityBcOnly');
+      expect(v.reason).toContain('expected exactly 2');
+    });
+
+    test('securityBcOnly of exactly 2 (fully applied) is compliant', () => {
+      const expectedLevers: LeverFlags = { securityBcOnly: true };
+      const v = checkArmCompliance('bc-security', null, null, seven, expectedLevers, { securityBcOnly: 2 });
+      expect(v.compliant).toBe(true);
+    });
+
+    test('a too-high count VOIDs too, not just too-low', () => {
+      const expectedLevers: LeverFlags = { agentSet: true };
+      const v = checkArmCompliance('agent-set', null, null, seven, expectedLevers, { agentSet: 2 });
+      expect(v.compliant).toBe(false);
+      expect(v.reason).toContain('agentSet');
+      expect(v.reason).toContain('expected exactly 1');
+    });
+
+    test('every enabled lever fully applied is compliant', () => {
+      const expectedLevers: LeverFlags = { agentSet: true, routing: true, scopedPayload: true, securityBcOnly: true };
+      const applied: AppliedLevers = { agentSet: 1, routing: 1, scopedPayload: 1, securityBcOnly: 2 };
+      const v = checkArmCompliance('lean', null, null, seven, expectedLevers, applied);
+      expect(v.compliant).toBe(true);
+    });
+
+    test('a lever the arm does NOT enable is ignored even if its recorded count would fail', () => {
+      // securityBcOnly=1 would VOID an arm that enabled it — this arm never
+      // enabled it at all, so its (nonsensical, but harmless) presence must
+      // not affect the verdict.
+      const expectedLevers: LeverFlags = { agentSet: true };
+      const applied: AppliedLevers = { agentSet: 1, securityBcOnly: 1 };
+      const v = checkArmCompliance('agent-set', null, null, seven, expectedLevers, applied);
+      expect(v.compliant).toBe(true);
+    });
   });
 });

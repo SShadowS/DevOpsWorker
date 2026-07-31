@@ -20,6 +20,7 @@ import {
   applyInlineFindings,
   buildPriorFindingsBlock,
   parseReviewPrArgs,
+  collectAppliedLevers,
 } from '../../src/cli/review-pr.ts';
 import { findingKey, markerFor } from '../../src/sdk/ado/finding-key.ts';
 import type { ReviewThread } from '../../src/sdk/ado/pull-requests.ts';
@@ -1795,5 +1796,137 @@ describe('reviewPR forwards --full into chooseReviewPath as forceFull', () => {
     const callBlock = src.match(/chooseReviewPath\(\{([\s\S]*?)\}\)/);
     expect(callBlock).not.toBeNull();
     expect(callBlock![1]).toMatch(/\bforceFull\b/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectAppliedLevers (task 9) — the record that closes the compliance gap
+// on prompt-CONTENT levers (scoped payload, BC-only security). Two of the six
+// PR_REVIEW_* env vars ('' vs '1') mean "enabled" for different levers, and
+// the container runner supplies ALL SIX to every run, '' for a disabled one —
+// so the critical property under test is that a lever's ABSENCE from the
+// returned map means "not enabled", never "enabled and recorded a zero".
+// ---------------------------------------------------------------------------
+describe('collectAppliedLevers', () => {
+  const LEVER_ENV_KEYS = [
+    'PR_REVIEW_AGENT_SET',
+    'PR_REVIEW_AGENT_ROUTING',
+    'PR_REVIEW_SCOPED_PAYLOAD',
+    'PR_REVIEW_SECURITY_BC_ONLY',
+    'PR_REVIEW_SUBAGENT_MODEL',
+    'PR_REVIEW_SUBAGENT_TOOL_RULE',
+  ] as const;
+
+  let saved: Record<string, string | undefined>;
+  beforeEach(() => {
+    saved = {};
+    for (const key of LEVER_ENV_KEYS) { saved[key] = process.env[key]; delete process.env[key]; }
+  });
+  afterEach(() => {
+    for (const key of LEVER_ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+    }
+  });
+
+  const allCounts = { agentSet: 1, routing: 1, scopedPayload: 1, securityBcOnly: 2, subagentModel: 3, subagentToolRule: 7 };
+
+  test('every lever env var unset returns null, not an all-zeros/all-counts map', () => {
+    expect(collectAppliedLevers(allCounts)).toBeNull();
+  });
+
+  // C2: the runner passes every PR_REVIEW_* var into the container, '' for a
+  // disabled lever — this is the exact shape a baseline arm's container sees,
+  // and a naive `!== undefined` test would have read every key here as "set".
+  test('every lever env var present but blank (container baseline shape) still returns null', () => {
+    process.env['PR_REVIEW_AGENT_SET'] = '';
+    process.env['PR_REVIEW_AGENT_ROUTING'] = '';
+    process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '';
+    process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '';
+    process.env['PR_REVIEW_SUBAGENT_MODEL'] = '';
+    process.env['PR_REVIEW_SUBAGENT_TOOL_RULE'] = '';
+    expect(collectAppliedLevers(allCounts)).toBeNull();
+  });
+
+  test('PR_REVIEW_AGENT_SET non-blank records only agentSet, passing the count through unchanged', () => {
+    process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator,al-performance-analyzer';
+    expect(collectAppliedLevers(allCounts)).toEqual({ agentSet: 1 });
+  });
+
+  test('a whitespace-only PR_REVIEW_AGENT_SET is treated as unset, mirroring maybeRestrictAgentSet\'s own predicate', () => {
+    process.env['PR_REVIEW_AGENT_SET'] = '   ';
+    expect(collectAppliedLevers(allCounts)).toBeNull();
+  });
+
+  test('PR_REVIEW_AGENT_ROUTING=1 and PR_REVIEW_SCOPED_PAYLOAD=1 record both, and only those two', () => {
+    process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+    process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '1';
+    expect(collectAppliedLevers(allCounts)).toEqual({ routing: 1, scopedPayload: 1 });
+  });
+
+  test('PR_REVIEW_AGENT_ROUTING="true" (not exactly "1") is not enabled', () => {
+    process.env['PR_REVIEW_AGENT_ROUTING'] = 'true';
+    expect(collectAppliedLevers(allCounts)).toBeNull();
+  });
+
+  test('PR_REVIEW_SECURITY_BC_ONLY=1 records the raw returned count, even a half-applied 1', () => {
+    // collectAppliedLevers only gates on whether the lever was enabled — it is
+    // not the place that judges whether the count is a valid fully-applied
+    // value; that judgment belongs to checkArmCompliance's REQUIRED_LEVER_COUNTS.
+    process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '1';
+    expect(collectAppliedLevers({ ...allCounts, securityBcOnly: 1 })).toEqual({ securityBcOnly: 1 });
+  });
+
+  test('a blank PR_REVIEW_SUBAGENT_MODEL is not enabled, mirroring maybeOverrideSubAgentModel\'s own predicate', () => {
+    process.env['PR_REVIEW_SUBAGENT_MODEL'] = '   ';
+    expect(collectAppliedLevers(allCounts)).toBeNull();
+  });
+
+  test('all six enabled records all six counts', () => {
+    for (const key of ['PR_REVIEW_AGENT_ROUTING', 'PR_REVIEW_SCOPED_PAYLOAD', 'PR_REVIEW_SECURITY_BC_ONLY', 'PR_REVIEW_SUBAGENT_TOOL_RULE']) {
+      process.env[key] = '1';
+    }
+    process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator';
+    process.env['PR_REVIEW_SUBAGENT_MODEL'] = 'claude-sonnet-5';
+    expect(collectAppliedLevers(allCounts)).toEqual(allCounts);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reviewPR wires collectAppliedLevers' output into both save() call sites and
+// preserves the hooks' original call order (each hook appends to the same
+// prompt file, so calling them out of order changes prompt structure even
+// though collectAppliedLevers itself only reads return values). No live-DB
+// test is possible here (DATABASE_URL is production) — pinned in the source
+// text, the same approach the forceFull/chooseReviewPath tests above use.
+// ---------------------------------------------------------------------------
+describe('reviewPR threads appliedLevers through both save() calls', () => {
+  const src = readFileSync(fileURLToPath(new URL('../../src/cli/review-pr.ts', import.meta.url)), 'utf-8');
+
+  test('the six hooks are still called in their original order inside the collectAppliedLevers call', () => {
+    const callBlock = src.match(/const appliedLevers = collectAppliedLevers\(\{([\s\S]*?)\}\);/);
+    expect(callBlock).not.toBeNull();
+    const body = callBlock![1]!;
+    const order = [
+      'maybeOverrideSubAgentModel',
+      'maybeInjectToolRule',
+      'maybeRestrictAgentSet',
+      'maybeInjectRouting',
+      'maybeInjectScopedPayload',
+      'maybeTrimSecurityDomains',
+    ];
+    let lastIndex = -1;
+    for (const fn of order) {
+      const idx = body.indexOf(`${fn}()`);
+      expect(idx).toBeGreaterThan(lastIndex);
+      lastIndex = idx;
+    }
+  });
+
+  test('both prReviewStore.save() calls include appliedLevers', () => {
+    const saveCalls = src.match(/await prReviewStore\.save\(\{[\s\S]*?\}\);/g) ?? [];
+    expect(saveCalls.length).toBe(2);
+    for (const call of saveCalls) {
+      expect(call).toMatch(/\bappliedLevers\b/);
+    }
   });
 });

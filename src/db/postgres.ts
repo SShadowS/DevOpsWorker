@@ -116,6 +116,15 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS inline_threads JSONB;
 -- 'full:<reason>' naming why the full path was chosen. Null for rows recorded
 -- before this routing existed.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_path TEXT;
+-- File-modification counts from the eval-only PR_REVIEW_* hooks (agent set,
+-- routing, scoped payload, BC-only security, sub-agent model override, tool
+-- rule) that were ENABLED this run, keyed by lever name. Null for a production
+-- review (no lever env var set) or a row recorded before this was captured —
+-- deliberately never a map of zeros, which would be indistinguishable from
+-- "every enabled lever failed to apply". Lets checkArmCompliance verify that
+-- prompt-CONTENT levers (scoped payload, BC-only security) actually took
+-- effect, not just that the expected sub-agents dispatched.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS applied_levers JSONB;
 `;
 
 /**

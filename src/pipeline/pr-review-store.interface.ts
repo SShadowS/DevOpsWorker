@@ -1,6 +1,27 @@
 import type { SubAgentUsage, StageModelUsage } from '../types/pipeline.types.ts';
 import type { PRFinding } from '../agents/pr-reviewer/schema.ts';
 
+/**
+ * Per-eval-lever file-modification counts, one key per `PR_REVIEW_*` hook in
+ * `src/cli/review-pr.ts` that was actually ENABLED this run (its own env var
+ * set, per that hook's own activation predicate) — a key absent means the
+ * lever was off, never that it silently failed.
+ *
+ * Persisted so `scripts/pr-review-eval/compliance.ts`'s `checkArmCompliance`
+ * can verify prompt-CONTENT levers (scoped payload, BC-only security
+ * narrowing) actually took effect. Those two edit what an agent is TOLD, not
+ * which agents dispatch, so a silent no-op produces `sub_agents` telemetry
+ * identical to a working run — the roster/model checks alone cannot see it.
+ */
+export interface AppliedLevers {
+  agentSet?: number;
+  routing?: number;
+  scopedPayload?: number;
+  securityBcOnly?: number;
+  subagentModel?: number;
+  subagentToolRule?: number;
+}
+
 export interface PRReviewRow {
   id: number;
   prId: number;
@@ -38,6 +59,11 @@ export interface PRReviewRow {
    *  `full:<reason>` naming why the full path was chosen. Null for rows recorded
    *  before this routing existed. */
   reviewPath: string | null;
+  /** File-modification counts from the eval-only `PR_REVIEW_*` hooks that were
+   *  enabled this run. Null for a production review (no lever env vars set)
+   *  or a row recorded before this was captured — never a map of zeros, which
+   *  would be indistinguishable from "every enabled lever failed to apply". */
+  appliedLevers: AppliedLevers | null;
 }
 
 export interface IPRReviewStore {

@@ -91,6 +91,34 @@ describe('rowToPRReview', () => {
     });
     expect(row.reviewPath).toBeNull();
   });
+
+  test('maps applied_levers to appliedLevers', () => {
+    const appliedLevers = { scopedPayload: 1, securityBcOnly: 2 };
+    const row = rowToPRReview({
+      id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',
+      title: null, recommendation: 'approve', findings: null, findings_count: null,
+      comment_id: null, cost_usd: null, duration_ms: null, turns: null,
+      tool_calls: null, session_id: null, error: null, review_body: null,
+      created_at: '2026-01-01T00:00:00Z', action_id: null, review_run_id: 'pr42-abc',
+      applied_levers: appliedLevers,
+    });
+    expect(row.appliedLevers).toEqual(appliedLevers);
+  });
+
+  // C2's failure mode lands here if the mapper ever normalised an absent
+  // key differently from an explicit null — a plain `??` is what keeps them
+  // both reading as "not recorded" rather than accidentally as `{}`.
+  test('maps a null applied_levers to null — production reviews set no lever', () => {
+    const row = rowToPRReview({
+      id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',
+      title: null, recommendation: 'approve', findings: null, findings_count: null,
+      comment_id: null, cost_usd: null, duration_ms: null, turns: null,
+      tool_calls: null, session_id: null, error: null, review_body: null,
+      created_at: '2026-01-01T00:00:00Z', action_id: null, review_run_id: 'pr42-abc',
+      applied_levers: null,
+    });
+    expect(row.appliedLevers).toBeNull();
+  });
 });
 
 describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
@@ -110,6 +138,12 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
     expect(insert![1]).toContain('review_path');
   });
 
+  test('the INSERT names applied_levers', () => {
+    const insert = /INSERT INTO pr_reviews \(([^)]*)\)/.exec(src);
+    expect(insert).not.toBeNull();
+    expect(insert![1]).toContain('applied_levers');
+  });
+
   test('column count matches placeholder count in the INSERT', () => {
     const columnMatch = src.match(/INSERT INTO pr_reviews \(([^)]*)\)/);
     expect(columnMatch).not.toBeNull();
@@ -122,7 +156,20 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
     expect(columns).toContain('findings_list');
     expect(columns).toContain('inline_threads');
     expect(columns).toContain('review_path');
+    expect(columns).toContain('applied_levers');
     expect(placeholderCount).toBe(columns.length);
+  });
+
+  // C3: the four SELECT column lists (listRecent, findByActionId, findById,
+  // findLatestByPrId) are hand-maintained too — missing applied_levers on any
+  // one of them means `row.appliedLevers` reads as undefined for rows fetched
+  // through that method, silently voiding every arm at scoring time.
+  test('every SELECT names applied_levers', () => {
+    const selects = src.match(/SELECT id,[\s\S]*?FROM pr_reviews/g) ?? [];
+    expect(selects.length).toBeGreaterThanOrEqual(4);
+    for (const select of selects) {
+      expect(select).toContain('applied_levers');
+    }
   });
 });
 

@@ -9,6 +9,7 @@ import type { BackportReview } from '../agents/cherry-pick-reviewer/schema.ts';
 import { findRepoByRepositoryId } from '../config/repos.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
 import { connectStores } from '../db/connect-stores.ts';
+import type { AppliedLevers } from '../pipeline/pr-review-store.interface.ts';
 import { notifyPipelineError } from '../sdk/discord-notify.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import type { PipelineConfig } from '../types/pipeline.types.ts';
@@ -687,6 +688,46 @@ export function maybeTrimSecurityDomains(): number {
 }
 
 /**
+ * Snapshot of which of the six eval-only `PR_REVIEW_*` hooks were enabled this
+ * run, and how many files each one actually modified — persisted to
+ * `pr_reviews.applied_levers` so `checkArmCompliance`
+ * (`scripts/pr-review-eval/compliance.ts`) can verify prompt-CONTENT levers
+ * (scoped payload, BC-only security narrowing) actually took effect, not just
+ * that the expected sub-agents dispatched. Those two edit what an agent is
+ * TOLD, not which agents dispatch, so a silent no-op produces `sub_agents`
+ * telemetry IDENTICAL to a working run — this is the only signal that closes
+ * that gap.
+ *
+ * A key is present only when that lever's OWN env var was set, tested with the
+ * exact predicate that hook itself uses to decide it is a no-op — not a
+ * blanket `!== undefined`. The runner supplies all six `PR_REVIEW_*` vars to
+ * every container, `''` for a disabled lever, so `!== undefined` would see
+ * every lever as "set" and record an all-zeros map even for the baseline arm,
+ * which the compliance gate would then VOID for a run that touched nothing.
+ *
+ * Returns null when no lever was enabled — the common case (every production
+ * review, and the eval matrix's own baseline arm) — never an empty object, so
+ * "nothing enabled" and "enabled but not recorded" stay distinguishable.
+ */
+export function collectAppliedLevers(counts: {
+  agentSet: number;
+  routing: number;
+  scopedPayload: number;
+  securityBcOnly: number;
+  subagentModel: number;
+  subagentToolRule: number;
+}): AppliedLevers | null {
+  const levers: AppliedLevers = {};
+  if ((process.env['PR_REVIEW_AGENT_SET'] ?? '').trim() !== '') levers.agentSet = counts.agentSet;
+  if (process.env['PR_REVIEW_AGENT_ROUTING'] === '1') levers.routing = counts.routing;
+  if (process.env['PR_REVIEW_SCOPED_PAYLOAD'] === '1') levers.scopedPayload = counts.scopedPayload;
+  if (process.env['PR_REVIEW_SECURITY_BC_ONLY'] === '1') levers.securityBcOnly = counts.securityBcOnly;
+  if ((process.env['PR_REVIEW_SUBAGENT_MODEL'] ?? '').trim() !== '') levers.subagentModel = counts.subagentModel;
+  if (process.env['PR_REVIEW_SUBAGENT_TOOL_RULE'] === '1') levers.subagentToolRule = counts.subagentToolRule;
+  return Object.keys(levers).length > 0 ? levers : null;
+}
+
+/**
  * Render the marker + severity-labeled body shared by a thread's creation and
  * its later update — the only difference between the two call sites is which
  * ADO write carries this same string.
@@ -913,12 +954,21 @@ export async function reviewPR(args: string[]): Promise<void> {
   // EVAL-ONLY: when PR_REVIEW_SUBAGENT_MODEL is set, rewrite the pinned `model:`
   // frontmatter in the pr-reviewer sub-agents so the A/B model arm takes effect.
   // No-op by default — production runs leave this unset.
-  maybeOverrideSubAgentModel();
-  maybeInjectToolRule();
-  maybeRestrictAgentSet();
-  maybeInjectRouting();
-  maybeInjectScopedPayload();
-  maybeTrimSecurityDomains();
+  //
+  // Order matters beyond side effects: each of the prompt-writing hooks below
+  // appends to the same file, so calling them in a different order changes
+  // which block lands first in the composed prompt. `collectAppliedLevers`
+  // below only reads each call's return value, so reordering the object
+  // literal's properties would not change this — the calls themselves,
+  // written in this order, are what fixes it.
+  const appliedLevers = collectAppliedLevers({
+    subagentModel: maybeOverrideSubAgentModel(),
+    subagentToolRule: maybeInjectToolRule(),
+    agentSet: maybeRestrictAgentSet(),
+    routing: maybeInjectRouting(),
+    scopedPayload: maybeInjectScopedPayload(),
+    securityBcOnly: maybeTrimSecurityDomains(),
+  });
 
   const repo = findRepoByRepositoryId(repoId);
   if (!repo) {
@@ -1320,6 +1370,7 @@ export async function reviewPR(args: string[]): Promise<void> {
           findingsList: result.output.findingsList ?? null,
           inlineThreads,
           reviewPath: reviewPath,
+          appliedLevers,
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -1363,6 +1414,7 @@ export async function reviewPR(args: string[]): Promise<void> {
         findingsList: null,
         inlineThreads: null,
         reviewPath: reviewPath,
+        appliedLevers,
       });
     }
 

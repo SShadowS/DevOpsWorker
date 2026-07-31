@@ -17,6 +17,65 @@ export interface SubAgentTelemetryEntry {
 }
 
 /**
+ * Which prompt-content levers an ARM enables — the config side of the
+ * comparison, supplied by the matrix definition (Task 7), not read from
+ * telemetry. Named to match `AppliedLevers`'s keys 1:1 (see below) so there is
+ * exactly one name per lever and no translation table between "what the arm
+ * configures" and "what got recorded" — a second naming scheme for the same
+ * four things is exactly the kind of transcription hazard this gate exists to
+ * remove, not add.
+ *
+ * Deliberately only the four levers that are prompt-CONTENT edits (an
+ * excluded/wrong sub-agent is already caught by the roster check above, and
+ * the wrong model by the `expectedModel` check) — `subagentModel` and
+ * `subagentToolRule` are recorded in `AppliedLevers` for completeness but are
+ * NOT gated here.
+ */
+export interface LeverFlags {
+  agentSet?: boolean;
+  routing?: boolean;
+  scopedPayload?: boolean;
+  securityBcOnly?: boolean;
+}
+
+/**
+ * Mirrors `AppliedLevers` in `src/pipeline/pr-review-store.interface.ts` — the
+ * shape persisted to `pr_reviews.applied_levers` by `collectAppliedLevers` in
+ * `src/cli/review-pr.ts`. Kept as a local duplicate rather than an import, the
+ * same choice already made for `SubAgentTelemetryEntry` above: this module
+ * reads a narrow slice of a row and should not need the full `src/` module
+ * graph to typecheck.
+ *
+ * A key absent means that lever was not enabled this run (its own env var was
+ * unset) — never that it was enabled and recorded a zero.
+ */
+export interface AppliedLevers {
+  agentSet?: number;
+  routing?: number;
+  scopedPayload?: number;
+  securityBcOnly?: number;
+  subagentModel?: number;
+  subagentToolRule?: number;
+}
+
+/**
+ * The exact file-modification count each lever's hook returns when it fully
+ * applies — NOT "non-zero". `maybeTrimSecurityDomains` (`securityBcOnly`) can
+ * return 1 in a genuinely half-applied state: the sub-agent file trims (+1),
+ * but if the orchestrator's dispatch-line regex fails to match (BC heading
+ * text drifted), the second write never happens and no warning fires either —
+ * the sub-agent narrows while the orchestrator still hands back every domain
+ * it just removed. A "value !== 0" check would wave that straight through as
+ * compliant. See task-9 brief correction C1.
+ */
+const REQUIRED_LEVER_COUNTS: Record<keyof LeverFlags, number> = {
+  agentSet: 1,
+  routing: 1,
+  scopedPayload: 1,
+  securityBcOnly: 2,
+};
+
+/**
  * Strip a trailing `-YYYYMMDD` date suffix so SDK-reported model ids compare
  * equal to the bare ids assistant messages carry.
  *
@@ -41,21 +100,34 @@ function normalizeModel(model: string): string {
  * results.
  *
  * SCOPE — read this before trusting a `compliant: true`. This check verifies
- * the sub-agent ROSTER (an excluded agent still ran, or nothing ran at all)
- * and, when `expectedModel` is given, the MODEL each sub-agent ran on. It does
- * **not** verify prompt-CONTENT levers (scoped payload, BC-only security
- * narrowing) — those produce IDENTICAL `sub_agents` telemetry whether the
- * injected instruction actually changed the agent's behaviour or silently
- * no-opped. A `compliant: true` verdict means "the right agents ran, on the
- * right model" — not "every lever this arm configures took effect". (That gap
- * is closed separately, runner-side, by asserting each hook's `[eval]` log
- * line appears in the container output — not this function's job.)
+ * the sub-agent ROSTER (an excluded agent still ran, or nothing ran at all),
+ * when `expectedModel` is given the MODEL each sub-agent ran on, and — when
+ * `expectedLevers` is given — that every prompt-CONTENT lever the arm enables
+ * (scoped payload, BC-only security narrowing) actually applied. Those two
+ * edit what an agent is TOLD, not which agents dispatch, so they produce
+ * `sub_agents` telemetry IDENTICAL whether the injected instruction changed
+ * the agent's behaviour or silently no-opped — the roster and model checks
+ * alone cannot see that gap. `expectedLevers`/`appliedLevers` is what closes
+ * it (an EARLIER version of this doc proposed asserting the hooks' `[eval]`
+ * log lines instead; rejected — `spawnContainer` uses `stdout: 'inherit'` and
+ * returns only an exit code, so capturing them means changing a function the
+ * production watcher shares, and string-matching log text is fragile in
+ * exactly the way this plan keeps getting bitten by).
  *
  * `expected === null` means the arm does not pin an exact roster (baseline, or
  * a routed arm whose roster is legitimately diff-dependent).
  *
  * `expectedModel === null` means the arm does not pin a model for its
  * sub-agents — skip the model check entirely.
+ *
+ * `expectedLevers === null` or an object with every flag false/absent means
+ * the arm enables no prompt-content lever (baseline) — skip the lever check
+ * entirely, regardless of what `appliedLevers` holds. For every lever the arm
+ * DOES enable: `appliedLevers` being null/undefined outright, the key being
+ * absent, or the recorded count not being EXACTLY the value that lever's hook
+ * returns when fully applied (see `REQUIRED_LEVER_COUNTS`) all VOID the arm —
+ * never just "value is 0". A too-high count VOIDs too; the hooks' contracts
+ * name one specific fully-applied count each, not a floor.
  *
  * MODEL-CHECK CAVEAT: `agent-stream.ts` records only the model of the FIRST
  * assistant message attributed to a sub-agent (`entry.model ??= ...`). A
@@ -68,6 +140,8 @@ export function checkArmCompliance(
   expected: string[] | null,
   expectedModel: string | null,
   subAgents: Record<string, SubAgentTelemetryEntry> | null,
+  expectedLevers: LeverFlags | null = null,
+  appliedLevers: AppliedLevers | null = null,
 ): ComplianceVerdict {
   if (!subAgents || typeof subAgents !== 'object') {
     return { arm: armName, compliant: false, actual: 0, reason: 'no sub_agents telemetry recorded' };
@@ -136,6 +210,49 @@ export function checkArmCompliance(
         actual,
         reason: `ran on the wrong model (expected ${expectedModel}): ${mismatched.join(', ')}`,
       };
+    }
+  }
+
+  // Prompt-content levers (scoped payload, BC-only security) — the gap the
+  // roster/model checks above cannot see (see the SCOPE doc above). Only the
+  // levers THIS arm enables are checked; an arm that enables none (baseline)
+  // is unaffected no matter what `appliedLevers` holds — bias every ambiguous
+  // case toward VOID, but "no lever configured" is not ambiguous.
+  const enabledLevers = (Object.keys(REQUIRED_LEVER_COUNTS) as (keyof LeverFlags)[])
+    .filter((lever) => expectedLevers?.[lever]);
+
+  if (enabledLevers.length > 0) {
+    if (!appliedLevers || typeof appliedLevers !== 'object') {
+      return {
+        arm: armName,
+        compliant: false,
+        actual,
+        reason: `arm enables ${enabledLevers.join(', ')} but no applied_levers telemetry was recorded`,
+      };
+    }
+    for (const lever of enabledLevers) {
+      const required = REQUIRED_LEVER_COUNTS[lever];
+      const value = appliedLevers[lever];
+      if (value === undefined) {
+        return {
+          arm: armName,
+          compliant: false,
+          actual,
+          reason: `lever ${lever} was enabled but no application was recorded`,
+        };
+      }
+      // Exact match, not "!== 0" — see REQUIRED_LEVER_COUNTS' doc (correction
+      // C1): securityBcOnly can return 1 in a genuinely half-applied state,
+      // and a too-high count is just as much a sign something is wrong as a
+      // too-low one.
+      if (value !== required) {
+        return {
+          arm: armName,
+          compliant: false,
+          actual,
+          reason: `lever ${lever} was enabled but applied to ${value} file(s), expected exactly ${required}`,
+        };
+      }
     }
   }
 
