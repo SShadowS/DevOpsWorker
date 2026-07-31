@@ -485,7 +485,7 @@ describe('maybeInjectScopedPayload', () => {
       expect(occurrences).toBe(1);
     });
 
-    test('composes cleanly with agent-set + routing both active — all three blocks land, none clobber the others', () => {
+    test('composes cleanly with agent-set + routing both active — all three blocks land, none clobber the others, and the scoping table excludes an agent the set already dropped', () => {
       // Direct proof for the "all three active" composition question the task asked
       // to be checked: apply Task 1's and Task 2's hooks first (the fixed order
       // reviewPR itself uses), then this one, and confirm all three markers survive
@@ -508,6 +508,18 @@ describe('maybeInjectScopedPayload', () => {
           .toBeLessThan(updated.indexOf(AGENT_SET_MARKER));
         expect(updated.indexOf(AGENT_SET_MARKER)).toBeLessThan(updated.indexOf(ROUTING_MARKER));
         expect(updated.indexOf(ROUTING_MARKER)).toBeLessThan(updated.indexOf(SCOPED_PAYLOAD_MARKER));
+
+        // Fix round 1, Critical: an agent excluded from the active set (here,
+        // code-quality-assessor — not in PR_REVIEW_AGENT_SET above) must not appear as
+        // a scoping row. Task 1's block already told the orchestrator "the available
+        // sub-agent set is exactly these 2" (code-quality-assessor absent); a stray
+        // "Always — full source of every changed file" row for it in THIS section
+        // would be a direct contradiction in the same prompt, not an inert leftover —
+        // the exact B1 defect class `buildRoutingBlock` already had to fix once for
+        // cells 6/8, the interaction cells the matrix exists for.
+        const scopedSection = updated.slice(updated.indexOf(SCOPED_PAYLOAD_MARKER));
+        expect(scopedSection).not.toContain('code-quality-assessor');
+        expect(scopedSection).toContain('al-performance-analyzer');
       } finally {
         if (savedSet === undefined) delete process.env['PR_REVIEW_AGENT_SET']; else process.env['PR_REVIEW_AGENT_SET'] = savedSet;
         if (savedRouting === undefined) delete process.env['PR_REVIEW_AGENT_ROUTING']; else process.env['PR_REVIEW_AGENT_ROUTING'] = savedRouting;

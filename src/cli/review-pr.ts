@@ -396,30 +396,32 @@ export const SCOPED_PAYLOAD_MARKER = '## Per-agent source payload (refines Phase
  * naming, readability, DRY and test quality across a whole file — a diff alone cannot
  * support that job. `AGENT_TRIGGERS`'s own doc comment already calls an empty list
  * "always-on" for dispatch; the same reasoning is applied here to payload scope.
- */
-const SCOPED_PAYLOAD_ROWS = Object.entries(AGENT_TRIGGERS)
-  .filter(([agent]) => agent !== 'code-review-validator')
-  .map(([agent, triggers]) => {
-    const cond = triggers.length === 0
-      ? 'Always — full source of every changed file'
-      : triggers.map((t) => `\`${t}\``).join(', ');
-    return `| \`${agent}\` | ${cond} |`;
-  })
-  .join('\n');
-
-/**
- * The payload-scoping block injected by `maybeInjectScopedPayload`.
  *
- * A plain constant, not a function of `process.env`: unlike `buildAgentSetBlock` and
- * `buildRoutingBlock`, this block does not need to react to which OTHER levers are
- * active. Composition check against Task 1 (`AGENT_SET_MARKER`) and Task 2
- * (`ROUTING_MARKER`): both govern which agents are DISPATCHED; this block governs only
- * what payload a DISPATCHED agent receives — a different axis, so there is nothing for
- * the three blocks to disagree about even when all three are active in the same run. A
- * row here for an agent excluded by Task 1's set, or not selected by Task 2's routing,
- * is simply inert (that agent never runs), not contradictory.
+ * `activeSet` filters to the agents `PR_REVIEW_AGENT_SET` (Task 1) actually left
+ * available this run — an empty array means no restriction, i.e. all agents. This is
+ * NOT optional tidiness: fix round 1 caught that an unfiltered table renders a row for
+ * an agent Task 1's block already declared unavailable ("the available sub-agent set is
+ * exactly these {N}"), which is a direct contradiction in the same prompt, not an inert
+ * leftover — exactly the B1 defect Task 2 already fixed once in `buildRoutingBlock` for
+ * the identical reason (cells 6/8, the interaction cells the matrix exists for, would
+ * otherwise void themselves under `checkArmCompliance`).
  */
-export const SCOPED_PAYLOAD_BLOCK = `
+function scopedPayloadRows(activeSet: string[]): string {
+  return Object.entries(AGENT_TRIGGERS)
+    .filter(([agent]) => agent !== 'code-review-validator')
+    .filter(([agent]) => activeSet.length === 0 || activeSet.includes(agent))
+    .map(([agent, triggers]) => {
+      const cond = triggers.length === 0
+        ? 'Always — full source of every changed file'
+        : triggers.map((t) => `\`${t}\``).join(', ');
+      return `| \`${agent}\` | ${cond} |`;
+    })
+    .join('\n');
+}
+
+/** Render the full scoping block around a pre-built rows table. */
+function renderScopedPayloadBlock(rows: string): string {
+  return `
 ${SCOPED_PAYLOAD_MARKER}
 
 Phase 4 sends every agent the full source of every changed file. For THIS run,
@@ -439,7 +441,7 @@ regardless of content, so it also receives every changed file's full source.
 
 | Agent | Include a file's full source when it contains |
 |---|---|
-${SCOPED_PAYLOAD_ROWS}
+${rows}
 
 Match case-insensitively, the same convention Phase 4's diff-based routing (when
 active) applies to its own, separate decision — whether to dispatch the agent at
@@ -450,6 +452,31 @@ paths, and reviews from those.
 State the scoping you applied in one line before dispatching, so it appears in
 the run log: \`SCOPING: <agent>=<n> files, <agent>=<n> files, ...\`
 `;
+}
+
+/**
+ * The unfiltered payload-scoping block — every agent, no `PR_REVIEW_AGENT_SET`
+ * restriction applied. Kept as a plain constant (not a function of `process.env`)
+ * because the brief's own mandated tests assert on `SCOPED_PAYLOAD_BLOCK` as a raw
+ * string. `maybeInjectScopedPayload` does NOT write this constant directly — it calls
+ * `buildScopedPayloadBlock()` below, which filters to the active set at call time
+ * exactly like `buildRoutingBlock` does, and falls back to this same text when no set
+ * is active.
+ */
+export const SCOPED_PAYLOAD_BLOCK = renderScopedPayloadBlock(scopedPayloadRows([]));
+
+/**
+ * Build the scoping block for THIS run, filtered to `PR_REVIEW_AGENT_SET` (Task 1)
+ * when one is active — mirroring `buildRoutingBlock`'s established pattern of reading
+ * `process.env` at call time rather than baking a filter into a module-load-time
+ * constant. See `scopedPayloadRows`'s doc for why the filter is required, not optional.
+ */
+function buildScopedPayloadBlock(): string {
+  const activeSet = (process.env['PR_REVIEW_AGENT_SET'] ?? '')
+    .split(',').map((a) => a.trim()).filter(Boolean);
+  if (activeSet.length === 0) return SCOPED_PAYLOAD_BLOCK;
+  return renderScopedPayloadBlock(scopedPayloadRows(activeSet));
+}
 
 /**
  * EVAL-ONLY: scope each sub-agent's full-source payload to its own domain.
@@ -474,7 +501,7 @@ export function maybeInjectScopedPayload(): number {
 
   const content = readFileSync(promptPath, 'utf-8');
   if (content.includes(SCOPED_PAYLOAD_MARKER)) return 0;
-  writeFileSync(promptPath, `${content.trimEnd()}\n${SCOPED_PAYLOAD_BLOCK}`);
+  writeFileSync(promptPath, `${content.trimEnd()}\n${buildScopedPayloadBlock()}`);
 
   console.log('[eval] injected per-agent payload scoping into the orchestrator prompt');
   return 1;
