@@ -349,6 +349,16 @@ export interface PRMetadata {
   /** Present on active PRs; used to detect a stale merge preview. */
   lastMergeSourceCommit?: string;
   lastMergeTargetCommit?: string;
+  /**
+   * The commit the PR was merged AS. Present once a PR completes, absent on active
+   * and abandoned ones (0/40 abandoned PRs measured had it).
+   *
+   * For a PR completed with `deleteSourceBranch: true` this is the only checkout
+   * target that survives: the source branch is gone and its head is usually
+   * unreachable after a squash-merge, while the merge commit sits on the target
+   * branch, which is always cloned.
+   */
+  lastMergeCommit?: string;
 }
 
 /**
@@ -371,6 +381,7 @@ export async function fetchPRMetadata(
     targetRefName?: string;
     lastMergeSourceCommit?: { commitId?: string };
     lastMergeTargetCommit?: { commitId?: string };
+    lastMergeCommit?: { commitId?: string };
   }>(
     config.azureDevOps,
     `git/repositories/${config.azureDevOps.repositoryId}/pullrequests/${prId}?api-version=7.0`,
@@ -383,6 +394,7 @@ export async function fetchPRMetadata(
     targetBranch: pr.targetRefName ?? '',
     ...(pr.lastMergeSourceCommit?.commitId ? { lastMergeSourceCommit: pr.lastMergeSourceCommit.commitId } : {}),
     ...(pr.lastMergeTargetCommit?.commitId ? { lastMergeTargetCommit: pr.lastMergeTargetCommit.commitId } : {}),
+    ...(pr.lastMergeCommit?.commitId ? { lastMergeCommit: pr.lastMergeCommit.commitId } : {}),
   };
 }
 

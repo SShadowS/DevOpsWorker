@@ -599,6 +599,10 @@ export async function reviewPR(args: string[]): Promise<void> {
     console.log(`[inline] could not read prior PR threads, prompting without them: ${err}`);
   }
 
+  // Set when the checkout landed on the PR's merge commit instead of its (deleted)
+  // source branch — i.e. the PR is already completed. Read by the staleness check.
+  let reviewedMergeCommit = false;
+
   try {
     let result: AgentResult<PRReviewResult> | AgentResult<BackportReview>;
 
@@ -606,11 +610,20 @@ export async function reviewPR(args: string[]): Promise<void> {
     // above are already fetched but no agent has run, so falling back is still
     // free — see the brief's note on why this ordering is the one that matters.
     if (route.path === 'sanity') {
-      const checkout = await checkoutBranch(repoDir, effectiveSourceBranch);
+      // `lastMergeCommit` is the fallback for a COMPLETED PR, whose source branch
+      // Azure DevOps deletes at merge (`deleteSourceBranch: true`). Without it the
+      // sanity path silently degrades to the full review for every completed PR —
+      // fail-safe, and therefore invisible, at ~3x the cost.
+      const checkout = await checkoutBranch(repoDir, effectiveSourceBranch, prMetadata?.lastMergeCommit);
       if (!checkout.ok) {
         console.log(`[backport] checkout of ${effectiveSourceBranch} failed, using the full review: ${checkout.error}`);
         route = { path: 'full', reason: `checkout of ${effectiveSourceBranch} failed: ${checkout.error}` };
         reviewPath = `full:${route.reason}`;
+      } else if (checkout.via === 'commit') {
+        // Record it: reviewing the merge commit is not the same evidence as
+        // reviewing the branch, and `review_path` is what a human reads later.
+        reviewPath = `${reviewPath}+merge-commit`;
+        reviewedMergeCommit = true;
       }
     }
 
@@ -665,9 +678,19 @@ export async function reviewPR(args: string[]): Promise<void> {
       // this PR's merge preview against. An unresolvable comparison counts as stale
       // too (see `resolveRef`'s doc) — "I could not check" must never read as "it's
       // current".
+      // A merge-commit checkout means the PR is already COMPLETED, and then there is
+      // no preview to be stale — the tree under review IS the merged result. The
+      // comparison below would say "stale" unconditionally for every completed PR,
+      // because `lastMergeTargetCommit` is the target tip AT MERGE TIME and the merge
+      // itself moved the tip past it. Since this flag flips the verdict on its own
+      // (see the overwrite below), leaving it computed would make every completed-PR
+      // review come back "needs discussion" — uniform, and therefore worthless as a
+      // signal or as A/B data.
       const targetRefName = effectiveTargetBranch.replace(/^refs\/heads\//, '');
       const targetTip = targetRefName ? await resolveRef(repoDir, `origin/${targetRefName}`) : null;
-      const mergePreviewStale = !prMetadata?.lastMergeTargetCommit || !targetTip || targetTip !== prMetadata.lastMergeTargetCommit;
+      const mergePreviewStale = reviewedMergeCommit
+        ? false
+        : !prMetadata?.lastMergeTargetCommit || !targetTip || targetTip !== prMetadata.lastMergeTargetCommit;
 
       const backportResult = await runBackportReview(
         {

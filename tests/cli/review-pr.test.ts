@@ -746,6 +746,30 @@ describe('reviewPR routes before spending and records which path ran', () => {
     expect(src).not.toMatch(/resolveRef\(config\.paths\.sessionRoot,/);
   });
 
+  test('the checkout is offered lastMergeCommit, so a completed PR still takes the sanity path', () => {
+    // Measured on PR 52308: completed PRs here carry
+    // `completionOptions.deleteSourceBranch: true`, so the source branch is GONE and
+    // the checkout cannot succeed. Without the fallback the sanity path degrades to
+    // the full review for every completed PR — fail-safe, and therefore invisible,
+    // at ~3x the cost. It also voids any A/B run over historical PRs, since every
+    // arm silently takes the fallback and the null result looks like data.
+    expect(src).toMatch(/checkoutBranch\(repoDir, effectiveSourceBranch, prMetadata\?\.lastMergeCommit\)/);
+    // The two-argument shape is the bug — pin that it does not come back.
+    expect(src).not.toMatch(/checkoutBranch\(repoDir, effectiveSourceBranch\)/);
+  });
+
+  test('a merge-commit checkout suppresses mergePreviewStale instead of computing it', () => {
+    // Second-order trap: for a COMPLETED PR, `lastMergeTargetCommit` is the target
+    // tip at merge time, and the merge itself moved the tip past it — so the computed
+    // comparison is unconditionally "stale". That flag flips the verdict on its own
+    // (review-pr.ts overwrites the model's echo of it), so leaving it computed makes
+    // every completed-PR review return the same verdict: uniform, and worthless both
+    // as a signal and as A/B data.
+    expect(src).toMatch(/const mergePreviewStale = reviewedMergeCommit\s*\?\s*false/);
+    // The suppression must be driven by the checkout result, not assumed.
+    expect(src).toMatch(/reviewedMergeCommit = true/);
+  });
+
   test('a failed port-diff fetch falls back to full rather than aborting the review', () => {
     // Important, caught by review: the source-diff fetch 80 lines above is
     // guarded, but the port's OWN diff fetch was not — a transient failure there
