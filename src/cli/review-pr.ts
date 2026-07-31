@@ -370,6 +370,116 @@ export function maybeInjectRouting(): number {
   return 1;
 }
 
+/** Marker identifying the payload-scoping block, for idempotency. */
+export const SCOPED_PAYLOAD_MARKER = '## Per-agent source payload (refines Phase 4)';
+
+/**
+ * Per-agent full-source scoping rows, built from `AGENT_TRIGGERS` (Task 2). The
+ * Interfaces section for this lever names `AGENT_TRIGGERS` as what it consumes, and
+ * the mechanism needs the actual strings printed somewhere the orchestrator can read
+ * them. `buildRoutingBlock`'s table is NOT a substitute — it renders only when
+ * `PR_REVIEW_AGENT_ROUTING=1`, and this lever ships ALONE in the matrix (cell `scoped`:
+ * `PR_REVIEW_SCOPED_PAYLOAD=1`, routing off). Without its own copy, that cell would tell
+ * the orchestrator to scope "using the same trigger strings that decide dispatch" while
+ * printing no trigger strings anywhere in its prompt — the same silent-no-op shape this
+ * plan has already been burned by twice.
+ *
+ * `code-review-validator` is excluded here — its exemption is stated once in prose in
+ * `SCOPED_PAYLOAD_BLOCK`, not repeated as a table row.
+ *
+ * Every OTHER agent with an EMPTY trigger list (today: only `code-quality-assessor`)
+ * renders as "Always", the same convention `buildRoutingBlock` uses for dispatch — but
+ * for a reason specific to scoping, not dispatch: read literally, "include a file when
+ * it contains one of the agent's triggers" is vacuously false for an agent with NO
+ * triggers, so without this it would receive zero full-source files on every review,
+ * deterministically, regardless of what the PR touches. `code-quality-assessor` reviews
+ * naming, readability, DRY and test quality across a whole file — a diff alone cannot
+ * support that job. `AGENT_TRIGGERS`'s own doc comment already calls an empty list
+ * "always-on" for dispatch; the same reasoning is applied here to payload scope.
+ */
+const SCOPED_PAYLOAD_ROWS = Object.entries(AGENT_TRIGGERS)
+  .filter(([agent]) => agent !== 'code-review-validator')
+  .map(([agent, triggers]) => {
+    const cond = triggers.length === 0
+      ? 'Always — full source of every changed file'
+      : triggers.map((t) => `\`${t}\``).join(', ');
+    return `| \`${agent}\` | ${cond} |`;
+  })
+  .join('\n');
+
+/**
+ * The payload-scoping block injected by `maybeInjectScopedPayload`.
+ *
+ * A plain constant, not a function of `process.env`: unlike `buildAgentSetBlock` and
+ * `buildRoutingBlock`, this block does not need to react to which OTHER levers are
+ * active. Composition check against Task 1 (`AGENT_SET_MARKER`) and Task 2
+ * (`ROUTING_MARKER`): both govern which agents are DISPATCHED; this block governs only
+ * what payload a DISPATCHED agent receives — a different axis, so there is nothing for
+ * the three blocks to disagree about even when all three are active in the same run. A
+ * row here for an agent excluded by Task 1's set, or not selected by Task 2's routing,
+ * is simply inert (that agent never runs), not contradictory.
+ */
+export const SCOPED_PAYLOAD_BLOCK = `
+${SCOPED_PAYLOAD_MARKER}
+
+Phase 4 sends every agent the full source of every changed file. For THIS run,
+send each agent the full source of only the files relevant to its domain.
+
+Every agent still receives, in full: the PR id and title, the description, the
+complete list of changed file paths, and the full diff for every changed file.
+Only the *full source bodies* are scoped.
+
+\`code-review-validator\` is exempt — it traces control flow across the change as a
+whole, so it receives the full source of every changed file exactly as today.
+
+For each other agent, include the full source of a changed file when that file
+contains one of the agent's trigger strings below. An agent marked "Always" carries
+no trigger of its own — like \`code-review-validator\`, it reviews every change
+regardless of content, so it also receives every changed file's full source.
+
+| Agent | Include a file's full source when it contains |
+|---|---|
+${SCOPED_PAYLOAD_ROWS}
+
+Match case-insensitively, the same convention Phase 4's diff-based routing (when
+active) applies to its own, separate decision — whether to dispatch the agent at
+all. This table governs a different decision: what a DISPATCHED agent then reads.
+When an agent's triggers match no changed file, it still receives the diff and
+paths, and reviews from those.
+
+State the scoping you applied in one line before dispatching, so it appears in
+the run log: \`SCOPING: <agent>=<n> files, <agent>=<n> files, ...\`
+`;
+
+/**
+ * EVAL-ONLY: scope each sub-agent's full-source payload to its own domain.
+ *
+ * Guarded so this is a TRUE NO-OP unless `PR_REVIEW_SCOPED_PAYLOAD=1`.
+ *
+ * This is the lever aimed at cacheCreation, which the token decomposition put at
+ * 45% of a review's cost. Each sub-agent caches its own context fresh, and ~98%
+ * of that context is the source payload Phase 4 broadcasts to all seven.
+ *
+ * Returns the number of files modified (0 when the env var is not `1`).
+ */
+export function maybeInjectScopedPayload(): number {
+  if (process.env['PR_REVIEW_SCOPED_PAYLOAD'] !== '1') return 0;
+
+  const cliDir = dirname(fileURLToPath(import.meta.url));
+  const promptPath = resolve(cliDir, '..', 'agents', 'pr-reviewer', 'CLAUDE.md');
+  if (!existsSync(promptPath)) {
+    console.log(`[eval] PR_REVIEW_SCOPED_PAYLOAD set but orchestrator prompt not found at ${promptPath} — skipping`);
+    return 0;
+  }
+
+  const content = readFileSync(promptPath, 'utf-8');
+  if (content.includes(SCOPED_PAYLOAD_MARKER)) return 0;
+  writeFileSync(promptPath, `${content.trimEnd()}\n${SCOPED_PAYLOAD_BLOCK}`);
+
+  console.log('[eval] injected per-agent payload scoping into the orchestrator prompt');
+  return 1;
+}
+
 /**
  * Render the marker + severity-labeled body shared by a thread's creation and
  * its later update — the only difference between the two call sites is which
@@ -601,6 +711,7 @@ export async function reviewPR(args: string[]): Promise<void> {
   maybeInjectToolRule();
   maybeRestrictAgentSet();
   maybeInjectRouting();
+  maybeInjectScopedPayload();
 
   const repo = findRepoByRepositoryId(repoId);
   if (!repo) {

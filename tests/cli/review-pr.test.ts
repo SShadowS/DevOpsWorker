@@ -11,6 +11,9 @@ import {
   maybeInjectRouting,
   AGENT_TRIGGERS,
   ROUTING_MARKER,
+  maybeInjectScopedPayload,
+  SCOPED_PAYLOAD_MARKER,
+  SCOPED_PAYLOAD_BLOCK,
   applyInlineFindings,
   buildPriorFindingsBlock,
   parseReviewPrArgs,
@@ -342,6 +345,172 @@ describe('maybeInjectRouting', () => {
       } finally {
         if (savedSet === undefined) delete process.env['PR_REVIEW_AGENT_SET'];
         else process.env['PR_REVIEW_AGENT_SET'] = savedSet;
+      }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// maybeInjectScopedPayload
+//
+// Same shape as the two hooks above: TRUE no-op unless PR_REVIEW_SCOPED_PAYLOAD=1,
+// appends to the same tracked orchestrator prompt, idempotent on a second call.
+// ---------------------------------------------------------------------------
+
+describe('maybeInjectScopedPayload', () => {
+  withEnv('PR_REVIEW_SCOPED_PAYLOAD');
+
+  test('is a no-op unless set to 1', () => {
+    delete process.env['PR_REVIEW_SCOPED_PAYLOAD'];
+    expect(maybeInjectScopedPayload()).toBe(0);
+    process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '';
+    expect(maybeInjectScopedPayload()).toBe(0);
+  });
+
+  test('is a no-op for any value other than "1"', () => {
+    process.env['PR_REVIEW_SCOPED_PAYLOAD'] = 'true';
+    expect(maybeInjectScopedPayload()).toBe(0);
+    process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '0';
+    expect(maybeInjectScopedPayload()).toBe(0);
+  });
+
+  test('the block preserves the always-full-context exemption', () => {
+    expect(SCOPED_PAYLOAD_BLOCK).toContain('code-review-validator');
+    expect(SCOPED_PAYLOAD_BLOCK).toContain('every changed file');
+  });
+
+  test('the block keeps the diff going to everyone', () => {
+    expect(SCOPED_PAYLOAD_BLOCK).toContain('full diff');
+  });
+
+  test('positive framing only — no prohibition language', () => {
+    // Same broader regex used throughout this file rather than literal substrings —
+    // negative framing is measured on this codebase to suppress steered behaviour
+    // outright instead of redirecting it.
+    expect(SCOPED_PAYLOAD_BLOCK).not.toMatch(/\bNEVER\b|\bDo NOT\b|\bdon't use\b/i);
+  });
+
+  // -------------------------------------------------------------------------
+  // Composition / correctness fix, found by reading this lever against its own
+  // Interfaces section ("Consumes: AGENT_TRIGGERS from Task 2") before writing it.
+  // -------------------------------------------------------------------------
+
+  test('generalizes the full-source exemption to every empty-trigger agent, not just code-review-validator', () => {
+    // AGENT_TRIGGERS gives code-quality-assessor an empty trigger list too (it is the
+    // other "always-on" dispatch, per that constant's own doc comment). Read literally,
+    // "include a file when it contains one of the agent's triggers" is vacuously false
+    // for an agent with NO triggers — it would receive zero full-source files on every
+    // single review, silently, forever. Fails if code-quality-assessor is dropped back
+    // out of the "Always" treatment (e.g. the filter narrowed to exclude it too).
+    expect(AGENT_TRIGGERS['code-quality-assessor']).toEqual([]);
+    expect(SCOPED_PAYLOAD_BLOCK).toContain('code-quality-assessor');
+    expect(SCOPED_PAYLOAD_BLOCK).toMatch(/`code-quality-assessor`\s*\|\s*Always/);
+  });
+
+  test('renders concrete trigger strings — the mechanism the brief\'s own Interfaces section names as consumed', () => {
+    // Needed for matrix cell 4 (`scoped`): PR_REVIEW_SCOPED_PAYLOAD=1 with routing OFF,
+    // so ROUTING_MARKER's table never renders in that cell's prompt. Without its own
+    // copy of the trigger strings, this block would ask the orchestrator to scope
+    // "using the same trigger strings that decide dispatch" while printing none of them
+    // anywhere it can read — a lever that reads as active but has no defined mechanism.
+    expect(SCOPED_PAYLOAD_BLOCK).toContain('HttpClient');
+    expect(SCOPED_PAYLOAD_BLOCK).toContain('SetLoadFields');
+    expect(SCOPED_PAYLOAD_BLOCK).toContain('FieldError');
+  });
+
+  test('no contradiction with the agent-set or routing blocks — different axis, not just different lever', () => {
+    // Task 1 (AGENT_SET_MARKER) and Task 2 (ROUTING_MARKER) both govern WHICH agents
+    // are dispatched. This block never states or implies a dispatch decision — it only
+    // says what a DISPATCHED agent reads — so there is nothing for the three blocks to
+    // disagree about even with all three active in one run. Pinned as a property of the
+    // text itself, not just documentation.
+    expect(SCOPED_PAYLOAD_BLOCK.toLowerCase()).not.toContain('dispatch these');
+    expect(SCOPED_PAYLOAD_BLOCK.toLowerCase()).not.toContain('choose the roster');
+  });
+
+  // -------------------------------------------------------------------------
+  // The apply branch — same tracked file `maybeRestrictAgentSet` and
+  // `maybeInjectRouting` write to (src/agents/pr-reviewer/CLAUDE.md). Snapshot/restore
+  // around every test so the suite leaves the working tree exactly as clean as it
+  // found it, including when a test fails mid-way — same reasoning as Tasks 1 and 2.
+  // -------------------------------------------------------------------------
+  describe('the write path (mutates the real orchestrator prompt, restored after each test)', () => {
+    const promptPath = fileURLToPath(new URL('../../src/agents/pr-reviewer/CLAUDE.md', import.meta.url));
+    let original: string;
+
+    beforeEach(() => { original = readFileSync(promptPath, 'utf-8'); });
+    afterEach(() => { writeFileSync(promptPath, original); });
+
+    test('applies the block and reports 1 file modified', () => {
+      // Fails if the final `return 1` were flipped to `return 0` — the write would
+      // still happen but the caller would be told it didn't.
+      process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '1';
+      const result = maybeInjectScopedPayload();
+      expect(result).toBe(1);
+
+      const updated = readFileSync(promptPath, 'utf-8');
+      expect(updated).toContain(SCOPED_PAYLOAD_MARKER);
+      expect(updated).toContain('code-review-validator');
+      expect(updated).toContain('code-quality-assessor');
+    });
+
+    test('appends after the existing prompt instead of clobbering it', () => {
+      // Fails if `writeFileSync(promptPath, \`${content.trimEnd()}\n...\`)` lost the
+      // `content.trimEnd()}\n` prefix and wrote only the new block — the same
+      // regression class Tasks 1 and 2's write paths guard against.
+      process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '1';
+      maybeInjectScopedPayload();
+
+      const updated = readFileSync(promptPath, 'utf-8');
+      expect(original).toContain('Phase 4: Parallel Analysis with Specialized Agents');
+      expect(updated).toContain('Phase 4: Parallel Analysis with Specialized Agents');
+      // The pre-existing content must still come BEFORE the appended block — proof
+      // this is an append, not a same-position overwrite.
+      expect(updated.indexOf('Phase 4: Parallel Analysis with Specialized Agents'))
+        .toBeLessThan(updated.indexOf(SCOPED_PAYLOAD_MARKER));
+    });
+
+    test('a second call is idempotent — the marker appears exactly once and the second call reports 0', () => {
+      // Fails if the `if (content.includes(SCOPED_PAYLOAD_MARKER)) return 0;` guard
+      // were removed or broken — the second call would append a duplicate block and
+      // report 1 again instead of 0.
+      process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '1';
+      const first = maybeInjectScopedPayload();
+      const second = maybeInjectScopedPayload();
+      expect(first).toBe(1);
+      expect(second).toBe(0);
+
+      const updated = readFileSync(promptPath, 'utf-8');
+      const occurrences = updated.split(SCOPED_PAYLOAD_MARKER).length - 1;
+      expect(occurrences).toBe(1);
+    });
+
+    test('composes cleanly with agent-set + routing both active — all three blocks land, none clobber the others', () => {
+      // Direct proof for the "all three active" composition question the task asked
+      // to be checked: apply Task 1's and Task 2's hooks first (the fixed order
+      // reviewPR itself uses), then this one, and confirm all three markers survive
+      // with the pre-existing prompt content still intact before all of them.
+      const savedSet = process.env['PR_REVIEW_AGENT_SET'];
+      const savedRouting = process.env['PR_REVIEW_AGENT_ROUTING'];
+      process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator,al-performance-analyzer';
+      process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+      process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '1';
+      try {
+        maybeRestrictAgentSet();
+        maybeInjectRouting();
+        maybeInjectScopedPayload();
+
+        const updated = readFileSync(promptPath, 'utf-8');
+        expect(updated).toContain(AGENT_SET_MARKER);
+        expect(updated).toContain(ROUTING_MARKER);
+        expect(updated).toContain(SCOPED_PAYLOAD_MARKER);
+        expect(updated.indexOf('Phase 4: Parallel Analysis with Specialized Agents'))
+          .toBeLessThan(updated.indexOf(AGENT_SET_MARKER));
+        expect(updated.indexOf(AGENT_SET_MARKER)).toBeLessThan(updated.indexOf(ROUTING_MARKER));
+        expect(updated.indexOf(ROUTING_MARKER)).toBeLessThan(updated.indexOf(SCOPED_PAYLOAD_MARKER));
+      } finally {
+        if (savedSet === undefined) delete process.env['PR_REVIEW_AGENT_SET']; else process.env['PR_REVIEW_AGENT_SET'] = savedSet;
+        if (savedRouting === undefined) delete process.env['PR_REVIEW_AGENT_ROUTING']; else process.env['PR_REVIEW_AGENT_ROUTING'] = savedRouting;
       }
     });
   });

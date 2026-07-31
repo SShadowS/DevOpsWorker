@@ -375,4 +375,10 @@ describe('container env allowlist', () => {
     const env = getPrReviewContainerEnv();
     expect(env['PR_REVIEW_AGENT_ROUTING']).toBe('1');
   });
+
+  test('forwards PR_REVIEW_SCOPED_PAYLOAD into the container env', () => {
+    process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '1';
+    const env = getPrReviewContainerEnv();
+    expect(env['PR_REVIEW_SCOPED_PAYLOAD']).toBe('1');
+  });
 });
