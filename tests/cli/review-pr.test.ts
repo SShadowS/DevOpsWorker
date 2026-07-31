@@ -14,6 +14,9 @@ import {
   maybeInjectScopedPayload,
   SCOPED_PAYLOAD_MARKER,
   SCOPED_PAYLOAD_BLOCK,
+  trimSecurityDomains,
+  trimSecurityDispatchLine,
+  maybeTrimSecurityDomains,
   applyInlineFindings,
   buildPriorFindingsBlock,
   parseReviewPrArgs,
@@ -523,6 +526,266 @@ describe('maybeInjectScopedPayload', () => {
       } finally {
         if (savedSet === undefined) delete process.env['PR_REVIEW_AGENT_SET']; else process.env['PR_REVIEW_AGENT_SET'] = savedSet;
         if (savedRouting === undefined) delete process.env['PR_REVIEW_AGENT_ROUTING']; else process.env['PR_REVIEW_AGENT_ROUTING'] = savedRouting;
+      }
+    });
+  });
+});
+
+describe('trimSecurityDomains', () => {
+  test('drops the web-appsec domains and keeps the BC one', () => {
+    const src = [
+      '## Analysis Framework',
+      '',
+      '### 1. Input Validation & Sanitization',
+      '- SQL injection vectors',
+      '',
+      '### 8. Business Central Platform Security',
+      '- **Permission sets**: missing entries',
+      '',
+      '## Output Format',
+      'json here',
+    ].join('\n');
+    const out = trimSecurityDomains(src);
+    expect(out).not.toContain('SQL injection');
+    expect(out).toContain('Business Central Platform Security');
+    expect(out).toContain('Permission sets');
+    // Everything after the framework must survive untouched.
+    expect(out).toContain('## Output Format');
+    expect(out).toContain('json here');
+  });
+
+  test('renumbers the surviving domain to 1 — a lone "### 8." reads as truncated and invites reconstruction', () => {
+    const src = [
+      '## Analysis Framework',
+      '### 1. Input Validation & Sanitization',
+      '- SQL injection vectors',
+      '### 8. Business Central Platform Security',
+      '- Permission sets',
+      '## Output Format',
+    ].join('\n');
+    const out = trimSecurityDomains(src);
+    expect(out).toContain('### 1. Business Central Platform Security');
+    expect(out).not.toContain('### 8.');
+  });
+
+  test('is a no-op on text with no analysis framework', () => {
+    expect(trimSecurityDomains('nothing here')).toBe('nothing here');
+  });
+
+  test('is a no-op on text with a framework but no Output Format boundary', () => {
+    // Guards the second `indexOf` check — without a closing boundary the function
+    // must not guess where the framework ends.
+    const src = '## Analysis Framework\n### 1. Input Validation\n- x';
+    expect(trimSecurityDomains(src)).toBe(src);
+  });
+
+  test('is idempotent — running it twice on an already-trimmed framework changes nothing further', () => {
+    const src = [
+      '## Analysis Framework',
+      '### 1. Input Validation & Sanitization',
+      '- SQL injection vectors',
+      '### 8. Business Central Platform Security',
+      '- Permission sets',
+      '## Output Format',
+    ].join('\n');
+    const once = trimSecurityDomains(src);
+    const twice = trimSecurityDomains(once);
+    expect(twice).toBe(once);
+  });
+});
+
+describe('trimSecurityDispatchLine', () => {
+  const withDispatch = (focusLine: string) => [
+    '### Agent 3: Security and Edge Case Analysis',
+    '',
+    'Dispatch the `security-edge-case-analyzer` agent.',
+    '',
+    focusLine,
+    '',
+    '### Agent 4: Performance Analysis',
+  ].join('\n');
+
+  test('replaces the generic focus-areas line with the BC-only one', () => {
+    const src = withDispatch('Focus areas: input validation, authorization gaps, data protection.');
+    const out = trimSecurityDispatchLine(src);
+    expect(out).not.toContain('input validation, authorization gaps');
+    expect(out).toContain('Focus areas: Business Central platform security');
+    expect(out).toContain('InherentPermissions');
+    // Everything else must survive untouched.
+    expect(out).toContain('### Agent 4: Performance Analysis');
+  });
+
+  test('is a no-op when the dispatch line is absent', () => {
+    const src = '### Agent 3: Security and Edge Case Analysis\n\nSomething else entirely.';
+    expect(trimSecurityDispatchLine(src)).toBe(src);
+  });
+
+  test('is idempotent — a second application reproduces the identical text', () => {
+    const src = withDispatch('Focus areas: input validation, authorization gaps, data protection.');
+    const once = trimSecurityDispatchLine(src);
+    const twice = trimSecurityDispatchLine(once);
+    expect(twice).toBe(once);
+  });
+
+  test('positive framing only — no prohibition language', () => {
+    const out = trimSecurityDispatchLine(withDispatch('Focus areas: input validation.'));
+    expect(out).not.toMatch(/\bNEVER\b|\bDo NOT\b|\bdon't use\b/i);
+  });
+});
+
+describe('maybeTrimSecurityDomains', () => {
+  withEnv('PR_REVIEW_SECURITY_BC_ONLY');
+  withEnv('PR_REVIEW_AGENT_SET');
+
+  test('is a no-op unless set to 1', () => {
+    delete process.env['PR_REVIEW_SECURITY_BC_ONLY'];
+    expect(maybeTrimSecurityDomains()).toBe(0);
+  });
+
+  test('is a no-op for any value other than "1"', () => {
+    // Malformed values, not just unset — the global TRUE-NO-OP constraint this
+    // plan holds every lever to.
+    process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '';
+    expect(maybeTrimSecurityDomains()).toBe(0);
+    process.env['PR_REVIEW_SECURITY_BC_ONLY'] = 'true';
+    expect(maybeTrimSecurityDomains()).toBe(0);
+    process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '0';
+    expect(maybeTrimSecurityDomains()).toBe(0);
+  });
+
+  test('is a no-op when the active agent set excludes security-edge-case-analyzer', () => {
+    // Filtered the same way buildRoutingBlock/buildScopedPayloadBlock read
+    // PR_REVIEW_AGENT_SET at call time: narrowing a prompt for an agent this run
+    // never dispatches measures nothing and should not touch disk.
+    process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '1';
+    process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator,al-performance-analyzer';
+    expect(maybeTrimSecurityDomains()).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // The apply branch — mutates the two real tracked files
+  // (src/agents/pr-reviewer/.claude/agents/security-edge-case-analyzer.md and
+  // src/agents/pr-reviewer/CLAUDE.md). Snapshot/restore around every test, same
+  // discipline Tasks 1-3 established, so the suite leaves the tree exactly as
+  // clean as it found it, including when a test fails mid-way.
+  // ---------------------------------------------------------------------------
+  describe('the write path (mutates two real tracked files, restored after each test)', () => {
+    const agentPath = fileURLToPath(new URL('../../src/agents/pr-reviewer/.claude/agents/security-edge-case-analyzer.md', import.meta.url));
+    const promptPath = fileURLToPath(new URL('../../src/agents/pr-reviewer/CLAUDE.md', import.meta.url));
+    let originalAgent: string;
+    let originalPrompt: string;
+
+    beforeEach(() => {
+      originalAgent = readFileSync(agentPath, 'utf-8');
+      originalPrompt = readFileSync(promptPath, 'utf-8');
+    });
+    afterEach(() => {
+      writeFileSync(agentPath, originalAgent);
+      writeFileSync(promptPath, originalPrompt);
+    });
+
+    test('applies the trim to both files and reports 2 files modified', () => {
+      // Fails if either write were dropped, or if the count were hardcoded instead
+      // of reflecting what actually changed.
+      process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '1';
+      const result = maybeTrimSecurityDomains();
+      expect(result).toBe(2);
+
+      const updatedAgent = readFileSync(agentPath, 'utf-8');
+      expect(updatedAgent).not.toContain('SQL injection');
+      expect(updatedAgent).toContain('Business Central Platform Security');
+      expect(updatedAgent).toContain('### 1. Business Central Platform Security');
+
+      const updatedPrompt = readFileSync(promptPath, 'utf-8');
+      expect(updatedPrompt).toContain('Focus areas: Business Central platform security');
+      expect(updatedPrompt).not.toContain('Focus areas: input validation, authorization gaps, data protection, information disclosure');
+    });
+
+    test('surgery only — everything outside the targeted section survives untouched', () => {
+      // Proof this is targeted surgery, not a clobber: the frontmatter and every
+      // other section of the sub-agent file, and every other agent's dispatch
+      // text in the orchestrator prompt, must be byte-identical afterwards.
+      process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '1';
+      maybeTrimSecurityDomains();
+
+      const updatedAgent = readFileSync(agentPath, 'utf-8');
+      expect(originalAgent).toContain('## Resolve Callees Before Flagging Behavior');
+      expect(updatedAgent).toContain('## Resolve Callees Before Flagging Behavior');
+      expect(updatedAgent).toContain('## Reporting a location');
+      expect(updatedAgent.slice(updatedAgent.indexOf('## Output Format')))
+        .toBe(originalAgent.slice(originalAgent.indexOf('## Output Format')));
+      // Everything BEFORE the framework (frontmatter, the "Your Mission" prose, the
+      // .dependencies note) must also survive byte-for-byte — trimSecurityDomains
+      // must not clobber the prefix while rebuilding the framework slice.
+      expect(updatedAgent.slice(0, updatedAgent.indexOf('## Analysis Framework')))
+        .toBe(originalAgent.slice(0, originalAgent.indexOf('## Analysis Framework')));
+
+      const updatedPrompt = readFileSync(promptPath, 'utf-8');
+      // Agent 4's own dispatch text is a different agent entirely and must be untouched.
+      expect(updatedPrompt).toContain('Focus areas: SetLoadFields usage, N+1 query patterns');
+    });
+
+    test('a second call is idempotent — reports 0 and leaves both files byte-identical to the first call\'s result', () => {
+      // Fails if the write were unconditional (no content-equality guard) — the
+      // second call would report a nonzero count again instead of 0.
+      process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '1';
+      const first = maybeTrimSecurityDomains();
+      const agentAfterFirst = readFileSync(agentPath, 'utf-8');
+      const promptAfterFirst = readFileSync(promptPath, 'utf-8');
+
+      const second = maybeTrimSecurityDomains();
+      expect(first).toBe(2);
+      expect(second).toBe(0);
+
+      expect(readFileSync(agentPath, 'utf-8')).toBe(agentAfterFirst);
+      expect(readFileSync(promptPath, 'utf-8')).toBe(promptAfterFirst);
+    });
+
+    test('composes cleanly with agent-set + routing + scoped payload all active (matrix cell "lean") — no block contradicts another', () => {
+      // Direct render of the config the task brief asked to be checked before
+      // writing this lever: all four levers on, in the fixed order reviewPR
+      // itself calls them. security-edge-case-analyzer is IN the active set here
+      // (only code-quality-assessor is excluded), so every block below must still
+      // name it — narrowing its own analysis framework is not the same decision
+      // as excluding it from the roster, and nothing here should read as if it did.
+      const savedSet = process.env['PR_REVIEW_AGENT_SET'];
+      const savedRouting = process.env['PR_REVIEW_AGENT_ROUTING'];
+      const savedScoped = process.env['PR_REVIEW_SCOPED_PAYLOAD'];
+      process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator,security-edge-case-analyzer,al-performance-analyzer,al-architecture-analyzer,al-error-pattern-analyzer,al-integration-analyzer';
+      process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+      process.env['PR_REVIEW_SCOPED_PAYLOAD'] = '1';
+      process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '1';
+      try {
+        maybeRestrictAgentSet();
+        maybeInjectRouting();
+        maybeInjectScopedPayload();
+        const result = maybeTrimSecurityDomains();
+        expect(result).toBe(2);
+
+        const updatedPrompt = readFileSync(promptPath, 'utf-8');
+        // All three appended blocks land, in order, none clobbered.
+        expect(updatedPrompt).toContain(AGENT_SET_MARKER);
+        expect(updatedPrompt).toContain(ROUTING_MARKER);
+        expect(updatedPrompt).toContain(SCOPED_PAYLOAD_MARKER);
+        // security-edge-case-analyzer is named as available and routed/scoped —
+        // narrowing its own file does not, and must not, drop it from any of them.
+        const agentSetSection = updatedPrompt.slice(updatedPrompt.indexOf(AGENT_SET_MARKER), updatedPrompt.indexOf(ROUTING_MARKER));
+        expect(agentSetSection).toContain('security-edge-case-analyzer');
+        const routingSection = updatedPrompt.slice(updatedPrompt.indexOf(ROUTING_MARKER), updatedPrompt.indexOf(SCOPED_PAYLOAD_MARKER));
+        expect(routingSection).toContain('`security-edge-case-analyzer`');
+        const scopedSection = updatedPrompt.slice(updatedPrompt.indexOf(SCOPED_PAYLOAD_MARKER));
+        expect(scopedSection).toContain('`security-edge-case-analyzer`');
+        // Agent 3's own dispatch text is narrowed to BC-only, consistent with what
+        // its sub-agent file was just trimmed to.
+        expect(updatedPrompt).toContain('Focus areas: Business Central platform security');
+
+        const updatedAgent = readFileSync(agentPath, 'utf-8');
+        expect(updatedAgent).not.toContain('SQL injection');
+        expect(updatedAgent).toContain('### 1. Business Central Platform Security');
+      } finally {
+        if (savedSet === undefined) delete process.env['PR_REVIEW_AGENT_SET']; else process.env['PR_REVIEW_AGENT_SET'] = savedSet;
+        if (savedRouting === undefined) delete process.env['PR_REVIEW_AGENT_ROUTING']; else process.env['PR_REVIEW_AGENT_ROUTING'] = savedRouting;
+        if (savedScoped === undefined) delete process.env['PR_REVIEW_SCOPED_PAYLOAD']; else process.env['PR_REVIEW_SCOPED_PAYLOAD'] = savedScoped;
       }
     });
   });

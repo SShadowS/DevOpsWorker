@@ -381,4 +381,10 @@ describe('container env allowlist', () => {
     const env = getPrReviewContainerEnv();
     expect(env['PR_REVIEW_SCOPED_PAYLOAD']).toBe('1');
   });
+
+  test('forwards PR_REVIEW_SECURITY_BC_ONLY into the container env', () => {
+    process.env['PR_REVIEW_SECURITY_BC_ONLY'] = '1';
+    const env = getPrReviewContainerEnv();
+    expect(env['PR_REVIEW_SECURITY_BC_ONLY']).toBe('1');
+  });
 });

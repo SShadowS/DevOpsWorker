@@ -508,6 +508,125 @@ export function maybeInjectScopedPayload(): number {
 }
 
 /**
+ * Remove every `### N.` domain from the Analysis Framework except the Business
+ * Central one, leaving the rest of the prompt untouched.
+ *
+ * Pure and separately exported so the surgery is unit-testable without touching
+ * the real prompt file. Idempotent by construction: run on an already-trimmed
+ * framework, the filter keeps the same single (already-renumbered) section and
+ * the renumbering replace is a no-op on text that already reads `1.`.
+ */
+export function trimSecurityDomains(content: string): string {
+  const frameworkStart = content.indexOf('## Analysis Framework');
+  if (frameworkStart === -1) return content;
+
+  const afterFramework = content.indexOf('## Output Format', frameworkStart);
+  if (afterFramework === -1) return content;
+
+  const framework = content.slice(frameworkStart, afterFramework);
+  const kept = framework
+    .split(/^### /m)
+    .filter((section, i) => i === 0 || /Business Central Platform Security/.test(section))
+    // Renumber to 1. Leaving it as "### 8." after deleting 1-7 reads as a truncated
+    // document, and a model may helpfully reconstruct the "missing" domains from the
+    // numbering gap — which would un-pull the very lever this arm is measuring.
+    .map((section, i) => (i === 0 ? section : section.replace(/^\d+\./, '1.')))
+    .join('### ');
+
+  return content.slice(0, frameworkStart) + kept + content.slice(afterFramework);
+}
+
+/**
+ * The orchestrator re-injects what the sub-agent prompt just removed.
+ *
+ * Phase 4's Agent 3 dispatch text still says "Focus areas: input validation,
+ * authorization gaps, data protection, information disclosure, business logic
+ * security…" — the caller hands those domains back on every dispatch, so trimming
+ * only the sub-agent leaves this arm measuring a half-pulled lever. A "removal
+ * changed nothing" result from cells 5 and 8 would then be untrustworthy by
+ * construction.
+ *
+ * Idempotent: the replacement is a fixed string, so running this on text that
+ * already carries it reproduces the identical text — the regex still matches
+ * (it accepts any `Focus areas:` line), and replacing text with itself is a no-op.
+ */
+export function trimSecurityDispatchLine(content: string): string {
+  return content.replace(
+    /(Dispatch the `security-edge-case-analyzer` agent\.\s*\n\s*\n)Focus areas:[^\n]*/,
+    '$1Focus areas: Business Central platform security — permission sets, InherentPermissions, DataClassification, tenant isolation, SecurityFiltering, IsolatedStorage secret handling, telemetry leakage, API field exposure.',
+  );
+}
+
+/**
+ * EVAL-ONLY: narrow security-edge-case-analyzer to Business Central concerns.
+ *
+ * Its original seven domains are generic web appsec — SQL injection, XSS,
+ * session fixation, JWT, SSRF — and almost none of that exists in AL: no raw
+ * SQL (record API), no HTML rendering, no session management in extension code.
+ * Whether removing them helps or merely removes a safety net is this arm's
+ * question, which is why the removal lives here rather than in the prompt.
+ *
+ * Filtered by `PR_REVIEW_AGENT_SET`, the same convention `buildRoutingBlock` and
+ * `buildScopedPayloadBlock` use: when an active set is named and it does NOT
+ * include `security-edge-case-analyzer`, this run never dispatches that agent, so
+ * narrowing its prompt (or the orchestrator's dispatch line naming it) measures
+ * nothing. This is unlike Tasks 2/3's own fix — a stray row there told the model an
+ * EXCLUDED agent was still part of the roster, a direct contradiction. Trimming an
+ * unused agent's own file contradicts nothing; the guard here is purely to avoid a
+ * wasted write, not to close a correctness bug.
+ *
+ * Guarded so this is a TRUE NO-OP unless `PR_REVIEW_SECURITY_BC_ONLY=1`.
+ *
+ * Returns the number of files actually modified (0 when the env var is not `1`,
+ * when the active set excludes the agent, or when both files already read as
+ * trimmed — e.g. a second call).
+ */
+export function maybeTrimSecurityDomains(): number {
+  if (process.env['PR_REVIEW_SECURITY_BC_ONLY'] !== '1') return 0;
+
+  const activeSet = (process.env['PR_REVIEW_AGENT_SET'] ?? '')
+    .split(',').map((a) => a.trim()).filter(Boolean);
+  if (activeSet.length > 0 && !activeSet.includes('security-edge-case-analyzer')) {
+    console.log('[eval] PR_REVIEW_SECURITY_BC_ONLY set but security-edge-case-analyzer is not in PR_REVIEW_AGENT_SET — skipping');
+    return 0;
+  }
+
+  let modified = 0;
+  const cliDir = dirname(fileURLToPath(import.meta.url));
+
+  const agentPath = resolve(cliDir, '..', 'agents', 'pr-reviewer', '.claude', 'agents', 'security-edge-case-analyzer.md');
+  if (!existsSync(agentPath)) {
+    console.log(`[eval] PR_REVIEW_SECURITY_BC_ONLY set but agent file not found at ${agentPath} — skipping`);
+  } else {
+    const content = readFileSync(agentPath, 'utf-8');
+    const trimmed = trimSecurityDomains(content);
+    if (trimmed !== content) {
+      writeFileSync(agentPath, trimmed);
+      modified++;
+    }
+  }
+
+  // Also narrow the ORCHESTRATOR's dispatch text, or it hands the removed domains
+  // straight back on every dispatch and this arm measures nothing.
+  const promptPath = resolve(cliDir, '..', 'agents', 'pr-reviewer', 'CLAUDE.md');
+  if (existsSync(promptPath)) {
+    const p = readFileSync(promptPath, 'utf-8');
+    const np = trimSecurityDispatchLine(p);
+    if (np !== p) {
+      writeFileSync(promptPath, np);
+      modified++;
+    }
+  } else {
+    console.log(`[eval] PR_REVIEW_SECURITY_BC_ONLY set but orchestrator prompt not found at ${promptPath} — skipping its dispatch line`);
+  }
+
+  if (modified > 0) {
+    console.log(`[eval] trimmed security-edge-case-analyzer to the BC platform domain (${modified} file(s) modified)`);
+  }
+  return modified;
+}
+
+/**
  * Render the marker + severity-labeled body shared by a thread's creation and
  * its later update — the only difference between the two call sites is which
  * ADO write carries this same string.
@@ -739,6 +858,7 @@ export async function reviewPR(args: string[]): Promise<void> {
   maybeRestrictAgentSet();
   maybeInjectRouting();
   maybeInjectScopedPayload();
+  maybeTrimSecurityDomains();
 
   const repo = findRepoByRepositoryId(repoId);
   if (!repo) {

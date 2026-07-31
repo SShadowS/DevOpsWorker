@@ -78,6 +78,7 @@ export function getContainerEnv(): Record<string, string> {
     PR_REVIEW_AGENT_SET: process.env['PR_REVIEW_AGENT_SET'] ?? '',
     PR_REVIEW_AGENT_ROUTING: process.env['PR_REVIEW_AGENT_ROUTING'] ?? '',
     PR_REVIEW_SCOPED_PAYLOAD: process.env['PR_REVIEW_SCOPED_PAYLOAD'] ?? '',
+    PR_REVIEW_SECURITY_BC_ONLY: process.env['PR_REVIEW_SECURITY_BC_ONLY'] ?? '',
     // Git identity inside pipeline containers. Email must be authorized in the
     // AL Object ID Ninja backend app pool; name marks commits as AI-made.
     GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',
