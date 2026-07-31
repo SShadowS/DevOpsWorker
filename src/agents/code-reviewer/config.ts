@@ -33,6 +33,12 @@ export function createCodeReviewerConfig(config: PipelineConfig): AgentConfig<ty
     outputSchema: CodeReviewSchema,
     // Read-only FS + Bash (for git diff/log) + LSP + Task (for spawning subagents) + pipeline read
     allowedTools: [...TOOL_SETS.fsReadOnlyWithLSP, 'Bash', TOOLS.Task, ...MCP_TOOLS.pipelinesReadOnly],
+    // Reviews the coder's work; it must not edit the code it is reviewing, or a
+    // finding can silently describe a tree the coder never produced. `Bash` and
+    // `Task` stay — both are declared above and used for inspection.
+    // `REPL`: a potential bypass of the mutation denials, sandbox unestablished,
+    // zero recorded usage — denied because it is free, not because it is proven.
+    disallowedTools: ['Write', 'Edit', 'NotebookEdit', 'REPL'],
     plugins: [resolveAlLspPlugin()].filter(Boolean) as SdkPluginConfig[],
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),

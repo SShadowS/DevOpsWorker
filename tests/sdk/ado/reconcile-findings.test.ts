@@ -128,4 +128,37 @@ describe('reconcileFindings', () => {
     expect(a).toHaveLength(1);
     expect((a[0] as any).finding.line).toBe(1);
   });
+
+  test('suppressStale leaves prior threads alone — a review that did not look cannot say "not detected"', () => {
+    // A backport sanity review deliberately never examines style, performance or
+    // security. Without suppression, its first finding of any kind would stamp
+    // "not detected" on every thread a full review opened for those domains — a
+    // false statement posted to a live PR.
+    const other = findingKey('A.al', 'A style nit from the full review');
+    const mine = findingKey('A.al', 'Partial port');
+    const threads = [thread(3, other), thread(4, mine)];
+    const findings = [f('major', 'Partial port', 'A.al', 5)];
+
+    const withStale = reconcileFindings(findings, threads);
+    expect(withStale.some((a) => a.kind === 'stale' && a.threadId === 3)).toBe(true);
+
+    const suppressed = reconcileFindings(findings, threads, 5, { suppressStale: true });
+    expect(suppressed.some((a) => a.kind === 'stale')).toBe(false);
+    // The finding it DID raise must still update its own thread.
+    expect(suppressed.some((a) => a.kind === 'update' && a.threadId === 4)).toBe(true);
+  });
+
+  test('negative control: suppressStale defaulting to false (opts omitted) still marks stale — the flag is opt-in', () => {
+    // Guards against an inverted or always-on guard: calling with the same
+    // arguments as every pre-existing test above must keep today's behaviour.
+    const key = findingKey('A.al', 'Gone');
+    const a = reconcileFindings([], [thread(4, key)], 5, {});
+    expect(a).toEqual([{ kind: 'stale', threadId: 4, key }]);
+  });
+
+  test('negative control: suppressStale explicitly false behaves identically to omitting opts', () => {
+    const key = findingKey('A.al', 'Gone');
+    const a = reconcileFindings([], [thread(4, key)], 5, { suppressStale: false });
+    expect(a).toEqual([{ kind: 'stale', threadId: 4, key }]);
+  });
 });

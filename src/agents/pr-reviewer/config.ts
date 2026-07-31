@@ -61,13 +61,26 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
 
   let originalPrId: number | undefined;
   if (pr.description) {
-    // Match "/pullrequest/456" (URL, most reliable) or "!456" (Azure DevOps PR reference)
-    const prUrlMatch = pr.description.match(/\/pullrequest\/(\d+)/);
-    const prRefMatch = pr.description.match(/!(\d+)/);
-    const match = prUrlMatch || prRefMatch;
-    if (match) {
-      originalPrId = parseInt(match[1]!, 10);
-    }
+    // Ordered by how strongly each form indicates the SOURCE of this port.
+    //
+    // 1. The `Cherry picked from !<id>` trailer is written by whoever made the port
+    //    and names the immediate parent. Last match wins: a port of a port
+    //    accumulates trailers, and the newest is the branch this was taken from
+    //    (PR 52309 carries !51720 then !52121 — 52121 is the parent).
+    // 2. A `/pullrequest/<id>` URL is what the Azure DevOps cherry-pick button
+    //    emits, and those descriptions carry no trailer at all.
+    // 3. A bare `!<id>` is the loosest form and only used when nothing better exists.
+    //
+    // The ordering is the bug fix. Preferring the URL first meant PR 52307 resolved
+    // to 50231 — an unrelated sibling fix cited in its prose — instead of its real
+    // source 52117. 50231 is same-repo and fetchable, so no downstream guard catches
+    // it; this ordering is the only protection.
+    const trailers = [...pr.description.matchAll(/cherry[- ]picked? from !(\d+)/gi)];
+    const lastTrailer = trailers[trailers.length - 1];
+    const urlMatch = pr.description.match(/\/pullrequest\/(\d+)/);
+    const refMatch = pr.description.match(/!(\d+)/);
+    const chosen = lastTrailer?.[1] ?? urlMatch?.[1] ?? refMatch?.[1];
+    if (chosen) originalPrId = parseInt(chosen, 10);
   }
 
   return { isCherryPick, originalPrId };
@@ -123,6 +136,12 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
       'Read',
       'Grep',
       'Glob',
+      // Declared because they are genuinely used — see the note on
+      // `disallowedTools` below. They were previously absent while the agent
+      // called `Write` 125 times, which is precisely the confusion this list is
+      // supposed to prevent.
+      'Write',
+      'Edit',
       'mcp__azureDevOps__list_pull_requests',
       'mcp__azureDevOps__get_pull_request_changes',
       'mcp__azureDevOps__get_pull_request_comments',
@@ -132,6 +151,21 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
       'mcp__azureDevOps__list_commits',
       ...lspTools,
     ],
+    // `Write` and `Edit` are NOT denied, and that is deliberate. Neither is in
+    // `allowedTools`, yet the orchestrator's recorded turns issued 125 `Write`
+    // calls: it builds a scratch context file (`/tmp/pr<id>/CONTEXT.md`) and
+    // hands its 7 sub-agents that path instead of inlining the whole PR context
+    // into every dispatch — 929 recorded dispatches reference such a path.
+    // Denying `Write` would break the review's context passing. `Agent` stays for
+    // the same reason: fanning out IS this agent's design.
+    //
+    // Known gap, left open on purpose: 31 of those writes landed under the
+    // checked-out repo rather than `/tmp`, and one overwrote a real source file.
+    // A blanket deny cannot fix that without breaking the scratch-file pattern —
+    // the right fix is a path-scoped PreToolUse hook, not a tool denial. That
+    // hook must cover Bash as well: this agent keeps `Bash`, and `sed -i`, `>`
+    // and `git checkout` write to the tree without going near Write or Edit.
+    disallowedTools: ['NotebookEdit'],
     plugins: lspPlugins,
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),

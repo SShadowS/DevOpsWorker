@@ -151,7 +151,7 @@ describe('detectCherryPick', () => {
     expect(result.originalPrId).toBe(45146);
   });
 
-  test('prefers URL match over ! reference for PR ID', () => {
+  test('falls back to the URL form when no trailer is present', () => {
     const result = detectCherryPick({
       title: 'Cherry-pick Fix something',
       description: 'Cherry-picked !99999 from https://dev.azure.com/org/proj/_git/repo/pullrequest/456',

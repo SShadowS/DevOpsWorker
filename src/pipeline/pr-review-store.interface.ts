@@ -34,6 +34,10 @@ export interface PRReviewRow {
    *  when nothing was attempted (noPost mode or no findings) — distinct from
    *  an all-zero result, which means it ran and found nothing to anchor. */
   inlineThreads: { created: number; updated: number; stale: number; failed: number } | null;
+  /** Which reviewer ran: `sanity:<sourcePrId>` for the cheap backport path, or
+   *  `full:<reason>` naming why the full path was chosen. Null for rows recorded
+   *  before this routing existed. */
+  reviewPath: string | null;
 }
 
 export interface IPRReviewStore {
@@ -41,4 +45,8 @@ export interface IPRReviewStore {
   listRecent(limit?: number): Promise<PRReviewRow[]>;
   findByActionId(actionId: number): Promise<PRReviewRow | null>;
   findById(id: number): Promise<PRReviewRow | null>;
+  /** Latest recorded review of a given PR id, or null when none exists. Used to
+   *  surface a backport's SOURCE PR's own review status — `reviewed` with its
+   *  recommendation, or `not-reviewed` when nothing was ever recorded for it. */
+  findLatestByPrId(prId: number): Promise<PRReviewRow | null>;
 }

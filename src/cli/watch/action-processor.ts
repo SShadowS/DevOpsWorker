@@ -39,6 +39,44 @@ import {
 // testable independently of the poll loop and the container dispatcher.
 // ---------------------------------------------------------------------------
 
+/** The queued `review-pr` action's parsed JSON feedback — the fields
+ *  `buildReviewPrExtraArgs` below reads to build the spawned container's argv. */
+export interface ReviewPrActionPayload {
+  prId: number;
+  repoKey: string;
+  repositoryId: string;
+  sourceBranch?: string;
+  targetBranch?: string;
+  prUrl?: string;
+  commentKey?: string;
+  /** Set when the triggering comment was `/review-full` (see webhook-server/index.ts's
+   *  `buildReviewPrActionFeedback`) — forwarded as `--full` below. */
+  forceFull?: boolean;
+}
+
+/**
+ * Build the review-pr container's extraArgs from the queued action's payload.
+ *
+ * Pulled out of `executeAction` so this hop of the webhook → action → argv bridge
+ * is independently testable — this is the exact bridge that let `prTitle` go
+ * missing before: threaded into the action payload correctly, but never read back
+ * out here into an argv flag, so cherry-pick detection silently never saw it.
+ */
+export function buildReviewPrExtraArgs(
+  payload: Pick<ReviewPrActionPayload, 'prId' | 'repositoryId' | 'sourceBranch' | 'targetBranch' | 'prUrl' | 'forceFull'>,
+  actionId: number | undefined,
+): string[] {
+  return [
+    '--pr-id', String(payload.prId),
+    '--repo-id', payload.repositoryId,
+    '--source-branch', payload.sourceBranch || '',
+    '--target-branch', payload.targetBranch || '',
+    ...(payload.prUrl ? ['--pr-url', payload.prUrl] : []),
+    ...(payload.forceFull ? ['--full'] : []),
+    '--action-id', String(actionId),
+  ];
+}
+
 /** Run an action's body and record terminal status in the action store.
  *  On success: markCompleted. On failure: markFailed (the original error is still rethrown). */
 export async function trackedExecute(
@@ -206,14 +244,7 @@ export async function executeAction(
         stateVolume: watchConfig.stateVolume,
         workspaceVolume,
         imageName: watchConfig.imageName,
-        extraArgs: [
-          '--pr-id', String(prId),
-          '--repo-id', repositoryId,
-          '--source-branch', sourceBranch || '',
-          '--target-branch', targetBranch || '',
-          ...(prUrl ? ['--pr-url', prUrl] : []),
-          '--action-id', String(action.id),
-        ],
+        extraArgs: buildReviewPrExtraArgs(payload, action.id),
       });
 
       // Override container name (buildDockerArgs uses wi-{id} by default)

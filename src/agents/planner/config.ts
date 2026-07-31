@@ -132,7 +132,7 @@ export function buildRevisionSection(state: PipelineState): string[] {
 
 const AGENT_DIR = dirname(fileURLToPath(import.meta.url));
 
-function createPlannerConfig(config: PipelineConfig): AgentConfig<typeof DevPlanSchema> {
+export function createPlannerConfig(config: PipelineConfig): AgentConfig<typeof DevPlanSchema> {
   return {
     name: 'planner',
     useClaudeCodePreset: true,
@@ -151,7 +151,12 @@ function createPlannerConfig(config: PipelineConfig): AgentConfig<typeof DevPlan
     ],
     outputSchema: DevPlanSchema,
     allowedTools: [...TOOL_SETS.fsReadOnlyWithLSP, ...MCP_TOOLS.zendeskReadOnly, ...MCP_TOOLS.pipelinesReadOnly],
-    disallowedTools: ['Bash'],
+    // Read-only: the planner's output is its structured plan, never a file. Its
+    // only recorded `Write` calls went to Claude Code's memory dir under
+    // `/root/.claude`, which is not a mounted volume and so cannot outlive the run.
+    // `REPL`: a potential bypass of the mutation denials, sandbox unestablished,
+    // zero recorded usage — denied because it is free, not because it is proven.
+    disallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit', 'REPL'],
     plugins: [resolveAlLspPlugin()].filter(Boolean) as SdkPluginConfig[],
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),

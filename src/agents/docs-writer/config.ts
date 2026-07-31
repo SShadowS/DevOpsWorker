@@ -23,6 +23,11 @@ export function createDocsWriterConfig(config: PipelineConfig): AgentConfig<type
     ],
     outputSchema: DocsWriterOutputSchema,
     allowedTools: [...TOOL_SETS.fsReadWrite, ...MCP_TOOLS.workItemRead],
+    // A writer by design — `Write`/`Edit` produce the documentation drafts and
+    // stay. `Bash` is undeclared but heavily used (62 recorded calls, all
+    // read-only `grep`/`ls`/`find` navigation), so denying it would break working
+    // behaviour. Only notebooks, which this repo has none of, are denied.
+    disallowedTools: ['NotebookEdit'],
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),
     },

@@ -2,26 +2,84 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadConfig } from './config.ts';
-import { runPRReview } from '../agents/pr-reviewer/config.ts';
-import type { PRFinding } from '../agents/pr-reviewer/schema.ts';
+import { runPRReview, detectCherryPick } from '../agents/pr-reviewer/config.ts';
+import type { PRFinding, PRReviewResult } from '../agents/pr-reviewer/schema.ts';
+import { runBackportReview } from '../agents/cherry-pick-reviewer/config.ts';
+import type { BackportReview } from '../agents/cherry-pick-reviewer/schema.ts';
 import { findRepoByRepositoryId } from '../config/repos.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
 import { connectStores } from '../db/connect-stores.ts';
 import { notifyPipelineError } from '../sdk/discord-notify.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import type { PipelineConfig } from '../types/pipeline.types.ts';
+import type { AgentResult } from '../types/agent.types.ts';
 import {
   fetchReviewThreadsRaw,
   postInlineThread,
   updateThreadComment,
   appendToThread,
+  fetchPRMetadata,
+  fetchPRDiff,
   type ReviewThread,
+  type PRMetadata,
 } from '../sdk/ado/pull-requests.ts';
+import { chooseReviewPath, compareDiffs, renderDiffComparison, type FileDiff } from '../sdk/ado/backport.ts';
+import { checkoutBranch, resolveRef } from '../sdk/git-checkout.ts';
 import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
 import { extractKey, findingKey, FINDING_MARKER_RE, markerFor } from '../sdk/ado/finding-key.ts';
 
 export function makeReviewRunId(prId: number): string {
   return `pr-${prId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export interface ReviewPrArgs {
+  prId?: number;
+  repoId?: string;
+  sourceBranch: string;
+  targetBranch: string;
+  prUrl?: string;
+  prTitle?: string;
+  prDescription?: string;
+  actionId?: number;
+  /** `--full` — forces the full seven-agent review even when `chooseReviewPath`
+   *  would otherwise route this PR to the backport reviewer. The CLI-flag half of
+   *  the `/review-full` escape hatch (webhook-server/parse.ts's other half); a
+   *  human uses the comment, an automated caller (eval harness, script) uses this. */
+  forceFull: boolean;
+}
+
+/**
+ * Parse `review-pr`'s argv into typed fields.
+ *
+ * Pulled out of `reviewPR` so this end of the webhook → action → argv bridge is
+ * unit-testable without the full agent + DB stack `reviewPR` itself needs —
+ * `buildReviewPrExtraArgs` (action-processor.ts) and `buildReviewPrActionFeedback`
+ * (webhook-server/index.ts) pin the other two hops the same way.
+ */
+export function parseReviewPrArgs(args: string[]): ReviewPrArgs {
+  let prId: number | undefined;
+  let repoId: string | undefined;
+  let sourceBranch = '';
+  let targetBranch = '';
+  let prUrl: string | undefined;
+  let prTitle: string | undefined;
+  let prDescription: string | undefined;
+  let actionId: number | undefined;
+  let forceFull = false;
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--pr-id' && args[i + 1]) prId = parseInt(args[++i]!, 10);
+    if (args[i] === '--repo-id' && args[i + 1]) repoId = args[++i];
+    if (args[i] === '--source-branch' && args[i + 1]) sourceBranch = args[++i]!;
+    if (args[i] === '--target-branch' && args[i + 1]) targetBranch = args[++i]!;
+    if (args[i] === '--pr-url' && args[i + 1]) prUrl = args[++i];
+    if (args[i] === '--pr-title' && args[i + 1]) prTitle = args[++i];
+    if (args[i] === '--pr-description' && args[i + 1]) prDescription = args[++i];
+    if (args[i] === '--action-id' && args[i + 1]) actionId = parseInt(args[++i]!, 10);
+    if (args[i] === '--full') forceFull = true;
+  }
+
+  return { prId, repoId, sourceBranch, targetBranch, prUrl, prTitle, prDescription, actionId, forceFull };
 }
 
 /**
@@ -298,7 +356,7 @@ export async function applyInlineFindings(
   prId: number,
   findings: PRFinding[],
   config: PipelineConfig,
-  opts: { today?: string } = {},
+  opts: { today?: string; suppressStale?: boolean } = {},
 ): Promise<{ created: number; updated: number; stale: number; failed: number }> {
   const result = { created: 0, updated: 0, stale: 0, failed: 0 };
   if (findings.length === 0) return result;
@@ -325,7 +383,7 @@ export async function applyInlineFindings(
   // review whose agent already succeeded and posted its summary.
   let actions: ReturnType<typeof reconcileFindings>;
   try {
-    actions = reconcileFindings(findings, threads);
+    actions = reconcileFindings(findings, threads, 5, { suppressStale: opts.suppressStale });
   } catch (err) {
     console.log(`[inline] could not reconcile findings against existing threads, skipping inline comments: ${err}`);
     return result;
@@ -360,28 +418,10 @@ export async function applyInlineFindings(
 }
 
 export async function reviewPR(args: string[]): Promise<void> {
-  let prId: number | undefined;
-  let repoId: string | undefined;
-  let sourceBranch = '';
-  let targetBranch = '';
-  let prUrl: string | undefined;
-  let prTitle: string | undefined;
-  let prDescription: string | undefined;
-  let actionId: number | undefined;
-
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--pr-id' && args[i + 1]) prId = parseInt(args[++i]!, 10);
-    if (args[i] === '--repo-id' && args[i + 1]) repoId = args[++i];
-    if (args[i] === '--source-branch' && args[i + 1]) sourceBranch = args[++i]!;
-    if (args[i] === '--target-branch' && args[i + 1]) targetBranch = args[++i]!;
-    if (args[i] === '--pr-url' && args[i + 1]) prUrl = args[++i];
-    if (args[i] === '--pr-title' && args[i + 1]) prTitle = args[++i];
-    if (args[i] === '--pr-description' && args[i + 1]) prDescription = args[++i];
-    if (args[i] === '--action-id' && args[i + 1]) actionId = parseInt(args[++i]!, 10);
-  }
+  const { prId, repoId, sourceBranch, targetBranch, prUrl, prTitle, prDescription, actionId, forceFull } = parseReviewPrArgs(args);
 
   if (!prId || !repoId) {
-    console.error('Usage: pipeline review-pr --pr-id <id> --repo-id <guid> [--source-branch <ref>] [--target-branch <ref>] [--action-id <id>]');
+    console.error('Usage: pipeline review-pr --pr-id <id> --repo-id <guid> [--source-branch <ref>] [--target-branch <ref>] [--action-id <id>] [--full]');
     process.exit(1);
   }
 
@@ -459,6 +499,81 @@ export async function reviewPR(args: string[]): Promise<void> {
   }
   logger.stageStart('pr-reviewer');
 
+  // argv carries these only when a caller passed them; the watcher does not
+  // (action-processor forwards no --pr-title), so detection would never see a
+  // cherry-pick trailer. Read them from the PR itself and let argv win when given.
+  let prMetadata: PRMetadata | undefined;
+  try {
+    prMetadata = await fetchPRMetadata(prId, config);
+  } catch (err) {
+    console.log(`[review-pr] could not read PR metadata, continuing without it: ${err}`);
+  }
+  const resolvedTitle = prTitle || prMetadata?.title || '';
+  const resolvedDescription = prDescription || prMetadata?.description || '';
+
+  // The container clones the repo ONE LEVEL BELOW the session root
+  // (`docker/entrypoint.sh`: `MAIN_REPO_DIR="${SESSION_ROOT}/${REPO_KEY}"`) —
+  // `config.paths.sessionRoot` alone has no `.git` of its own. `config.repoKey` (not
+  // `config.paths.targetRepo`, which stays `loadConfig`'s placeholder here since this
+  // file builds `config` without going through `buildConfigFromRepo`) is the real
+  // directory name.
+  //
+  // Declared before the diff reads rather than just before the checkout: a PR's diff
+  // is now computed with `git diff` inside this clone, because Azure DevOps REST
+  // serves no unified diffs at all.
+  const repoDir = join(config.paths.sessionRoot, config.repoKey);
+
+  // Route before spending. `full` is the default for every uncertainty: an
+  // unidentifiable backport then costs exactly what it costs today.
+  const cherryPick = detectCherryPick({ title: resolvedTitle, description: resolvedDescription });
+  let sourceDiff: FileDiff[] = [];
+  let sourcePrExists = false;
+  let sourceDiffError = '';
+  if (cherryPick.originalPrId) {
+    const source = await fetchPRDiff(cherryPick.originalPrId, repoDir, config);
+    if (source.ok) {
+      sourceDiff = source.files;
+      sourcePrExists = true;
+      // An empty-but-successful diff is not a fetch failure, and must not be
+      // reported as one — there is simply nothing to compare against.
+      if (sourceDiff.length === 0) sourceDiffError = 'the source PR changed no comparable files';
+    } else {
+      // `prMissing` is the only thing allowed to report the PR as absent. Before
+      // this, ANY failure set `sourcePrExists = false` and the route reason read
+      // "source PR !<id> not found in this repository" — which is what a 404 from a
+      // non-existent endpoint looked like, all the way into the `review_path` column.
+      sourcePrExists = !source.prMissing;
+      sourceDiffError = source.error;
+      console.log(`[backport] source PR !${cherryPick.originalPrId} diff unavailable: ${source.error}`);
+    }
+  }
+
+  // This PR's own branches. REST wins over argv here — the opposite precedence from
+  // resolvedTitle/resolvedDescription above — because `chooseReviewPath` and the
+  // checkout that follows need the CURRENT branch, and `fetchPRMetadata` always is
+  // (its doc: "Reading over REST is always current"), while argv is a snapshot the
+  // watcher forwards from the webhook payload. Computed once and reused for the route
+  // decision, the checkout, and the staleness check below, so all three agree.
+  const effectiveSourceBranch = prMetadata?.sourceBranch ?? sourceBranch ?? '';
+  const effectiveTargetBranch = prMetadata?.targetBranch ?? targetBranch ?? '';
+
+  let route = chooseReviewPath({
+    cherryPick,
+    sourceBranch: effectiveSourceBranch,
+    sourcePrExists,
+    sourceDiffFetchable: sourceDiff.length > 0,
+    sourceDiffError,
+    forceFull,
+  });
+  console.log(route.path === 'sanity'
+    ? `[backport] sanity path — ported from !${route.sourcePrId}`
+    : `[backport] full path — ${route.reason}`);
+  // Kept in sync with `route` below (the checkout-failure fallback reassigns both
+  // together) so a run that errors before `save()` still persists which path it
+  // took — a cheap review and a failed detection must stay distinguishable in the
+  // data even when the run itself blows up.
+  let reviewPath = route.path === 'sanity' ? `sanity:${route.sourcePrId}` : `full:${route.reason}`;
+
   // Read the PR's existing marker threads BEFORE the agent runs, so the prompt can
   // hand it the exact file+title pairs already under discussion. Without this the
   // agent is asked to keep titles stable with nothing to be stable against.
@@ -485,11 +600,135 @@ export async function reviewPR(args: string[]): Promise<void> {
   }
 
   try {
-    const result = await runPRReview(
-      { prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId, project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl, prTitle, prDescription, noPost, priorFindingsBlock },
-      config,
-      logger,
-    );
+    let result: AgentResult<PRReviewResult> | AgentResult<BackportReview>;
+
+    // A failed checkout falls back to the full review: at this point the diffs
+    // above are already fetched but no agent has run, so falling back is still
+    // free — see the brief's note on why this ordering is the one that matters.
+    if (route.path === 'sanity') {
+      const checkout = await checkoutBranch(repoDir, effectiveSourceBranch);
+      if (!checkout.ok) {
+        console.log(`[backport] checkout of ${effectiveSourceBranch} failed, using the full review: ${checkout.error}`);
+        route = { path: 'full', reason: `checkout of ${effectiveSourceBranch} failed: ${checkout.error}` };
+        reviewPath = `full:${route.reason}`;
+      }
+    }
+
+    // Same "still free" reasoning as the checkout above: no agent has run yet,
+    // so a transient failure here falls back rather than failing the whole
+    // review with no review at all. `fetchPRDiff` returns a result instead of
+    // throwing, so this is an `if`, not a try/catch — but the fallback it guards
+    // is the same one, and it is still the thing that must not be dropped.
+    let portDiff: FileDiff[] = [];
+    if (route.path === 'sanity') {
+      const port = await fetchPRDiff(prId, repoDir, config);
+      if (port.ok && port.files.length === 0) {
+        // Symmetry with the source side, which already refuses to route `sanity` on
+        // an empty diff. An empty PORT diff would compare cleanly and report every
+        // source file as missing — technically the safe direction, but it presents a
+        // computation failure as a damning finding about the port.
+        console.log('[backport] port diff is empty, using the full review');
+        route = { path: 'full', reason: 'port PR changed no comparable files' };
+        reviewPath = `full:${route.reason}`;
+      } else if (port.ok) {
+        portDiff = port.files;
+      } else {
+        console.log(`[backport] port diff unavailable, using the full review: ${port.error}`);
+        // Capped like the source-side reason in `chooseReviewPath`, for the same
+        // reason: this string is persisted to `review_path` and read by a human.
+        route = { path: 'full', reason: `port diff could not be computed: ${port.error.slice(0, 200)}` };
+        reviewPath = `full:${route.reason}`;
+      }
+    }
+
+    if (route.path === 'sanity') {
+      const diffComparison = renderDiffComparison(compareDiffs(sourceDiff, portDiff));
+
+      // Surfaced, not gated on (design decision M3): a change never deep-reviewed
+      // anywhere still takes the cheap path, but the output says so, so a human
+      // reading an approval can ask for /review-full.
+      let sourceReviewStatus: 'reviewed' | 'not-reviewed' = 'not-reviewed';
+      let sourceRecommendation: string | null = null;
+      if (prReviewStore) {
+        try {
+          const sourceReview = await prReviewStore.findLatestByPrId(route.sourcePrId);
+          if (sourceReview?.recommendation) {
+            sourceReviewStatus = 'reviewed';
+            sourceRecommendation = sourceReview.recommendation;
+          }
+        } catch (err) {
+          console.log(`[backport] could not look up source PR !${route.sourcePrId}'s review status, reporting not-reviewed: ${err}`);
+        }
+      }
+
+      // Stale when the target branch has moved past the commit ADO last computed
+      // this PR's merge preview against. An unresolvable comparison counts as stale
+      // too (see `resolveRef`'s doc) — "I could not check" must never read as "it's
+      // current".
+      const targetRefName = effectiveTargetBranch.replace(/^refs\/heads\//, '');
+      const targetTip = targetRefName ? await resolveRef(repoDir, `origin/${targetRefName}`) : null;
+      const mergePreviewStale = !prMetadata?.lastMergeTargetCommit || !targetTip || targetTip !== prMetadata.lastMergeTargetCommit;
+
+      const backportResult = await runBackportReview(
+        {
+          prId,
+          sourcePrId: route.sourcePrId,
+          // The folder name (`config.repoKey`, same value `repoDir` is built from),
+          // NOT the registry key (`repo.key`) the `save()` calls below persist —
+          // the prompt now names this directly as the checkout subdirectory, so
+          // the wrong string here would tell the agent to look in a directory
+          // that does not exist.
+          repoKey: config.repoKey,
+          sourceBranch: effectiveSourceBranch,
+          targetBranch: effectiveTargetBranch,
+          diffComparison,
+          sourceReviewStatus,
+          sourceRecommendation,
+          mergePreviewStale,
+          checkoutOk: true,
+          noPost,
+          priorFindingsBlock,
+        },
+        config,
+        logger,
+      );
+
+      // `sourcePrId`, `sourceReviewStatus`, `sourceRecommendation`, `checkoutOk` and
+      // `mergePreviewStale` are already known to TypeScript before the agent ran —
+      // overwrite the model's echo of them rather than trust it. A transcription
+      // slip on any of the first four is cosmetic; a slip on `mergePreviewStale`
+      // flips the verdict on its own (it is read inverted from the prompt's `Merge
+      // preview current` line — see cherry-pick-reviewer/CLAUDE.md).
+      //
+      // The overwrite below is silent by construction — logged here instead, since
+      // it is the only thing that would ever tell anyone the model misread that
+      // inverted line. `checkoutOk` can only ever mismatch as `false` (this branch
+      // is unreachable otherwise), so it is a weaker signal than `mergePreviewStale`,
+      // but cheap to log alongside it.
+      if (backportResult.output.mergePreviewStale !== mergePreviewStale) {
+        console.warn(`[backport] model reported mergePreviewStale=${backportResult.output.mergePreviewStale} but the computed value is ${mergePreviewStale} — likely misread the inverted "Merge preview current" prompt line. Using the computed value.`);
+      }
+      if (backportResult.output.checkoutOk !== true) {
+        console.warn(`[backport] model reported checkoutOk=${backportResult.output.checkoutOk}, but checkout had already succeeded by construction to reach this branch. Using true.`);
+      }
+      result = {
+        ...backportResult,
+        output: {
+          ...backportResult.output,
+          sourcePrId: route.sourcePrId,
+          sourceReviewStatus,
+          sourceRecommendation,
+          checkoutOk: true,
+          mergePreviewStale,
+        },
+      };
+    } else {
+      result = await runPRReview(
+        { prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId, project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl, prTitle: resolvedTitle, prDescription: resolvedDescription, noPost, priorFindingsBlock },
+        config,
+        logger,
+      );
+    }
 
     // The likeliest way this feature silently does nothing on a real PR: the
     // model reports findings in its counts but leaves findingsList empty (or
@@ -504,9 +743,13 @@ export async function reviewPR(args: string[]): Promise<void> {
     // comment. Inline threads MUST honour it too — see applyInlineFindings' doc.
     // `null` means "not attempted" (noPost, or no findings) — kept distinct from
     // an all-zero result, which means it ran and found nothing to anchor.
+    // The sanity path deliberately never examines style, performance or security, so
+    // it has no basis to declare a full-review finding "not detected" — suppress the
+    // stale notice there. The full path passes `{}`, identical to passing nothing,
+    // and keeps today's stale-marking behaviour.
     let inlineThreads: { created: number; updated: number; stale: number; failed: number } | null = null;
     if (!noPost && result.output?.findingsList?.length) {
-      inlineThreads = await applyInlineFindings(prId, result.output.findingsList, config);
+      inlineThreads = await applyInlineFindings(prId, result.output.findingsList, config, route.path === 'sanity' ? { suppressStale: true } : {});
     }
 
     if (prReviewStore) {
@@ -516,7 +759,7 @@ export async function reviewPR(args: string[]): Promise<void> {
           repoKey: repo.key,
           sourceBranch: shortBranch,
           targetBranch: shortTarget,
-          title: `PR #${prId}`,
+          title: resolvedTitle || `PR #${prId}`,
           recommendation: result.output.recommendation,
           findings: result.output.findings ?? null,
           findingsCount: result.output.findingsCount,
@@ -535,6 +778,7 @@ export async function reviewPR(args: string[]): Promise<void> {
           reviewRunId,
           findingsList: result.output.findingsList ?? null,
           inlineThreads,
+          reviewPath: reviewPath,
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -558,7 +802,7 @@ export async function reviewPR(args: string[]): Promise<void> {
         repoKey: repo.key,
         sourceBranch: shortBranch,
         targetBranch: shortTarget,
-        title: `PR #${prId}`,
+        title: resolvedTitle || `PR #${prId}`,
         recommendation: null,
         findings: null,
         findingsCount: null,
@@ -577,6 +821,7 @@ export async function reviewPR(args: string[]): Promise<void> {
         reviewRunId,
         findingsList: null,
         inlineThreads: null,
+        reviewPath: reviewPath,
       });
     }
 

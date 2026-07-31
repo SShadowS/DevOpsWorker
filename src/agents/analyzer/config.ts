@@ -31,7 +31,20 @@ export function createAnalyzerConfig(config: PipelineConfig): AgentConfig<typeof
     ],
     outputSchema: ReadinessReportSchema,
     allowedTools: [...TOOL_SETS.fsReadOnlyWithLSP, ...MCP_TOOLS.zendeskReadOnly, ...MCP_TOOLS.pipelinesReadOnly],
-    disallowedTools: ['Bash'],
+    // The analyzer only reads. Omitting the mutating tools from `allowedTools`
+    // does not remove them (see CLAUDE.md "Tool Scoping"), and telemetry shows it
+    // reaching for them: its recorded stage runs issued 2 `Write` calls, both to
+    // Claude Code's own memory dir under `/root/.claude`. That path is not a
+    // mounted volume, so it dies with the container and nothing can read it back
+    // — incidental, not load-bearing.
+    //
+    // `REPL` rides along with the mutation denials on every read-only agent. Not
+    // because it is known to write — its sandbox is unestablished and this list
+    // makes no claim about it — but because if it CAN, it bypasses the three
+    // denials above wholesale. Usage is zero (0 across 1483 recorded reviews and
+    // 0 of 90,218 recorded stage tool calls), so the denial removes no capability
+    // anyone uses. Cheap insurance against an unverified risk.
+    disallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit', 'REPL'],
     plugins: [resolveAlLspPlugin()].filter(Boolean) as SdkPluginConfig[],
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),

@@ -13,7 +13,7 @@ import type { SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 
 const AGENT_DIR = dirname(fileURLToPath(import.meta.url));
 
-function createPlanReviewerConfig(config: PipelineConfig): AgentConfig<typeof PlanReviewSchema> {
+export function createPlanReviewerConfig(config: PipelineConfig): AgentConfig<typeof PlanReviewSchema> {
   return {
     name: 'plan-reviewer',
     useClaudeCodePreset: true,
@@ -31,7 +31,11 @@ function createPlanReviewerConfig(config: PipelineConfig): AgentConfig<typeof Pl
     ],
     outputSchema: PlanReviewSchema,
     allowedTools: [...TOOL_SETS.fsReadOnlyWithLSP, TOOLS.Task, ...MCP_TOOLS.zendeskReadOnly],
-    disallowedTools: ['Bash'],
+    // Read-only reviewer. `Task` stays allowed — dispatching the 4 domain
+    // sub-agents is this agent's whole design.
+    // `REPL`: a potential bypass of the mutation denials, sandbox unestablished,
+    // zero recorded usage — denied because it is free, not because it is proven.
+    disallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit', 'REPL'],
     plugins: [resolveAlLspPlugin()].filter(Boolean) as SdkPluginConfig[],
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),

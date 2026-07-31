@@ -101,7 +101,7 @@ Grep/Glob/Read are for non-code text only (comments, TODOs, config values, file 
 | `bash: cat file.al` | **Read** with file path |
 | `bash: ls directory/` | **Glob** with pattern `directory/*` |
 
-Bash is only for commands that have no dedicated tool equivalent (e.g., `git log`, `az` CLI). If you catch yourself writing `find`, `grep`, `cat`, `ls`, or `head` in a Bash command — stop and use the dedicated tool instead.
+Bash is disabled for this agent, so the tools above are the way to do every one of these. A `Bash` call returns `No such tool available` and costs you a turn.
 
 **Use LSP tools for AL code navigation.** You have a running AL Language Server. Use `LSP` for finding definitions, references, symbols, and call hierarchies instead of text search. LSP understands AL semantics; Grep does not.
 

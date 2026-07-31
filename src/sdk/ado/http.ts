@@ -6,7 +6,14 @@ import type { PipelineConfig } from '../../types/pipeline.types.ts';
 // ---------------------------------------------------------------------------
 
 export class AzureDevOpsError extends Error {
-  constructor(message: string) {
+  /**
+   * HTTP status, when the error came from a response rather than from parsing.
+   *
+   * Present so a caller can tell "this resource is not there" (404) from "the call
+   * failed" (500, auth, network) WITHOUT regex-matching the message. Optional, so
+   * every existing `new AzureDevOpsError(msg)` is unaffected.
+   */
+  constructor(message: string, readonly status?: number) {
     super(message);
     this.name = 'AzureDevOpsError';
   }
@@ -39,6 +46,7 @@ export async function adoFetch<T>(
     const body = await res.text().catch(() => '');
     throw new AzureDevOpsError(
       `Azure DevOps API: ${res.status} ${res.statusText} — ${path}\n${body}`,
+      res.status,
     );
   }
 

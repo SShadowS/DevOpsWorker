@@ -68,6 +68,10 @@ export interface PRWebhookEvent {
     description?: string;
   };
   commentKey?: string;
+  /** Set when the triggering comment was `/review-full` — forces the full seven-agent
+   *  review even for a PR `chooseReviewPath` would otherwise route to the backport
+   *  reviewer. Absent (not `false`) for a plain `/review`. */
+  forceFull?: boolean;
 }
 
 /**
@@ -106,10 +110,15 @@ export function parseWebhookPayload(payload: unknown): PRWebhookEvent | null {
       return null;
     }
 
-    // Strip HTML and check for /review command
+    // Strip HTML and check for a review command. `/review` and `/review-full` are
+    // separate commands: the second forces the full seven-agent review on a PR that
+    // would otherwise route to the cheaper backport reviewer. Anchored so
+    // `/review-fully` and `/reviewfull` match neither.
     const plainText = commentContent.replace(/<[^>]+>/g, '').trim();
-    if (!/^\s*\/review\s*$/m.test(plainText)) {
-      return null; // No /review command — skip silently
+    const isReview = /^\s*\/review\s*$/m.test(plainText);
+    const isReviewFull = /^\s*\/review-full\s*$/m.test(plainText);
+    if (!isReview && !isReviewFull) {
+      return null; // No /review or /review-full command — skip silently
     }
 
     // Extract commentKey from self link: .../threads/{threadId}/comments/{commentId}
@@ -144,6 +153,7 @@ export function parseWebhookPayload(payload: unknown): PRWebhookEvent | null {
         description: pr.description,
       },
       commentKey,
+      ...(isReviewFull ? { forceFull: true } : {}),
     };
   } else {
     return null;

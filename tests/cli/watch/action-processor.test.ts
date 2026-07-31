@@ -1,6 +1,10 @@
 import { describe, test, expect } from 'bun:test';
 import { applyRerun, type ApplyRerunOptions } from '../../../src/cli/watch/work-detector.ts';
 import { ensurePat } from '../../../src/cli/watch/env-actions.ts';
+import { buildReviewPrExtraArgs } from '../../../src/cli/watch/action-processor.ts';
+import { parseWebhookPayload } from '../../../src/webhook-server/parse.ts';
+import { buildReviewPrActionFeedback } from '../../../src/webhook-server/index.ts';
+import { parseReviewPrArgs } from '../../../src/cli/review-pr.ts';
 import type { PipelineConfig, PipelineState, TestCaseFailure } from '../../../src/types/pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
@@ -156,6 +160,129 @@ function mockConfig(pat: string): PipelineConfig {
     layout: { appRoot: 'Cloud', source: 'Cloud/Al', testAppRoot: 'Test', test: 'Test/Src' },
   };
 }
+
+// ---------------------------------------------------------------------------
+// buildReviewPrExtraArgs — the webhook forceFull -> --full bridge.
+//
+// This is the exact bridge that let `prTitle` go missing before: threaded into
+// the action payload correctly, but never read back out here into an argv
+// flag, so cherry-pick detection silently never saw it. Pinned directly
+// (not via a source-text regex) so a field dropped from the array below fails
+// this test rather than a weaker "does the string 'forceFull' appear anywhere".
+// ---------------------------------------------------------------------------
+
+describe('buildReviewPrExtraArgs', () => {
+  test('appends --full when the payload carries forceFull (a /review-full comment or --full CLI call)', () => {
+    const args = buildReviewPrExtraArgs({ prId: 1, repositoryId: 'repo-guid', forceFull: true }, 42);
+    expect(args).toContain('--full');
+  });
+
+  test('omits --full for a plain /review — forceFull absent, not just falsy', () => {
+    const args = buildReviewPrExtraArgs({ prId: 1, repositoryId: 'repo-guid' }, 42);
+    expect(args).not.toContain('--full');
+  });
+
+  test('omits --full when forceFull is explicitly false', () => {
+    const args = buildReviewPrExtraArgs({ prId: 1, repositoryId: 'repo-guid', forceFull: false }, 42);
+    expect(args).not.toContain('--full');
+  });
+
+  test('every other flag still forwards unchanged, in the same shape as before', () => {
+    const args = buildReviewPrExtraArgs(
+      { prId: 7, repositoryId: 'r', sourceBranch: 'refs/heads/x', targetBranch: 'refs/heads/y', prUrl: 'https://example/pr/7' },
+      3,
+    );
+    expect(args).toEqual([
+      '--pr-id', '7',
+      '--repo-id', 'r',
+      '--source-branch', 'refs/heads/x',
+      '--target-branch', 'refs/heads/y',
+      '--pr-url', 'https://example/pr/7',
+      '--action-id', '3',
+    ]);
+  });
+
+  test('missing sourceBranch/targetBranch/prUrl degrade the same way as before (empty string / omitted)', () => {
+    const args = buildReviewPrExtraArgs({ prId: 1, repositoryId: 'r' }, undefined);
+    expect(args).toEqual([
+      '--pr-id', '1',
+      '--repo-id', 'r',
+      '--source-branch', '',
+      '--target-branch', '',
+      '--action-id', 'undefined',
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// forceFull composition: webhook payload -> action feedback -> argv -> parsed
+// args, run through the four *real* functions end to end.
+//
+// Each hop already has its own unit test (parse.test.ts, webhook-server's
+// index.test.ts, this file's buildReviewPrExtraArgs describe above,
+// review-pr.test.ts's parseReviewPrArgs describe) but nothing runs them
+// back-to-back. That gap is exactly how `prTitle` went missing before:
+// correct at each hop in isolation, dropped at the boundary between them.
+// The action-processor's `payload` is `JSON.parse(...)` typed `any` at the
+// real `executeAction` call site, so a field lost at that boundary costs
+// nothing at compile time — only a composition test like this one catches
+// it. Nothing here is mocked; a fixed payload shape is fed through
+// parseWebhookPayload -> buildReviewPrActionFeedback -> JSON.parse ->
+// buildReviewPrExtraArgs -> parseReviewPrArgs exactly as watch.ts's
+// action-processor and review-pr.ts's CLI entry point do.
+// ---------------------------------------------------------------------------
+
+describe('forceFull composition: webhook -> action -> argv -> parsed args', () => {
+  // Same shape as commentEventPayload() in tests/webhook-server/parse.test.ts
+  // (not exported from there, so reconstructed here rather than invented).
+  function commentEventPayload(commentContent: string): Record<string, unknown> {
+    return {
+      eventType: 'ms.vss-code.git-pullrequest-comment-event',
+      createdDate: new Date().toISOString(),
+      resource: {
+        comment: {
+          id: 1,
+          content: commentContent,
+          _links: {
+            self: {
+              href: 'https://dev.azure.com/org/_apis/git/repositories/repo-id/pullRequests/100/threads/5001/comments/1',
+            },
+          },
+        },
+        pullRequest: {
+          pullRequestId: 100,
+          repository: {
+            id: 'repo-guid-456',
+            name: 'My Repo',
+            project: { id: 'proj-id', name: 'My Project' },
+          },
+          sourceRefName: 'refs/heads/feature/review-me',
+          targetRefName: 'refs/heads/master',
+          status: 'active',
+          createdBy: { displayName: 'Jane Doe' },
+          url: 'https://dev.azure.com/org/proj/_apis/git/repositories/repo-id/pullRequests/100',
+        },
+      },
+    };
+  }
+
+  function forceFullThroughTheChain(commentContent: string): boolean {
+    const event = parseWebhookPayload(commentEventPayload(commentContent));
+    if (!event) throw new Error(`expected a parsed event for comment ${JSON.stringify(commentContent)}`);
+    const feedback = buildReviewPrActionFeedback(event, 'DocumentOutput');
+    const payload = JSON.parse(feedback); // matches executeAction's own untyped JSON.parse
+    const extraArgs = buildReviewPrExtraArgs(payload, 42);
+    return parseReviewPrArgs(extraArgs).forceFull;
+  }
+
+  test('/review-full survives all four real hops as forceFull === true', () => {
+    expect(forceFullThroughTheChain('/review-full')).toBe(true);
+  });
+
+  test('/review survives all four real hops as forceFull === false', () => {
+    expect(forceFullThroughTheChain('/review')).toBe(false);
+  });
+});
 
 describe('ensurePat', () => {
   test('injects the fallback when pat is the empty string (the "=== \'\'" call sites\' case)', () => {

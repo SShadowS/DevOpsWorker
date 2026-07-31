@@ -172,6 +172,32 @@ describe('comment event parsing', () => {
     expect(result).toBeNull();
   });
 
+  test('/review-full is detected and sets forceFull', () => {
+    const r = parseWebhookPayload(commentEventPayload('/review-full'));
+    expect(r).not.toBeNull();
+    expect(r!.forceFull).toBe(true);
+    expect(r!.commentKey).toBe('5001:1');
+  });
+
+  test('/review does not set forceFull', () => {
+    const r = parseWebhookPayload(commentEventPayload('/review'));
+    expect(r!.forceFull).toBeFalsy();
+  });
+
+  test('/review-fully does NOT match (anchored, not a prefix match)', () => {
+    expect(parseWebhookPayload(commentEventPayload('/review-fully'))).toBeNull();
+  });
+
+  test('/reviewfull (no hyphen) does NOT match', () => {
+    expect(parseWebhookPayload(commentEventPayload('/reviewfull'))).toBeNull();
+  });
+
+  test('/review-full with surrounding whitespace matches', () => {
+    const r = parseWebhookPayload(commentEventPayload('  /review-full  '));
+    expect(r).not.toBeNull();
+    expect(r!.forceFull).toBe(true);
+  });
+
   test('rejects stale comment event', () => {
     const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     expect(() =>

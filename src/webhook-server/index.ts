@@ -1,7 +1,7 @@
 import { connectStores } from '../db/connect-stores.ts';
 import { findRepoByRepositoryId } from '../config/repos.ts';
 import { validateSignature } from './validate.ts';
-import { parseWebhookPayload } from './parse.ts';
+import { parseWebhookPayload, type PRWebhookEvent } from './parse.ts';
 import type { IStateStore } from '../pipeline/state-store.interface.ts';
 import type { IWebhookEventStore } from '../pipeline/webhook-event-store.interface.ts';
 
@@ -29,6 +29,32 @@ async function isPipelinePR(stateStore: IStateStore, prId: number): Promise<bool
     if (state?.draftPR?.id === prId) return true;
   }
   return false;
+}
+
+/**
+ * Build the `review-pr` action's JSON feedback payload from a parsed webhook event.
+ *
+ * Pulled out of the request handler so this hop of the webhook → action →
+ * action-processor → argv bridge is unit-testable without a database connection —
+ * this is exactly the kind of seam that let `prTitle` go missing before: it was
+ * threaded into this payload correctly but never read back out on the other end.
+ * A field dropped HERE (never added to the object below) is the failure mode this
+ * function's own tests exist to catch.
+ */
+export function buildReviewPrActionFeedback(event: PRWebhookEvent, repoKey: string): string {
+  return JSON.stringify({
+    prId: event.pr.id,
+    repoKey,
+    repositoryId: event.pr.repositoryId,
+    project: event.pr.project,
+    sourceBranch: event.pr.sourceBranch,
+    targetBranch: event.pr.targetBranch,
+    prUrl: event.pr.url,
+    prTitle: event.pr.title,
+    prDescription: event.pr.description,
+    ...(event.commentKey ? { commentKey: event.commentKey } : {}),
+    ...(event.forceFull ? { forceFull: true } : {}),
+  });
 }
 
 export async function startWebhookServer(options: WebhookServerOptions): Promise<void> {
@@ -146,18 +172,7 @@ export async function startWebhookServer(options: WebhookServerOptions): Promise
         await actionStore.write({
           workItemId: 0,
           type: 'review-pr',
-          feedback: JSON.stringify({
-            prId: event.pr.id,
-            repoKey: repo.key,
-            repositoryId: event.pr.repositoryId,
-            project: event.pr.project,
-            sourceBranch: event.pr.sourceBranch,
-            targetBranch: event.pr.targetBranch,
-            prUrl: event.pr.url,
-            prTitle: event.pr.title,
-            prDescription: event.pr.description,
-            ...(event.commentKey ? { commentKey: event.commentKey } : {}),
-          }),
+          feedback: buildReviewPrActionFeedback(event, repo.key),
           createdAt: new Date().toISOString(),
         });
 

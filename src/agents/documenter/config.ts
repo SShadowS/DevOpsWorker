@@ -25,6 +25,12 @@ export function createDocumenterConfig(config: PipelineConfig): AgentConfig<type
     ],
     outputSchema: WorkItemUpdateSchema,
     allowedTools: [...TOOL_SETS.fsReadOnly, ...MCP_TOOLS.zendeskReadOnly],
+    // Summarises a finished work item into a structured update — it reads and
+    // reports, nothing else. `Bash` is denied too: across its recorded runs the
+    // documenter issued no tool calls at all, so nothing depends on a shell.
+    // `REPL`: a potential bypass of the mutation denials, sandbox unestablished,
+    // zero recorded usage — denied because it is free, not because it is proven.
+    disallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit', 'REPL'],
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),
     },

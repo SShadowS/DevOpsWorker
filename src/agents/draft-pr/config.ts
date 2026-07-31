@@ -27,6 +27,12 @@ export function createDraftPRConfig(config: PipelineConfig): AgentConfig<typeof 
     outputSchema: DraftPullRequestSchema,
     // Needs DevOps write access for PR creation, plus Bash for git read
     allowedTools: ['Bash', 'Read', 'mcp__azureDevOps__create_pull_request', 'mcp__azureDevOps__update_pull_request', 'mcp__azureDevOps__list_pull_requests'],
+    // Opens the PR from an already-committed branch. `Bash` is load-bearing (git),
+    // but it has no reason to change a file: the commit it publishes is the
+    // coder's, and an edit here would land in the PR unreviewed.
+    // `REPL`: a potential bypass of the mutation denials, sandbox unestablished,
+    // zero recorded usage — denied because it is free, not because it is proven.
+    disallowedTools: ['Write', 'Edit', 'NotebookEdit', 'REPL'],
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),
     },

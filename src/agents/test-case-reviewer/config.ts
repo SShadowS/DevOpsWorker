@@ -23,7 +23,10 @@ export function createTestCaseReviewerConfig(config: PipelineConfig): AgentConfi
     ],
     outputSchema: TestCaseReviewSchema,
     allowedTools: [...TOOL_SETS.fsReadOnlyWithLSP, ...MCP_TOOLS.zendeskReadOnly],
-    disallowedTools: ['Bash'],
+    // Read-only reviewer — it judges test cases, it does not edit them.
+    // `REPL`: a potential bypass of the mutation denials, sandbox unestablished,
+    // zero recorded usage — denied because it is free, not because it is proven.
+    disallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit', 'REPL'],
     plugins: [resolveAlLspPlugin()].filter(Boolean) as SdkPluginConfig[],
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),

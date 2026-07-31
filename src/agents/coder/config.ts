@@ -325,6 +325,10 @@ export function createCoderConfig(config: PipelineConfig): AgentConfig<typeof Ch
     ],
     outputSchema: ChangesetSchema,
     allowedTools: [...TOOL_SETS.fsAndBashWithLSP, TOOLS.Task, ...MCP_TOOLS.zendeskReadOnly, ...MCP_TOOLS.pipelinesWithTrigger, ...MCP_TOOLS.workItemRead, ...BC_MCP_TOOLS, ...OBJID_MCP_TOOLS],
+    // The one agent that exists to change the repo: `Write`, `Edit`, `Bash` and
+    // `Task` are all load-bearing and none may be denied. `NotebookEdit` is the
+    // sole exception — the target repos are AL, and there are no notebooks.
+    disallowedTools: ['NotebookEdit'],
     plugins: [resolveAlLspPlugin()].filter(Boolean) as SdkPluginConfig[],
     agents: { 'ci-waiter': ciWaiterAgent },
     hooks: { PreToolUse: [ciWaiterGuardHook, fileOpGuardHook] },

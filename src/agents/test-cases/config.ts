@@ -27,6 +27,15 @@ export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeo
     ],
     outputSchema: TestCasesOutputSchema,
     allowedTools: [...TOOL_SETS.fsReadOnlyWithLSP, ...MCP_TOOLS.zendeskReadOnly, ...BC_MCP_TOOLS],
+    // Produces test cases as structured output, never as files.
+    //
+    // `Bash` is deliberately NOT denied, unlike its sibling test-case-reviewer:
+    // this agent's recorded runs made 15 Bash calls and every one was read-only
+    // navigation (`grep`, `find`, `git log`). Denying it would remove a capability
+    // that is demonstrably in use, to no benefit the mutating denials don't give.
+    // `REPL`: a potential bypass of the mutation denials, sandbox unestablished,
+    // zero recorded usage — denied because it is free, not because it is proven.
+    disallowedTools: ['Write', 'Edit', 'NotebookEdit', 'REPL'],
     plugins: [resolveAlLspPlugin()].filter(Boolean) as SdkPluginConfig[],
     mcpServers: (state: PipelineState) => {
       const servers: Record<string, McpServerConfig> = {

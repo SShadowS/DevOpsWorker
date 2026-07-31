@@ -67,6 +67,30 @@ describe('rowToPRReview', () => {
     });
     expect(row.inlineThreads).toBeNull();
   });
+
+  test('maps review_path to reviewPath', () => {
+    const row = rowToPRReview({
+      id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',
+      title: null, recommendation: 'approve', findings: null, findings_count: null,
+      comment_id: null, cost_usd: null, duration_ms: null, turns: null,
+      tool_calls: null, session_id: null, error: null, review_body: null,
+      created_at: '2026-01-01T00:00:00Z', action_id: null, review_run_id: 'pr42-abc',
+      review_path: 'sanity:52117',
+    });
+    expect(row.reviewPath).toBe('sanity:52117');
+  });
+
+  test('maps a null review_path to null — rows predating the backport path', () => {
+    const row = rowToPRReview({
+      id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',
+      title: null, recommendation: 'approve', findings: null, findings_count: null,
+      comment_id: null, cost_usd: null, duration_ms: null, turns: null,
+      tool_calls: null, session_id: null, error: null, review_body: null,
+      created_at: '2026-01-01T00:00:00Z', action_id: null, review_run_id: 'pr42-abc',
+      review_path: null,
+    });
+    expect(row.reviewPath).toBeNull();
+  });
 });
 
 describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
@@ -80,6 +104,12 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
     expect(src).toContain('inline_threads');
   });
 
+  test('the INSERT names review_path', () => {
+    const insert = /INSERT INTO pr_reviews \(([^)]*)\)/.exec(src);
+    expect(insert).not.toBeNull();
+    expect(insert![1]).toContain('review_path');
+  });
+
   test('column count matches placeholder count in the INSERT', () => {
     const columnMatch = src.match(/INSERT INTO pr_reviews \(([^)]*)\)/);
     expect(columnMatch).not.toBeNull();
@@ -91,6 +121,27 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
 
     expect(columns).toContain('findings_list');
     expect(columns).toContain('inline_threads');
+    expect(columns).toContain('review_path');
     expect(placeholderCount).toBe(columns.length);
+  });
+});
+
+describe('PgPRReviewStore.findLatestByPrId — excludes the sanity path', () => {
+  // Caught by review: without this, a sanity review OF a PR counts as that PR's
+  // own "deep review" — on a release-line chain A -> B -> C, the sanity review
+  // that ported A's fix onto B would make C's lookup of B report `reviewed`,
+  // suppressing the "no recorded deep review anywhere" warning for a change that
+  // was never actually deep-reviewed. No live-DB test (DATABASE_URL points at
+  // production and nothing under tests/ guards it) — pinned in the SQL text.
+  const src = readFileSync(fileURLToPath(new URL('../../src/db/pg-pr-review-store.ts', import.meta.url)), 'utf-8');
+
+  test('the query excludes rows recorded on the sanity path', () => {
+    const method = src.match(/async findLatestByPrId\(prId: number\)[\s\S]*?\n {2}\}/);
+    expect(method).not.toBeNull();
+    const body = method![0];
+    expect(body).toContain('WHERE pr_id = ${prId}');
+    // NULL must count as a full review too — every row predating this feature
+    // has no review_path at all.
+    expect(body).toMatch(/review_path IS NULL OR review_path LIKE 'full:%'/);
   });
 });

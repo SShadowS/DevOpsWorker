@@ -28,11 +28,18 @@ const SEVERITY_ORDER: Record<string, number> = { critical: 0, major: 1 };
  *   inline-eligible ones. A finding downgraded to minor this round, or
  *   re-raised without a line, is still detected; replying "not detected" to
  *   its thread would be a false statement.
+ * - `opts.suppressStale` skips the stale loop entirely. A backport sanity
+ *   review never examines style, performance or security, so on a PR that
+ *   already carries full-review threads for those domains, its first finding
+ *   of any kind would otherwise stamp all of them "not detected" — a false
+ *   statement posted to a live PR. The finding it DOES raise still creates or
+ *   updates its own thread; only the "not detected" side is suppressed.
  */
 export function reconcileFindings(
   findings: PRFinding[],
   threads: ReviewThread[],
   cap = 5,
+  opts: { suppressStale?: boolean } = {},
 ): ThreadAction[] {
   const existing = new Map<string, ReviewThread>();
   for (const t of threads) {
@@ -82,13 +89,18 @@ export function reconcileFindings(
     }
   }
 
-  for (const [key, thread] of existing) {
-    if (detected.has(key)) continue;
-    // Do not append a second "not detected" notice to a thread that already ends
-    // with one. Without this the 37-review PR accrues one reply per thread per
-    // review forever, and the design's "bounded" promise is false.
-    if (thread.lastCommentIsStaleNotice) continue;
-    actions.push({ kind: 'stale', threadId: thread.id, key });
+  // A backport sanity review examines only the port — it never looks at style,
+  // performance or security, so it has no basis to declare a finding from a full
+  // review "not detected". Emitting one would post a false statement to the PR.
+  if (!opts.suppressStale) {
+    for (const [key, thread] of existing) {
+      if (detected.has(key)) continue;
+      // Do not append a second "not detected" notice to a thread that already ends
+      // with one. Without this the 37-review PR accrues one reply per thread per
+      // review forever, and the design's "bounded" promise is false.
+      if (thread.lastCommentIsStaleNotice) continue;
+      actions.push({ kind: 'stale', threadId: thread.id, key });
+    }
   }
 
   return actions;

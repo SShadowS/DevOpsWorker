@@ -141,7 +141,9 @@ To iterate on agent behavior: edit the agent's `CLAUDE.md` — no TypeScript cha
 
 ### Tool Scoping
 
-Each agent's `allowedTools` restricts what it can access. Tool sets are defined in `src/sdk/mcp-configs.ts` (e.g., `fsReadOnly`, `fsReadWrite`, `fsAndBash`, plus LSP variants `fsReadOnlyWithLSP`, `fsAndBashWithLSP`). Analyzer gets read-only + LSP; Coder gets full bash + git + LSP. The `Skill` tool is automatically enabled for agents with `.claude/skills/`.
+Each agent declares `allowedTools` — the SDK's list of tools auto-approved *without prompting*. It is **not** an availability restriction: `runAgent` passes `permissionMode: 'bypassPermissions'` and no `tools:` option, so a tool left out of `allowedTools` stays callable. `disallowedTools` is what actually removes a tool — a denied tool is absent from the model's context, and an attempt to call it returns `No such tool available`.
+
+Tool sets are defined in `src/sdk/mcp-configs.ts` (e.g., `fsReadOnly`, `fsReadWrite`, `fsAndBash`, plus LSP variants `fsReadOnlyWithLSP`, `fsAndBashWithLSP`). Analyzer gets read-only + LSP; Coder gets full bash + git + LSP. Agents that only read additionally **deny** the mutating tools (`Write`, `Edit`, `NotebookEdit`) rather than merely omitting them; `tests/agents/tool-scoping.test.ts` pins that invariant. The `Skill` tool is automatically enabled for agents with `.claude/skills/`.
 
 ### Checkpoint Rewind
 

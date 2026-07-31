@@ -112,6 +112,10 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS findings_list JSONB;
 -- Counters from posting Critical/Major findings as inline PR threads. Null when
 -- nothing was attempted (noPost mode or no findings), not a zeroed result.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS inline_threads JSONB;
+-- Which reviewer ran: 'sanity:<sourcePrId>' for the cheap backport path, or
+-- 'full:<reason>' naming why the full path was chosen. Null for rows recorded
+-- before this routing existed.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_path TEXT;
 `;
 
 /**
