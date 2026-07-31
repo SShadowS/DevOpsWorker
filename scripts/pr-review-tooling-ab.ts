@@ -238,7 +238,19 @@ for (let r = 0; r < runs; r++) {
       stateVolume,
       workspaceVolume: volume,
       imageName,
-      extraArgs: ['--pr-id', String(prId), '--repo-id', repositoryId],
+      // `--full` pins every arm to the seven-agent reviewer. Since the cherry-pick
+      // sanity path shipped, `review-pr` routes on the PR's own title/description,
+      // which it reads from the API — so it fires even though this runner passes no
+      // `--pr-title`. A subject PR carrying a cherry-pick trailer would silently run
+      // a DIFFERENT agent, single-model, at roughly a twentieth of the cost, in EVERY
+      // arm.
+      //
+      // That is the shape worth guarding against: the arms would still differ from
+      // one another, so nothing would look broken — the numbers would just stop
+      // measuring the levers under test. `forceFull` is the first check in
+      // `chooseReviewPath`, so this short-circuits detection rather than depending on
+      // which PRs are in the subject set today.
+      extraArgs: ['--pr-id', String(prId), '--repo-id', repositoryId, '--full'],
     });
     const nameIdx = args.indexOf('--name');
     if (nameIdx !== -1 && args[nameIdx + 1]) args[nameIdx + 1] = container;
