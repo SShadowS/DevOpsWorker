@@ -280,7 +280,7 @@ export const AGENT_TRIGGERS: Record<string, string[]> = {
   'al-performance-analyzer': ['repeat', 'FindSet', 'FindFirst', 'SetLoadFields', 'CalcFields', 'Commit', 'LockTable', 'SetRange', 'SetFilter'],
   'al-error-pattern-analyzer': ['Error(', 'ErrorInfo', 'FieldError', 'TestField', 'Try', 'GetLastError'],
   'al-integration-analyzer': ['HttpClient', 'IntegrationEvent', 'BusinessEvent', 'EventSubscriber', 'PageType = API', 'PageType=API', 'Job Queue', 'JobQueue', 'Codeunit.Run', 'StartSession'],
-  'al-architecture-analyzer': ['codeunit ', 'interface ', 'implements ', 'table ', 'tableextension '],
+  'al-architecture-analyzer': ['codeunit ', 'interface ', 'implements ', 'table ', 'tableextension ', 'page ', 'pageextension ', 'report ', 'reportextension ', 'query ', 'xmlport ', 'enum ', 'enumextension '],
   'security-edge-case-analyzer': ['Permission', 'DataClassification', 'IsolatedStorage', 'SecurityFiltering', 'PageType = API', 'PageType=API', 'HttpClient', 'InherentPermissions'],
 };
 
@@ -303,6 +303,19 @@ function buildRoutingBlock(): string {
     })
     .join('\n');
 
+  // Only when an active set is actually named above (Task 1's block) is there
+  // anything to reconcile: without it, this table alone already governs Phase 4
+  // and there is no second directive to contradict. With it, Task 1's block reads
+  // as an unconditional imperative ("dispatch these N in parallel") and this
+  // block reads as trigger-gated — landing in the same prompt with nothing
+  // saying which one wins would let a model that follows Task 1's wording
+  // literally dispatch the named set every time, collapsing cells 6/8 into
+  // cell 2's behaviour while looking, from the outside, like routing still ran.
+  const reconciliation = activeSet.length === 0 ? '' : `
+Treat the set named above as the agents available to this run, and this table
+as what decides which of them to dispatch.
+`;
+
   return `
 ${ROUTING_MARKER}
 
@@ -313,7 +326,7 @@ agent when any of its trigger strings appears in the changed files or their diff
 | Agent | Dispatch when the changed code contains |
 |---|---|
 ${rows}
-
+${reconciliation}
 Match case-insensitively on the changed files' source and diffs. When in doubt
 about a trigger, dispatch the agent — a spurious dispatch costs money, a missed
 one costs a finding.

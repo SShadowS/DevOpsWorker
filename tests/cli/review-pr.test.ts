@@ -188,6 +188,37 @@ describe('maybeInjectRouting', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Fix round 1, Important 2: the original list only covered codeunit/interface/
+  // table constructs, so a PR touching only a Page or Report never dispatched
+  // the architecture analyst — a coverage hole, not a routing decision.
+  // -------------------------------------------------------------------------
+  describe('al-architecture-analyzer trigger coverage', () => {
+    const triggers = AGENT_TRIGGERS['al-architecture-analyzer']!;
+    // The exact pre-fix list (this task's original brief value) — reused below
+    // to prove the diffs it fails on are exactly the ones the fix closes.
+    const preFixTriggers = ['codeunit ', 'interface ', 'implements ', 'table ', 'tableextension '];
+    const matches = (list: string[], diff: string) => list.some((t) => diff.toLowerCase().includes(t.toLowerCase()));
+
+    test('covers every AL object type keyword, not just codeunit/interface/table', () => {
+      for (const kw of ['page ', 'pageextension ', 'report ', 'reportextension ', 'query ', 'xmlport ', 'enum ', 'enumextension ']) {
+        expect(triggers).toContain(kw);
+      }
+    });
+
+    test('a Page-only diff now dispatches al-architecture-analyzer — it did not before this fix', () => {
+      const pageOnlyDiff = 'page 50100 "My Page"\n{\n    layout\n    {\n    }\n}\n';
+      expect(matches(triggers, pageOnlyDiff)).toBe(true);
+      expect(matches(preFixTriggers, pageOnlyDiff)).toBe(false);
+    });
+
+    test('a Report-only diff now dispatches al-architecture-analyzer — it did not before this fix', () => {
+      const reportOnlyDiff = 'report 50100 "My Report"\n{\n    dataset\n    {\n    }\n}\n';
+      expect(matches(triggers, reportOnlyDiff)).toBe(true);
+      expect(matches(preFixTriggers, reportOnlyDiff)).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // The apply branch — same tracked file `maybeRestrictAgentSet` writes to
   // (src/agents/pr-reviewer/CLAUDE.md). Snapshot/restore around every test so
   // the suite leaves the working tree exactly as clean as it found it — same
@@ -260,6 +291,54 @@ describe('maybeInjectRouting', () => {
         expect(routingBlock).toContain('al-performance-analyzer');
         expect(routingBlock).not.toContain('al-integration-analyzer');
         expect(routingBlock).not.toContain('security-edge-case-analyzer');
+      } finally {
+        if (savedSet === undefined) delete process.env['PR_REVIEW_AGENT_SET'];
+        else process.env['PR_REVIEW_AGENT_SET'] = savedSet;
+      }
+    });
+
+    // ---------------------------------------------------------------------
+    // Fix round 1, Important 1: Task 1's block reads as an unconditional
+    // imperative ("dispatch these N in parallel") and this block reads as
+    // trigger-gated. Landing in the same prompt with nothing saying which one
+    // wins would let a model follow Task 1's wording literally and dispatch
+    // the named set every time — cells 6/8 would collapse into cell 2's
+    // behaviour while looking, from the outside, like routing still ran.
+    // ---------------------------------------------------------------------
+    test('reconciles with the named agent set — states the set is the ceiling and the table is the decision, with no negative framing', () => {
+      const savedSet = process.env['PR_REVIEW_AGENT_SET'];
+      process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator,al-performance-analyzer';
+      process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+      try {
+        maybeInjectRouting();
+        const updated = readFileSync(promptPath, 'utf-8');
+        const routingBlock = updated.slice(updated.indexOf(ROUTING_MARKER));
+        expect(routingBlock).toContain(
+          'Treat the set named above as the agents available to this run, and this table',
+        );
+        expect(routingBlock).toContain('as what decides which of them to dispatch.');
+        // Same broader regex SUBAGENT_TOOL_RULE's sibling test uses, rather than
+        // two literal substrings — negative framing is measured on this codebase
+        // to suppress the steered behaviour outright instead of redirecting it.
+        expect(routingBlock).not.toMatch(/\bNEVER\b|\bDo NOT\b|\bdon't use\b/i);
+      } finally {
+        if (savedSet === undefined) delete process.env['PR_REVIEW_AGENT_SET'];
+        else process.env['PR_REVIEW_AGENT_SET'] = savedSet;
+      }
+    });
+
+    test('omits the reconciliation sentence when routing runs without a named agent set — there is nothing to reconcile', () => {
+      // Without PR_REVIEW_AGENT_SET, Task 1's block does not exist in the prompt
+      // at all, so "the set named above" would refer to nothing — the sentence
+      // must not print in this case.
+      const savedSet = process.env['PR_REVIEW_AGENT_SET'];
+      delete process.env['PR_REVIEW_AGENT_SET'];
+      process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+      try {
+        maybeInjectRouting();
+        const updated = readFileSync(promptPath, 'utf-8');
+        const routingBlock = updated.slice(updated.indexOf(ROUTING_MARKER));
+        expect(routingBlock).not.toContain('Treat the set named above');
       } finally {
         if (savedSet === undefined) delete process.env['PR_REVIEW_AGENT_SET'];
         else process.env['PR_REVIEW_AGENT_SET'] = savedSet;
