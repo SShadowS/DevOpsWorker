@@ -369,4 +369,10 @@ describe('container env allowlist', () => {
     const env = getPrReviewContainerEnv();
     expect(env['PR_REVIEW_AGENT_SET']).toBe('code-review-validator');
   });
+
+  test('forwards PR_REVIEW_AGENT_ROUTING into the container env', () => {
+    process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+    const env = getPrReviewContainerEnv();
+    expect(env['PR_REVIEW_AGENT_ROUTING']).toBe('1');
+  });
 });

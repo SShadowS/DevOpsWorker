@@ -8,6 +8,9 @@ import {
   buildAgentSetBlock,
   AGENT_SET_MARKER,
   SUBAGENT_TOOL_RULE,
+  maybeInjectRouting,
+  AGENT_TRIGGERS,
+  ROUTING_MARKER,
   applyInlineFindings,
   buildPriorFindingsBlock,
   parseReviewPrArgs,
@@ -148,6 +151,119 @@ describe('maybeRestrictAgentSet', () => {
       const updated = readFileSync(promptPath, 'utf-8');
       const occurrences = updated.split(AGENT_SET_MARKER).length - 1;
       expect(occurrences).toBe(1);
+    });
+  });
+});
+
+describe('maybeInjectRouting', () => {
+  withEnv('PR_REVIEW_AGENT_ROUTING');
+
+  test('is a no-op unless set to 1', () => {
+    delete process.env['PR_REVIEW_AGENT_ROUTING'];
+    expect(maybeInjectRouting()).toBe(0);
+    process.env['PR_REVIEW_AGENT_ROUTING'] = '0';
+    expect(maybeInjectRouting()).toBe(0);
+  });
+
+  test('every always-on agent has an empty trigger list', () => {
+    expect(AGENT_TRIGGERS['code-review-validator']).toEqual([]);
+  });
+
+  test('conditional agents carry AL-specific triggers', () => {
+    expect(AGENT_TRIGGERS['al-integration-analyzer']).toContain('HttpClient');
+    expect(AGENT_TRIGGERS['al-performance-analyzer']).toContain('SetLoadFields');
+    expect(AGENT_TRIGGERS['al-error-pattern-analyzer']).toContain('FieldError');
+  });
+
+  test('all seven agents appear exactly once', () => {
+    expect(Object.keys(AGENT_TRIGGERS).sort()).toEqual([
+      'al-architecture-analyzer',
+      'al-error-pattern-analyzer',
+      'al-integration-analyzer',
+      'al-performance-analyzer',
+      'code-quality-assessor',
+      'code-review-validator',
+      'security-edge-case-analyzer',
+    ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // The apply branch — same tracked file `maybeRestrictAgentSet` writes to
+  // (src/agents/pr-reviewer/CLAUDE.md). Snapshot/restore around every test so
+  // the suite leaves the working tree exactly as clean as it found it — same
+  // reasoning and same file as Task 1's write-path block above.
+  // -------------------------------------------------------------------------
+  describe('the write path (mutates the real orchestrator prompt, restored after each test)', () => {
+    const promptPath = fileURLToPath(new URL('../../src/agents/pr-reviewer/CLAUDE.md', import.meta.url));
+    let original: string;
+
+    beforeEach(() => { original = readFileSync(promptPath, 'utf-8'); });
+    afterEach(() => { writeFileSync(promptPath, original); });
+
+    test('applies the block and reports 1 file modified', () => {
+      // Fails if the final `return 1` were flipped to `return 0` — the write
+      // would still happen but the caller would be told it didn't.
+      process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+      const result = maybeInjectRouting();
+      expect(result).toBe(1);
+
+      const updated = readFileSync(promptPath, 'utf-8');
+      expect(updated).toContain(ROUTING_MARKER);
+      expect(updated).toContain('code-review-validator');
+      expect(updated).toContain('al-performance-analyzer');
+    });
+
+    test('appends after the existing prompt instead of clobbering it', () => {
+      // Fails if `writeFileSync(promptPath, \`${content.trimEnd()}\n...\`)` lost
+      // the `content.trimEnd()}\n` prefix and wrote only the new block — the
+      // same regression class Task 1's write path guards against.
+      process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+      maybeInjectRouting();
+
+      const updated = readFileSync(promptPath, 'utf-8');
+      expect(original).toContain('Phase 4: Parallel Analysis with Specialized Agents');
+      expect(updated).toContain('Phase 4: Parallel Analysis with Specialized Agents');
+      // The pre-existing content must still come BEFORE the appended block —
+      // proof this is an append, not a same-position overwrite.
+      expect(updated.indexOf('Phase 4: Parallel Analysis with Specialized Agents'))
+        .toBeLessThan(updated.indexOf(ROUTING_MARKER));
+    });
+
+    test('a second call is idempotent — the marker appears exactly once and the second call reports 0', () => {
+      // Fails if the `if (content.includes(ROUTING_MARKER)) return 0;` guard
+      // were removed or broken — the second call would append a duplicate block
+      // and report 1 again instead of 0.
+      process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+      const first = maybeInjectRouting();
+      const second = maybeInjectRouting();
+      expect(first).toBe(1);
+      expect(second).toBe(0);
+
+      const updated = readFileSync(promptPath, 'utf-8');
+      const occurrences = updated.split(ROUTING_MARKER).length - 1;
+      expect(occurrences).toBe(1);
+    });
+
+    test('composes with PR_REVIEW_AGENT_SET — the rendered table is filtered to the active set', () => {
+      // The brief's own reasoning for why this matters: cells 6 and 8 set both
+      // env vars, and this block is appended AFTER the agent-set block. An
+      // unfiltered table would silently re-add an agent Task 1's block just
+      // excluded, and both interaction cells the matrix exists for would void.
+      const savedSet = process.env['PR_REVIEW_AGENT_SET'];
+      process.env['PR_REVIEW_AGENT_SET'] = 'code-review-validator,al-performance-analyzer';
+      process.env['PR_REVIEW_AGENT_ROUTING'] = '1';
+      try {
+        maybeInjectRouting();
+        const updated = readFileSync(promptPath, 'utf-8');
+        const routingBlock = updated.slice(updated.indexOf(ROUTING_MARKER));
+        expect(routingBlock).toContain('code-review-validator');
+        expect(routingBlock).toContain('al-performance-analyzer');
+        expect(routingBlock).not.toContain('al-integration-analyzer');
+        expect(routingBlock).not.toContain('security-edge-case-analyzer');
+      } finally {
+        if (savedSet === undefined) delete process.env['PR_REVIEW_AGENT_SET'];
+        else process.env['PR_REVIEW_AGENT_SET'] = savedSet;
+      }
     });
   });
 });

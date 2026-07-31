@@ -264,6 +264,99 @@ export function maybeRestrictAgentSet(): number {
   return 1;
 }
 
+/** Marker identifying the routing block, for idempotency. */
+export const ROUTING_MARKER = '## Sub-agent routing (applies during Phase 4)';
+
+/**
+ * Diff substrings that make each sub-agent relevant.
+ *
+ * An empty list means always-on: `code-review-validator` reviews correctness on
+ * every change, so it has no trigger. The rest are AL constructs that either
+ * appear in a diff or do not.
+ */
+export const AGENT_TRIGGERS: Record<string, string[]> = {
+  'code-review-validator': [],
+  'code-quality-assessor': [],
+  'al-performance-analyzer': ['repeat', 'FindSet', 'FindFirst', 'SetLoadFields', 'CalcFields', 'Commit', 'LockTable', 'SetRange', 'SetFilter'],
+  'al-error-pattern-analyzer': ['Error(', 'ErrorInfo', 'FieldError', 'TestField', 'Try', 'GetLastError'],
+  'al-integration-analyzer': ['HttpClient', 'IntegrationEvent', 'BusinessEvent', 'EventSubscriber', 'PageType = API', 'PageType=API', 'Job Queue', 'JobQueue', 'Codeunit.Run', 'StartSession'],
+  'al-architecture-analyzer': ['codeunit ', 'interface ', 'implements ', 'table ', 'tableextension '],
+  'security-edge-case-analyzer': ['Permission', 'DataClassification', 'IsolatedStorage', 'SecurityFiltering', 'PageType = API', 'PageType=API', 'HttpClient', 'InherentPermissions'],
+};
+
+function buildRoutingBlock(): string {
+  // Render ONLY agents in the active set. Cells 6 (`routed+no-cqa`) and 8 (`lean`)
+  // set PR_REVIEW_AGENT_SET *and* routing; because `code-quality-assessor` has an
+  // empty trigger list it renders as "Always — dispatch on every review", and this
+  // block is appended after the agent-set block. The excluded agent would be
+  // re-added by the later instruction, `checkArmCompliance` would see it run, and
+  // BOTH interaction cells — the ones the matrix exists for — would void.
+  const activeSet = (process.env['PR_REVIEW_AGENT_SET'] ?? '')
+    .split(',').map((a) => a.trim()).filter(Boolean);
+  const rows = Object.entries(AGENT_TRIGGERS)
+    .filter(([agent]) => activeSet.length === 0 || activeSet.includes(agent))
+    .map(([agent, triggers]) => {
+      const cond = triggers.length === 0
+        ? 'Always — dispatch on every review'
+        : triggers.map((t) => `\`${t}\``).join(', ');
+      return `| \`${agent}\` | ${cond} |`;
+    })
+    .join('\n');
+
+  return `
+${ROUTING_MARKER}
+
+Phase 4 dispatches the full roster. For THIS run, choose the roster from the diff
+instead: after Phase 3 you hold every changed file's full source, so dispatch an
+agent when any of its trigger strings appears in the changed files or their diffs.
+
+| Agent | Dispatch when the changed code contains |
+|---|---|
+${rows}
+
+Match case-insensitively on the changed files' source and diffs. When in doubt
+about a trigger, dispatch the agent — a spurious dispatch costs money, a missed
+one costs a finding.
+
+Record your routing decision as one line before dispatching, so it appears in the
+run log: \`ROUTING: dispatched <comma-separated agents> (skipped: <agents>)\`.
+
+Everything else in Phase 4, 5 and 6 is unchanged. A domain with no agent this run
+has no findings; treat it as Phase 5 step 6 treats an agent that returned nothing.
+`;
+}
+
+/**
+ * EVAL-ONLY: replace the fixed roster with diff-driven routing.
+ *
+ * Guarded so this is a TRUE NO-OP unless `PR_REVIEW_AGENT_ROUTING=1`.
+ *
+ * Composes with `PR_REVIEW_AGENT_SET`: when both are set, Task 1's block narrows
+ * the roster and this block routes WITHIN it — the table is filtered to the active
+ * set so the two instructions cannot disagree. Do not "resolve overlap by ordering"
+ * here: this block is appended last, so an unfiltered table would silently re-add
+ * an excluded agent rather than defer to the earlier directive.
+ *
+ * Returns the number of files modified (0 when the env var is not `1`).
+ */
+export function maybeInjectRouting(): number {
+  if (process.env['PR_REVIEW_AGENT_ROUTING'] !== '1') return 0;
+
+  const cliDir = dirname(fileURLToPath(import.meta.url));
+  const promptPath = resolve(cliDir, '..', 'agents', 'pr-reviewer', 'CLAUDE.md');
+  if (!existsSync(promptPath)) {
+    console.log(`[eval] PR_REVIEW_AGENT_ROUTING set but orchestrator prompt not found at ${promptPath} — skipping`);
+    return 0;
+  }
+
+  const content = readFileSync(promptPath, 'utf-8');
+  if (content.includes(ROUTING_MARKER)) return 0;
+  writeFileSync(promptPath, `${content.trimEnd()}\n${buildRoutingBlock()}`);
+
+  console.log('[eval] injected diff-trigger routing into the orchestrator prompt');
+  return 1;
+}
+
 /**
  * Render the marker + severity-labeled body shared by a thread's creation and
  * its later update — the only difference between the two call sites is which
@@ -494,6 +587,7 @@ export async function reviewPR(args: string[]): Promise<void> {
   maybeOverrideSubAgentModel();
   maybeInjectToolRule();
   maybeRestrictAgentSet();
+  maybeInjectRouting();
 
   const repo = findRepoByRepositoryId(repoId);
   if (!repo) {
