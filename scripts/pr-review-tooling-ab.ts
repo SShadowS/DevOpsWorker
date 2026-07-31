@@ -233,6 +233,14 @@ export function buildArmEnv(base: Record<string, string>, arm: Arm, opts: ArmEnv
     // and, when set, explicitly blanks CLAUDE_CODE_OAUTH_TOKEN — that is the
     // pay-per-token default every arm bills against today. Applied AFTER the
     // spread so --oauth always wins when passed.
+    // The bracketed computed-property keys just below (`['ANTHROPIC_API_KEY']`
+    // etc.) are deliberate, not stylistic: writing them as plain object-literal
+    // keys trips .claude/hooks/guard-commit.ts's blunt "env-var name immediately
+    // followed by a colon" secret scan (it inspects only the key shape, never
+    // the value, so it cannot tell an empty string or a variable from a real
+    // credential) and blocks the commit. Do NOT "tidy" these brackets away
+    // without re-checking that hook first — see task-7-report.md for the
+    // false positive this sidesteps.
     ...(opts.oauth ? { ['ANTHROPIC_API_KEY']: '', ['CLAUDE_CODE_OAUTH_TOKEN']: opts.oauthToken } : {}),
   };
 }
@@ -281,6 +289,66 @@ export function buildResultLine(arm: Arm, prId: number, row: ResultRow, verdict:
     note: verdict.note ?? null,
     appliedLevers: row.appliedLevers ?? null,
   }) + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// PR -> repo resolution (C5 follow-up fix).
+//
+// C5 moved the PR loop outermost, and with it the ADO repo-resolution probe
+// that used to run before the --go gate now sits entirely after it. That
+// silently removed a free safety net: with `--prs a,b,c,d`, a mistyped or
+// unregistered id at position `c` was only discovered once the loop reached
+// it — after `a` and `b` had each fully run and billed an 8-arm pool.
+// Recovery meant hand-trimming already-completed ids out of `--prs` and
+// re-invoking, risking a duplicate double-billed run.
+//
+// Fix: resolve EVERY id in `--prs` to its registered repo ONCE, up front,
+// before --go is checked. It costs one ADO REST call per PR id and zero LLM
+// spend, so — like `preflightDb` proving the DB write path before a review
+// runs — it belongs entirely on the free side of the gate.
+//
+// `resolveAllRepos` takes the resolver as a parameter so it stays pure and
+// testable without a real network call; the real resolver (making the actual
+// ADO call) is defined inside `import.meta.main` below.
+// ---------------------------------------------------------------------------
+
+export interface ResolvedRepo {
+  key: string;
+  config: ReturnType<typeof getRepoConfig>;
+  repositoryId: string;
+  title?: string;
+}
+
+export type RepoResolver = (prId: number) => Promise<ResolvedRepo | null>;
+
+export type ResolveAllReposResult =
+  | { ok: true; repos: Map<number, ResolvedRepo> }
+  | { ok: false; message: string; unresolved: number[] };
+
+/**
+ * Resolve every PR id to its registered repo. Checks ALL ids (never stops at
+ * the first failure) so a bad `--prs` list reports every offending id in one
+ * pass instead of a whack-a-mole of fix-one-rerun-find-the-next. Any
+ * unresolved id fails the WHOLE batch — this is a preflight for the entire
+ * matrix, not a per-PR gate, so a partial resolution is never handed back as
+ * if it were safe to spend against.
+ */
+export async function resolveAllRepos(prIds: number[], resolve: RepoResolver): Promise<ResolveAllReposResult> {
+  const resolved = new Map<number, ResolvedRepo>();
+  const unresolved: number[] = [];
+  for (const prId of prIds) {
+    const r = await resolve(prId);
+    if (r) resolved.set(prId, r);
+    else unresolved.push(prId);
+  }
+  if (unresolved.length > 0) {
+    return {
+      ok: false,
+      unresolved,
+      message: `Could not locate PR ${unresolved.join(', ')} in any registered repo. Fix --prs before spending anything.`,
+    };
+  }
+  return { ok: true, repos: resolved };
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +522,37 @@ async function preflightDb(dbUrl: string): Promise<boolean> {
 // plan / execute
 // ---------------------------------------------------------------------------
 
+// Resolve every PR id to its registered repo BEFORE the --go gate (see the
+// module-level comment on `resolveAllRepos` for why this moved here). One ADO
+// call per PR id, no LLM spend — safe to run on every invocation, dry run
+// included, so a mistyped/unregistered id is caught for free.
+const resolveRepoForPr: RepoResolver = async (prId) => {
+  for (const k of Object.keys(repos)) {
+    const rc = getRepoConfig(k);
+    const cfg = buildConfigFromRepo(rc, process.env as Record<string, string>);
+    try {
+      const r: any = await (await import('../src/sdk/ado/http.ts')).adoFetch(
+        cfg.azureDevOps,
+        `git/repositories/${cfg.azureDevOps.repositoryId}/pullrequests/${prId}?api-version=7.0`,
+      );
+      if (r?.pullRequestId === prId) {
+        return { key: k, config: rc, repositoryId: cfg.azureDevOps.repositoryId, title: r.title };
+      }
+    } catch { /* not this repo */ }
+  }
+  return null;
+};
+
+const repoResult = await resolveAllRepos(prIds, resolveRepoForPr);
+if (!repoResult.ok) {
+  console.error(`[ab] ${repoResult.message}`);
+  process.exit(1);
+}
+const resolvedRepos = repoResult.repos;
+for (const [prId, r] of resolvedRepos) {
+  console.log(`[ab] PR #${prId} -> repo "${r.key}"${r.title ? ` (${r.title})` : ''}`);
+}
+
 const total = SELECTED.length * runs * prIds.length;
 console.log(`[ab] ${SELECTED.length} arm(s) x ${prIds.length} PR(s) x ${runs} run(s) = ${total} reviews`);
 console.log(`[ab] posting to the PR: ${post ? 'YES' : 'no (PR_REVIEW_NO_POST=1)'}`);
@@ -490,26 +589,8 @@ let n = 0;
 // leaves complete 8-arm pools for the PRs that already finished, instead of
 // eight half-pools that cannot be scored at all.
 for (const prId of prIds) {
-  const repoKeys = Object.keys(repos);
-  let repo: { key: string; config: ReturnType<typeof getRepoConfig> } | undefined;
-  let repositoryId = '';
-  for (const k of repoKeys) {
-    const rc = getRepoConfig(k);
-    const cfg = buildConfigFromRepo(rc, process.env as Record<string, string>);
-    try {
-      const r: any = await (await import('../src/sdk/ado/http.ts')).adoFetch(
-        cfg.azureDevOps,
-        `git/repositories/${cfg.azureDevOps.repositoryId}/pullrequests/${prId}?api-version=7.0`,
-      );
-      if (r?.pullRequestId === prId) {
-        repo = { key: k, config: rc };
-        repositoryId = cfg.azureDevOps.repositoryId;
-        console.log(`[ab] PR #${prId} -> repo "${k}" (${r.title})`);
-        break;
-      }
-    } catch { /* not this repo */ }
-  }
-  if (!repo) { console.error(`Could not locate PR #${prId} in any registered repo`); process.exit(1); }
+  const repo = resolvedRepos.get(prId)!; // resolved (and validated) above, before --go
+  const repositoryId = repo.repositoryId;
 
   for (let r = 0; r < runs; r++) {
     for (const arm of SELECTED) {

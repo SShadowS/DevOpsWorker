@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   argFrom,
   hasFrom,
@@ -14,7 +15,10 @@ import {
   buildArmEnv,
   matchesArmRow,
   buildResultLine,
+  resolveAllRepos,
   type Arm,
+  type ResolvedRepo,
+  type RepoResolver,
 } from '../../scripts/pr-review-tooling-ab.ts';
 
 // Importing this module must NEVER open a DB connection, spawn a container,
@@ -347,5 +351,93 @@ describe('buildResultLine', () => {
     );
     expect(line.endsWith('\n')).toBe(true);
     expect(line.trim().split('\n')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR -> repo resolution (fix round 1: resolve every id up front, before --go)
+// ---------------------------------------------------------------------------
+
+describe('resolveAllRepos', () => {
+  const repoA: ResolvedRepo = { key: 'repoA', config: {} as ResolvedRepo['config'], repositoryId: 'guid-a' };
+  const repoB: ResolvedRepo = { key: 'repoB', config: {} as ResolvedRepo['config'], repositoryId: 'guid-b' };
+
+  /** A fake resolver — no network, no ADO, no real I/O — mapping known PR ids to canned repos. */
+  const fakeResolver = (known: Record<number, ResolvedRepo>): RepoResolver => async (prId) => known[prId] ?? null;
+
+  test('every id resolves: returns ok with all of them mapped', async () => {
+    const result = await resolveAllRepos([100, 200], fakeResolver({ 100: repoA, 200: repoB }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.repos.get(100)).toEqual(repoA);
+      expect(result.repos.get(200)).toEqual(repoB);
+    }
+  });
+
+  test(
+    'C5 follow-up: an unresolvable id in the middle of --prs is rejected, naming it, before any spend path is reachable',
+    async () => {
+      const result = await resolveAllRepos([100, 999, 200], fakeResolver({ 100: repoA, 200: repoB }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.unresolved).toEqual([999]);
+        expect(result.message).toContain('999');
+      }
+    },
+  );
+
+  test('every unresolved id is named, not just the first (avoids a fix-one-rerun-find-the-next loop)', async () => {
+    const result = await resolveAllRepos([1, 2, 3], fakeResolver({ 2: repoA }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.unresolved).toEqual([1, 3]);
+      expect(result.message).toContain('1');
+      expect(result.message).toContain('3');
+    }
+  });
+
+  test('a single bad id still fails the WHOLE batch — no partial success returned to spend against', async () => {
+    const result = await resolveAllRepos([100, 999], fakeResolver({ 100: repoA }));
+    expect(result.ok).toBe(false);
+  });
+
+  test('the resolver is called for every id even after an earlier one fails (so all failures are reported together)', async () => {
+    const seen: number[] = [];
+    const resolver: RepoResolver = async (prId) => {
+      seen.push(prId);
+      return prId === 999 ? null : repoA;
+    };
+    await resolveAllRepos([100, 999, 200], resolver);
+    expect(seen).toEqual([100, 999, 200]);
+  });
+});
+
+describe('source order: repo resolution runs before the --go gate (regression guard for the C5 ordering bug)', () => {
+  // `resolveAllRepos`'s own logic is proven safe-without-spending above (it
+  // only ever calls the injected resolver — never docker, never the DB). What
+  // that cannot prove is that the SCRIPT actually calls it before checking
+  // --go, which is the exact regression this fix round exists to close: C5
+  // moved the PR loop (and, with it, repo resolution) entirely after the
+  // --go check, so a bad PR id was only discovered after earlier ids in the
+  // same --prs list had already billed a full 8-arm pool. This is a
+  // structural property of the main block, which only runs under
+  // `import.meta.main` (never on import), so it is asserted against the
+  // script's own source text rather than by executing it.
+  const source = readFileSync(new URL('../../scripts/pr-review-tooling-ab.ts', import.meta.url), 'utf-8');
+
+  test('resolveAllRepos is called before the --go dry-run gate', () => {
+    const resolveCallIdx = source.indexOf('await resolveAllRepos(');
+    const goGateIdx = source.indexOf("if (!has('go'))");
+    expect(resolveCallIdx).toBeGreaterThan(-1);
+    expect(goGateIdx).toBeGreaterThan(-1);
+    expect(resolveCallIdx).toBeLessThan(goGateIdx);
+  });
+
+  test('a failed resolution exits before preflightDb (the DB write-path probe) ever runs', () => {
+    const repoResultCheckIdx = source.indexOf('if (!repoResult.ok)');
+    const preflightCallIdx = source.indexOf('await preflightDb(containerDbUrl)');
+    expect(repoResultCheckIdx).toBeGreaterThan(-1);
+    expect(preflightCallIdx).toBeGreaterThan(-1);
+    expect(repoResultCheckIdx).toBeLessThan(preflightCallIdx);
   });
 });
