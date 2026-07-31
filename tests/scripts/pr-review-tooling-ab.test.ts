@@ -292,24 +292,39 @@ describe('buildArmEnv', () => {
 describe('matchesArmRow', () => {
   const since = '2026-07-29T10:00:00.000Z';
 
-  test('a NO-POST row for the right PR after the cutoff matches', () => {
-    expect(matchesArmRow({ prId: 100, commentId: null, createdAt: '2026-07-29T10:00:05.000Z' }, 100, since)).toBe(true);
+  // Fix round 2 (2026-08-01): the first cut used `row.commentId == null`,
+  // which happened to pass every test below EXCEPT one that did not exist —
+  // there was no case for `commentId: 0`. `== null` matches `null`/`undefined`
+  // but not `0`, and a NO-POST review (every arm in this matrix) records
+  // `comment_id: 0`, not `null`. That rejected exactly the rows the matrix
+  // produces: a real $15.54 run (PR 49388, row 1687) saved correctly and was
+  // then discarded by this predicate. The three cases below are the three
+  // real shapes confirmed against the live table (see the comment on
+  // `matchesArmRow` in the source): positive (posted), 0 (NO-POST), null
+  // (error row, no telemetry) — all three must be covered, not just two.
+
+  test('C10 shape 1/3 — a positive commentId (posted to the PR) is excluded, even with matching PR id and timing', () => {
+    expect(matchesArmRow({ prId: 100, commentId: 42, createdAt: '2026-07-29T10:00:05.000Z' }, 100, since)).toBe(false);
   });
 
   test(
-    'C10: a row with a non-null commentId is excluded even though PR id and timing match — ' +
-    'a concurrent production/watcher review must never be misattributed to an arm',
+    'C10 shape 2/3 — commentId: 0 (the real shape every NO-POST arm row carries) is ACCEPTED, not excluded ' +
+    '(reproduces the exact bug that voided a genuine $15.54 recorded run)',
     () => {
-      expect(matchesArmRow({ prId: 100, commentId: 42, createdAt: '2026-07-29T10:00:05.000Z' }, 100, since)).toBe(false);
+      expect(matchesArmRow({ prId: 100, commentId: 0, createdAt: '2026-07-29T10:00:05.000Z' }, 100, since)).toBe(true);
     },
   );
 
+  test('C10 shape 3/3 — commentId: null (an error row with no telemetry) is accepted by this predicate too', () => {
+    expect(matchesArmRow({ prId: 100, commentId: null, createdAt: '2026-07-29T10:00:05.000Z' }, 100, since)).toBe(true);
+  });
+
   test('a row for a different PR does not match', () => {
-    expect(matchesArmRow({ prId: 200, commentId: null, createdAt: '2026-07-29T10:00:05.000Z' }, 100, since)).toBe(false);
+    expect(matchesArmRow({ prId: 200, commentId: 0, createdAt: '2026-07-29T10:00:05.000Z' }, 100, since)).toBe(false);
   });
 
   test('a row before the cutoff does not match', () => {
-    expect(matchesArmRow({ prId: 100, commentId: null, createdAt: '2026-07-29T09:59:00.000Z' }, 100, since)).toBe(false);
+    expect(matchesArmRow({ prId: 100, commentId: 0, createdAt: '2026-07-29T09:59:00.000Z' }, 100, since)).toBe(false);
   });
 });
 

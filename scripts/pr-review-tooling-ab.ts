@@ -248,8 +248,24 @@ export function buildArmEnv(base: Record<string, string>, arm: Arm, opts: ArmEnv
 // ---------------------------------------------------------------------------
 // Row attribution — pure predicate. C10: a NO-POST arm row must never be
 // confused with a concurrent production/watcher review of the SAME PR, which
-// would carry a non-null commentId. Matching on PR id + time alone silently
+// would carry a POSITIVE commentId. Matching on PR id + time alone silently
 // poisons scoring by attributing a foreign row to an arm.
+//
+// Fix round 2 (2026-08-01): the first cut used `row.commentId == null`, which
+// matches `null`/`undefined` but NOT `0` — and a NO-POST review records
+// `comment_id: 0`, not `null`. That rejected exactly the rows every arm
+// produces: a paid smoke run (PR 49388, row id 1687, $15.54, 14 findings)
+// recorded correctly and was then discarded by this predicate, which told the
+// operator to go debug DATABASE_URL. The database was never the problem.
+//
+// Checked against the live table rather than assumed this time:
+//   comment_id positive (1..230469): 1326 rows — posted to the PR
+//   comment_id 0:                       61 rows — ran NO-POST
+//   comment_id null:                   101 rows — error rows, no telemetry
+// So "not posted to a PR" is `null` OR `0`, not just nullish. A posted review
+// always has a POSITIVE id, so this still excludes a concurrent production
+// review of the same PR, which is what C10 was for — the fix narrows what
+// counts as "not posted", it does not widen what counts as "posted".
 // ---------------------------------------------------------------------------
 
 export interface AttributableRow {
@@ -259,7 +275,7 @@ export interface AttributableRow {
 }
 
 export function matchesArmRow(row: AttributableRow, prId: number, since: string): boolean {
-  return row.prId === prId && row.commentId == null && isAtOrAfter(row.createdAt, since);
+  return row.prId === prId && !row.commentId && isAtOrAfter(row.createdAt, since);
 }
 
 // ---------------------------------------------------------------------------
@@ -473,9 +489,12 @@ if (has('collect')) {
  * Polls rather than reading once: the container's own DB write races the
  * `docker run` exit by a moment. Returns the row, or null once the window
  * closes — which the caller treats as fatal, not as something to retry past.
- * C10: `matchesArmRow` requires `commentId == null` so a concurrent
- * production/watcher review of the same PR (which WOULD post, and so carries
- * a commentId) can never be misattributed to this arm.
+ * C10: `matchesArmRow` excludes any row with a POSITIVE commentId so a
+ * concurrent production/watcher review of the same PR (which WOULD post, and
+ * so carries a positive commentId) can never be misattributed to this arm.
+ * `0` (NO-POST) and `null` (error, no telemetry) both count as "not posted"
+ * — see the fix-round-2 comment on `matchesArmRow` for why a naive
+ * nullish check is not the same thing.
  */
 async function waitForRow(pr: number, since: string, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
@@ -640,11 +659,25 @@ for (const prId of prIds) {
       // second run without proof the first was recorded.
       const recorded = await waitForRow(prId, startedAt);
       if (!recorded) {
+        // State what was OBSERVED, not a diagnosis. A prior version of this
+        // message asserted "check DATABASE_URL" as the cause; on PR 49388
+        // that was wrong — the row (id 1687) had saved correctly, and this
+        // gate aborted anyway because `matchesArmRow`'s predicate rejected
+        // it (see the fix-round-2 note on `matchesArmRow` above). Asserting
+        // a cause here sends the operator to debug the wrong subsystem;
+        // listing candidates and pointing at the evidence does not.
         console.error(
           `\n[ab] ABORTING after run ${n}/${total} (${arm.name}, PR ${prId}, exit=${code}).\n` +
-          `[ab] The container finished but no pr_reviews row appeared for PR ${prId}.\n` +
-          `[ab] Fix the recording path before spending another run — check DATABASE_URL\n` +
-          `[ab] inside the container resolves to the compose service, not localhost.`,
+          `[ab] Observed: the container exited ${code}; no pr_reviews row matched PR ${prId}\n` +
+          `[ab] (via matchesArmRow) within the polling window.\n` +
+          `[ab] Check what actually happened before assuming a cause:\n` +
+          `[ab]   SELECT id, created_at, comment_id, cost_usd, error FROM pr_reviews\n` +
+          `[ab]   WHERE pr_id = ${prId} ORDER BY created_at DESC LIMIT 3;\n` +
+          `[ab] Candidate causes (not in order, not asserted): the container's DATABASE_URL not\n` +
+          `[ab] resolving to the compose service; the review erroring before the save step; a real\n` +
+          `[ab] row that saved but was rejected by matchesArmRow's attribution predicate (this\n` +
+          `[ab] exact bug voided a genuine $15.54 run once already); or the 30s polling window\n` +
+          `[ab] being too short for a slow write.`,
         );
         process.exit(1);
       }
