@@ -71,6 +71,11 @@ services:
       - "3000:3000"
     volumes:
       - ./private:/app/private:ro
+      # Read-only so the status ribbon can resolve a LIVE HEAD (src/dashboard/stats.ts
+      # resolveHeadSha) instead of the hardcoded "not observable" placeholder. The
+      # watcher/dashboard are themselves compose services, so this is what makes the
+      # ribbon able to detect compose drifting from source at all — see task-5-report.md.
+      - ./.git:/repo/.git:ro
     networks:
       - pipeline-net
 

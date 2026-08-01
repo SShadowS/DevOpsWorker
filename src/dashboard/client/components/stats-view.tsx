@@ -1,10 +1,11 @@
 import { useEffect } from 'preact/hooks';
 import {
-  statsWindow, costStats, qualityStats, integrityStats, operationalStats, driftStats, configReport,
+  statsWindow, costStats, qualityStats, integrityStats, operationalStats, configReport,
   setStatsWindow, loadAllStats, STATS_WINDOWS,
 } from '../stats-store.ts';
 import type { FetchState, StatsWindow } from '../stats-store.ts';
 import { formatCost } from '../format.ts';
+import { StatsRibbon } from './stats-ribbon.tsx';
 
 // ---------------------------------------------------------------------------
 // Shell for the Stats & Config tab (Task 4). Owns: the third tab's panel
@@ -125,30 +126,19 @@ export function StatsView() {
   const quality = qualityStats.value;
   const integrity = integrityStats.value;
   const operational = operationalStats.value;
-  const drift = driftStats.value;
   const config = configReport.value;
 
   return (
     <div class="stats-view">
       {/* Ribbon is "directly under the tabs, above everything else" per Task
           5's brief — it's the reason this page exists; the window selector
-          (chrome, not a panel) comes after it, not before. */}
-      <StatsSlot
-        id="stats-slot-ribbon"
-        title="Status ribbon"
-        taskLabel="Task 5"
-        window={currentWindow}
-        sources={[
-          describeFetchState('Deployment drift', drift, (d) =>
-            d.provenanceRecorded
-              ? `compose service image: ${d.composeService.classification}`
-              : 'no build provenance recorded yet'),
-          describeFetchState('Model integrity', integrity, (d) =>
-            `${d.modelUsage.flaggedKeys.length} flagged model key(s) · error rate ${formatPct(d.errorRate.rate)}`),
-          describeFetchState('Active levers', config, (d) =>
-            `${d.evalLevers.filter((l) => l.state === 'active').length}/${d.evalLevers.length} eval levers active`),
-        ]}
-      />
+          (chrome, not a panel) comes after it, not before. Own component
+          (stats-ribbon.tsx): each of its 4 indicators degrades through its
+          OWN fetch's loading/error/empty/ready cycle rather than the
+          combined-worst-of-N-sources pattern StatsSlot below uses, since the
+          drift comparison is worth reading even when /api/stats/integrity
+          comes back empty for this window. */}
+      <StatsRibbon />
 
       <div class="stats-view__toolbar">
         <WindowSelector />

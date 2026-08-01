@@ -1626,3 +1626,140 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   font-size: 0.8rem;
   font-style: italic;
 }
+
+/* ============================================================
+   Status ribbon (Task 5) — "the reason this entire feature exists."
+   Four independent indicator cards. Each card's border-left colour reuses
+   --color-stage-* for loading/error/empty/ok, exactly like .stats-slot
+   above so this tab reads as one system; --color-accent is spent ONLY on
+   `--attention`, and only here — see design-constraints.md. Every
+   `--attention` card also carries literal warning text ("Needs attention:",
+   "config may be inert") — colour is never the only signal.
+   ============================================================ */
+
+.status-ribbon {
+  display: flex;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.status-ribbon__item {
+  flex: 1 1 220px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-stage-pending);
+  border-radius: 6px;
+  padding: var(--space-md);
+}
+/* Deployment drift is the centrepiece — give it more room than the other
+   three compact indicators when there is space to spare. */
+.status-ribbon__item:first-child { flex: 2 1 320px; }
+
+.status-ribbon__item--loading   { border-left-color: var(--color-stage-active); }
+.status-ribbon__item--error     { border-left-color: var(--color-stage-error); }
+.status-ribbon__item--empty     { border-left-color: var(--color-stage-pending); }
+.status-ribbon__item--ok        { border-left-color: var(--color-stage-completed); }
+.status-ribbon__item--attention {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-secondary));
+}
+
+.status-ribbon__item-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.status-ribbon__item-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 var(--space-sm) 0;
+}
+.status-ribbon__item-header .status-ribbon__item-label { margin-bottom: 0; }
+
+.status-ribbon__window {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.status-ribbon__item-text {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.status-ribbon__attention-tag { color: var(--color-accent); }
+
+.status-ribbon__warning {
+  margin: var(--space-sm) 0 0 0;
+  padding-top: var(--space-sm);
+  border-top: 1px dashed var(--color-border-muted);
+  color: var(--color-accent);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+/* Three-sha provenance table — shas render in --font-mono per
+   design-constraints.md; the decorative bar is aria-hidden, so every fact
+   it conveys (the sha itself, the distance) is ALSO present as text. */
+.status-ribbon__provenance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.status-ribbon__provenance-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  font-size: 0.82rem;
+}
+
+.status-ribbon__provenance-label {
+  min-width: 100px;
+  color: var(--color-text-secondary);
+}
+
+.status-ribbon__provenance-value { color: var(--color-text-primary); }
+.status-ribbon__sha { font-family: var(--font-mono); }
+
+.status-ribbon__bar {
+  position: relative;
+  flex: 1 1 60px;
+  min-width: 40px;
+  max-width: 120px;
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+.status-ribbon__bar-dot {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-secondary);
+  transform: translate(-50%, -50%);
+}
+
+.status-ribbon__distance {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .status-ribbon { flex-direction: column; }
+  .status-ribbon__item:first-child { flex: 1 1 auto; }
+  .status-ribbon__provenance-row { align-items: flex-start; }
+  .status-ribbon__bar { display: none; }
+}

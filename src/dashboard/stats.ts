@@ -21,6 +21,7 @@
  * that need per-row JSONB combination are fetched raw and shaped in JS rather
  * than forced into a correlated subquery.
  */
+import { statSync } from 'node:fs';
 import type postgres from 'postgres';
 import type { PRFinding } from '../agents/pr-reviewer/schema.ts';
 
@@ -462,6 +463,167 @@ export function classifyImageSha(value: string | null): ImageShaClass {
 }
 
 // ---------------------------------------------------------------------------
+// HEAD resolution — git bind-mounted read-only at a FIXED, hardcoded path.
+//
+// The watcher/dashboard are themselves compose services (see docker-compose.yml),
+// so HEAD drifting from what is actually running is exactly the failure class
+// the status ribbon exists to catch. That requires a real git invocation, which
+// is why this section is impure and sits apart from the pure shaping above: a
+// unit test may not mock the filesystem or the subprocess (`mock.module()` is
+// disallowed repo-wide), so the classification logic is kept pure and tested
+// with fixture inputs, and only the thin wrapper touching git/fs is impure.
+// ---------------------------------------------------------------------------
+
+/** Read-only bind mount source — see the `dashboard` service in
+ *  docker-compose.yml (`./.git:/repo/.git:ro`). Hardcoded on purpose: no
+ *  request parameter, query string, or env var may choose which directory
+ *  this process runs `git` against — that is the whole point of "fixed
+ *  path". The only reason it is still a function *parameter* below (with
+ *  this constant as its default) is so tests can point the same code at a
+ *  real temporary git repo instead of mocking `fs`/`Bun.spawn`; every
+ *  production call site (`getDriftStats`) calls with no override. */
+const REPO_GIT_DIR = '/repo/.git';
+
+/** Bounds every git subprocess so a wedged invocation (or a mount that hangs
+ *  on stat) cannot hang the `/api/drift` request. 3s is generous for a
+ *  `rev-parse`/`rev-list --count` against a local bind mount — a judgement
+ *  call, not a measured figure. */
+const GIT_TIMEOUT_MS = 3_000;
+
+export type GitDirState = 'directory' | 'file' | 'missing';
+
+/** What the fixed mount path actually is, checked BEFORE spawning git — this
+ *  is what turns "a worktree's .git is a file, not a directory" into a
+ *  distinct, sayable state instead of an opaque git error. Never throws:
+ *  ENOENT and every other stat failure both read as `'missing'`, which is
+ *  the expected, common case (no `/repo/.git` in local dev, in tests, or on
+ *  any deployment predating this mount). */
+export function statGitDir(path: string): GitDirState {
+  try {
+    return statSync(path).isDirectory() ? 'directory' : 'file';
+  } catch {
+    return 'missing';
+  }
+}
+
+export type HeadUnresolvedReason = 'not-mounted' | 'not-a-directory' | 'command-failed' | 'timeout' | 'empty-output';
+
+export interface HeadResolution {
+  value: string | null;
+  reason: HeadUnresolvedReason | null;
+}
+
+export interface GitInvocation {
+  code: number;
+  stdout: string;
+  timedOut: boolean;
+}
+
+/** Turns a git-dir state plus an (optional) invocation result into the
+ *  ribbon's first-class HEAD state. Pure — no filesystem, no subprocess — so
+ *  every branch is unit-tested with fixture inputs rather than a mounted
+ *  repo. `result` is `null` exactly when `dirState !== 'directory'`: there
+ *  was nothing to invoke git against. */
+export function classifyHeadResolution(dirState: GitDirState, result: GitInvocation | null): HeadResolution {
+  if (dirState === 'missing') return { value: null, reason: 'not-mounted' };
+  if (dirState === 'file') return { value: null, reason: 'not-a-directory' };
+  if (!result || result.timedOut) return { value: null, reason: 'timeout' };
+  if (result.code !== 0) return { value: null, reason: 'command-failed' };
+  const sha = result.stdout.trim();
+  return sha ? { value: sha, reason: null } : { value: null, reason: 'empty-output' };
+}
+
+/** Loose hex-sha check. Guards the one place a DB/env-sourced string (never a
+ *  request parameter — see `computeCommitsBehindHead`) reaches a git
+ *  argument: a value failing this never reaches `Bun.spawn`. Defends both
+ *  against garbage (the literal `'unknown'`, `''`) and against git argument
+ *  injection (a value starting with `-` being read as a flag instead of a
+ *  revision) — a hex string can never start with `-`. */
+const SHA_PATTERN = /^[0-9a-f]{4,40}$/i;
+export function isPlausibleSha(value: string): boolean {
+  return SHA_PATTERN.test(value);
+}
+
+/** Runs `git` against the FIXED `gitDir` with a hard timeout. Never throws:
+ *  `Bun.spawn` throws SYNCHRONOUSLY when the executable is missing (see
+ *  `src/sdk/git-run.ts` for the same caveat), so the spawn itself is inside
+ *  the try/catch, not just the await. `args` is always a literal array built
+ *  by this module's own callers — `isPlausibleSha` above is the one place
+ *  external data (a sha) is allowed to reach it. */
+async function runGitFixed(gitDir: string, args: string[], timeoutMs: number): Promise<GitInvocation> {
+  // The spawn itself must stay inside this try: `Bun.spawn` throws
+  // SYNCHRONOUSLY (not a rejected promise) when the executable is missing —
+  // see `src/sdk/git-run.ts` for the same caveat. `proc` is also declared
+  // with `const` inline (rather than pre-declared with a widened
+  // `ReturnType<typeof Bun.spawn>`) so TS infers the exact `stdout: 'pipe'`
+  // subprocess type instead of the generic union.
+  try {
+    const proc = Bun.spawn(['git', '-c', `safe.directory=${gitDir}`, `--git-dir=${gitDir}`, ...args], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<GitInvocation>((resolve) => {
+      timer = setTimeout(() => {
+        proc.kill();
+        resolve({ code: -1, stdout: '', timedOut: true });
+      }, timeoutMs);
+    });
+    const run = (async (): Promise<GitInvocation> => {
+      const [stdout, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+      return { code, stdout, timedOut: false };
+    })();
+
+    try {
+      return await Promise.race([run, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return { code: -1, stdout: '', timedOut: false };
+  }
+}
+
+/**
+ * Resolves HEAD from the read-only bind mount. Never throws, never hangs
+ * (see `GIT_TIMEOUT_MS`), and degrades to an explicit `HeadUnresolvedReason`
+ * rather than a guess — a deploy without the mount (local dev, or any
+ * environment predating this feature) resolves to `'not-mounted'`, not an
+ * exception. `gitDir`/`timeoutMs` are only ever overridden by tests; the one
+ * production call site (`getDriftStats`) uses the defaults.
+ */
+export async function resolveHeadSha(gitDir: string = REPO_GIT_DIR, timeoutMs: number = GIT_TIMEOUT_MS): Promise<HeadResolution> {
+  const dirState = statGitDir(gitDir);
+  if (dirState !== 'directory') return classifyHeadResolution(dirState, null);
+  const result = await runGitFixed(gitDir, ['rev-parse', '--short', 'HEAD'], timeoutMs);
+  return classifyHeadResolution(dirState, result);
+}
+
+/**
+ * How many commits `sha` is behind `HEAD` in the mounted repo, or `null`
+ * when it cannot be determined — NEVER `0` as a fallback (see
+ * design-constraints.md: a coerced `0` reads as "in sync" and is the exact
+ * lie this ribbon exists to prevent). `null` covers every failure mode
+ * uniformly: the mount is absent, `sha` fails `isPlausibleSha`, `sha` is not
+ * reachable in this repo's history (built elsewhere, or — this repo's own
+ * history was rewritten in July 2026 — simply no longer present), or the
+ * git call timed out.
+ */
+export async function computeCommitsBehindHead(
+  sha: string,
+  gitDir: string = REPO_GIT_DIR,
+  timeoutMs: number = GIT_TIMEOUT_MS,
+): Promise<number | null> {
+  if (!isPlausibleSha(sha)) return null;
+  if (statGitDir(gitDir) !== 'directory') return null;
+  const result = await runGitFixed(gitDir, ['rev-list', '--count', `${sha}..HEAD`], timeoutMs);
+  if (result.timedOut || result.code !== 0) return null;
+  const n = Number(result.stdout.trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+// ---------------------------------------------------------------------------
 // SQL — shared helpers
 // ---------------------------------------------------------------------------
 
@@ -841,10 +1003,24 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
 // ---------------------------------------------------------------------------
 
 export interface DriftStats extends WindowMeta {
-  head: { value: null; reason: 'not-observable-in-container' };
-  composeService: { value: string | null; classification: ImageShaClass; source: string };
+  head: HeadResolution;
+  composeService: {
+    value: string | null;
+    classification: ImageShaClass;
+    source: string;
+    /** Commits `value` is behind the live-resolved HEAD, or `null` when it
+     *  cannot be computed — HEAD itself is unresolved, `value` is not a real
+     *  sha, or `value` is not reachable in the mounted repo's history. Never
+     *  `0` as a stand-in for "unknown" (see `computeCommitsBehindHead`). */
+    commitsBehindHead: number | null;
+  };
   spawnedImage: {
-    mostRecentSha: { value: string | null; recordedAt: string | null };
+    mostRecentSha: {
+      value: string | null;
+      classification: ImageShaClass;
+      recordedAt: string | null;
+      commitsBehindHead: number | null;
+    };
     distribution: Array<{ classification: ImageShaClass; count: number }>;
   };
   /** First-class "nothing recorded yet" state — true only once at least one
@@ -887,18 +1063,44 @@ export async function getDriftStats(
     distribution.set(cls, (distribution.get(cls) ?? 0) + 1);
   }
 
+  // HEAD is resolved live from a read-only bind mount (docker-compose.yml,
+  // dashboard service) rather than hardcoded — the watcher/dashboard ARE
+  // compose services, so a HEAD that has moved past what is actually running
+  // is exactly the failure this ribbon exists to surface. Distance-from-HEAD
+  // is only ever computed once HEAD itself resolved: a distance without a
+  // HEAD to anchor it is a number nobody could trust, so both git calls below
+  // are skipped entirely (left `null`) rather than run against a meaningless
+  // reference.
+  const head = await resolveHeadSha();
+  const composeClassification = classifyImageSha(buildSha);
+  const mostRecentClassification = classifyImageSha(mostRecent?.image_sha ?? null);
+  let composeCommitsBehind: number | null = null;
+  let spawnedCommitsBehind: number | null = null;
+  if (head.value) {
+    [composeCommitsBehind, spawnedCommitsBehind] = await Promise.all([
+      composeClassification === 'sha' && buildSha ? computeCommitsBehindHead(buildSha) : Promise.resolve(null),
+      mostRecentClassification === 'sha' && mostRecent ? computeCommitsBehindHead(mostRecent.image_sha) : Promise.resolve(null),
+    ]);
+  }
+
   return {
     ...buildWindowMeta(window, totalN),
-    head: { value: null, reason: 'not-observable-in-container' },
+    head,
     composeService: {
       value: buildSha,
-      classification: classifyImageSha(buildSha),
+      classification: composeClassification,
       source: "this dashboard process's BUILD_SHA env var",
+      commitsBehindHead: composeCommitsBehind,
     },
     spawnedImage: {
       mostRecentSha: mostRecent
-        ? { value: mostRecent.image_sha, recordedAt: mostRecent.created_at }
-        : { value: null, recordedAt: null },
+        ? {
+            value: mostRecent.image_sha,
+            classification: mostRecentClassification,
+            recordedAt: mostRecent.created_at,
+            commitsBehindHead: spawnedCommitsBehind,
+          }
+        : { value: null, classification: mostRecentClassification, recordedAt: null, commitsBehindHead: null },
       distribution: [...distribution.entries()].map(([classification, count]) => ({ classification, count })),
     },
     provenanceRecorded: (distribution.get('sha') ?? 0) > 0 || mostRecent != null,

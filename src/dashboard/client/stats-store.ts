@@ -33,11 +33,13 @@ export function classifyWindowedResponse<T extends { sampleSize: number }>(data:
 /**
  * Drift is never "empty" the way the other windowed endpoints are.
  * `sampleSize` on `/api/drift` counts PR-review rows in the window, but
- * `head` comes from a hardcoded not-observable-in-container marker,
- * `composeService` reads an env var, and `spawnedImage.mostRecentSha` is an
- * UNWINDOWED whole-table search (`stats.ts` `getDriftStats`) — none of that
- * depends on the window holding any rows. Even `spawnedImage.distribution`
- * being empty at n=0 is itself informative, not blank.
+ * `head` is resolved LIVE from a read-only bind-mounted `.git` (or reports
+ * an explicit unresolved reason when the mount/git command fails —
+ * see `resolveHeadSha` in `stats.ts`), `composeService` reads an env var,
+ * and `spawnedImage.mostRecentSha` is an UNWINDOWED whole-table search
+ * (`stats.ts` `getDriftStats`) — none of that depends on the window holding
+ * any rows. Even `spawnedImage.distribution` being empty at n=0 is itself
+ * informative, not blank.
  *
  * Running drift through `classifyWindowedResponse` would collapse a
  * zero-review window to a generic "No data recorded in this window" and

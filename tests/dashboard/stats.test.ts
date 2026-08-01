@@ -1,6 +1,8 @@
-import { describe, test, expect } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   parseWindow,
   getWindowDays,
@@ -24,8 +26,14 @@ import {
   summarizeEffortMix,
   computeEffortDrift,
   classifyImageSha,
+  statGitDir,
+  classifyHeadResolution,
+  isPlausibleSha,
+  resolveHeadSha,
+  computeCommitsBehindHead,
 } from '../../src/dashboard/stats.ts';
 import type { PRFinding } from '../../src/agents/pr-reviewer/schema.ts';
+import type { GitInvocation } from '../../src/dashboard/stats.ts';
 
 // No test in this file may open a database connection — DATABASE_URL points at
 // the live production database. Only pure shaping functions and source-text
@@ -498,6 +506,187 @@ describe('classifyImageSha', () => {
 });
 
 // ---------------------------------------------------------------------------
+// HEAD resolution — the ribbon's centrepiece. `classifyHeadResolution` and
+// `isPlausibleSha` are pure and covered with fixture inputs; `statGitDir`,
+// `resolveHeadSha`, and `computeCommitsBehindHead` actually touch the
+// filesystem/spawn git, so they are exercised against REAL temporary git
+// repos (mirroring tests/sdk/git-checkout.test.ts's approach) — no DB
+// connection anywhere in this block, no mock.module().
+// ---------------------------------------------------------------------------
+
+describe('statGitDir', () => {
+  let dir: string;
+  beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'stats-gitdir-test-')); });
+  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  test('a real directory classifies as directory', () => {
+    expect(statGitDir(dir)).toBe('directory');
+  });
+
+  test('a path that is a file (the worktree .git shape) classifies as file', () => {
+    const filePath = join(dir, 'dot-git-as-file');
+    writeFileSync(filePath, 'gitdir: /elsewhere/.git\n');
+    expect(statGitDir(filePath)).toBe('file');
+  });
+
+  test('a path that does not exist classifies as missing', () => {
+    expect(statGitDir(join(dir, 'does-not-exist'))).toBe('missing');
+  });
+});
+
+describe('classifyHeadResolution', () => {
+  test('missing git-dir -> not-mounted, regardless of any result', () => {
+    expect(classifyHeadResolution('missing', null)).toEqual({ value: null, reason: 'not-mounted' });
+  });
+
+  test('git-dir is a file (worktree shape) -> not-a-directory', () => {
+    expect(classifyHeadResolution('file', null)).toEqual({ value: null, reason: 'not-a-directory' });
+  });
+
+  test('directory but no result (should not happen, defensive) -> timeout', () => {
+    expect(classifyHeadResolution('directory', null)).toEqual({ value: null, reason: 'timeout' });
+  });
+
+  test('directory + timed-out invocation -> timeout, regardless of code', () => {
+    const result: GitInvocation = { code: 0, stdout: 'deadbeef', timedOut: true };
+    expect(classifyHeadResolution('directory', result)).toEqual({ value: null, reason: 'timeout' });
+  });
+
+  test('directory + non-zero exit -> command-failed', () => {
+    const result: GitInvocation = { code: 128, stdout: '', timedOut: false };
+    expect(classifyHeadResolution('directory', result)).toEqual({ value: null, reason: 'command-failed' });
+  });
+
+  test('directory + success but blank stdout -> empty-output', () => {
+    const result: GitInvocation = { code: 0, stdout: '   \n', timedOut: false };
+    expect(classifyHeadResolution('directory', result)).toEqual({ value: null, reason: 'empty-output' });
+  });
+
+  test('directory + success with a real sha -> the trimmed sha, no reason', () => {
+    const result: GitInvocation = { code: 0, stdout: '8129ee0\n', timedOut: false };
+    expect(classifyHeadResolution('directory', result)).toEqual({ value: '8129ee0', reason: null });
+  });
+});
+
+describe('isPlausibleSha', () => {
+  test('a short hex sha passes', () => expect(isPlausibleSha('8129ee0')).toBe(true));
+  test('a full 40-char hex sha passes', () => expect(isPlausibleSha('a'.repeat(40))).toBe(true));
+  test('the literal "unknown" fails', () => expect(isPlausibleSha('unknown')).toBe(false));
+  test('an empty string fails', () => expect(isPlausibleSha('')).toBe(false));
+  test('a value starting with "-" fails (argument-injection guard)', () => expect(isPlausibleSha('--upload-pack=x')).toBe(false));
+  test('non-hex characters fail', () => expect(isPlausibleSha('not-a-sha!')).toBe(false));
+  test('a 3-char string fails the minimum length', () => expect(isPlausibleSha('abc')).toBe(false));
+  test('a 41-char string fails the maximum length', () => expect(isPlausibleSha('a'.repeat(41))).toBe(false));
+});
+
+describe('resolveHeadSha (behavioral, real temp git repos)', () => {
+  let repoDir: string;
+  let gitDir: string;
+  let plainDir: string; // exists, is a directory, but is NOT a git repository
+
+  beforeAll(async () => {
+    repoDir = mkdtempSync(join(tmpdir(), 'stats-head-repo-'));
+    gitDir = join(repoDir, '.git');
+    const run = async (...args: string[]) => {
+      const p = Bun.spawn(['git', ...args], { cwd: repoDir, stdout: 'pipe', stderr: 'pipe' });
+      await p.exited;
+    };
+    await run('init', '-b', 'main');
+    await run('config', 'user.email', 't@t');
+    await run('config', 'user.name', 't');
+    writeFileSync(join(repoDir, 'a.txt'), 'one\n');
+    await run('add', '.');
+    await run('commit', '-m', 'one');
+
+    plainDir = mkdtempSync(join(tmpdir(), 'stats-head-plain-'));
+  });
+  afterAll(() => {
+    rmSync(repoDir, { recursive: true, force: true });
+    rmSync(plainDir, { recursive: true, force: true });
+  });
+
+  test('a real mounted repo resolves a real short sha', async () => {
+    const result = await resolveHeadSha(gitDir, 2_000);
+    expect(result.reason).toBeNull();
+    expect(result.value).not.toBeNull();
+    expect(isPlausibleSha(result.value!)).toBe(true);
+  });
+
+  test('a missing mount resolves not-mounted', async () => {
+    const result = await resolveHeadSha(join(repoDir, 'does-not-exist', '.git'), 2_000);
+    expect(result).toEqual({ value: null, reason: 'not-mounted' });
+  });
+
+  test('a .git that is a file (worktree shape) resolves not-a-directory', async () => {
+    const fileGitDir = join(repoDir, 'file-as-gitdir');
+    writeFileSync(fileGitDir, 'gitdir: /elsewhere\n');
+    const result = await resolveHeadSha(fileGitDir, 2_000);
+    expect(result).toEqual({ value: null, reason: 'not-a-directory' });
+  });
+
+  test('a real directory that is not a git repository resolves command-failed', async () => {
+    const result = await resolveHeadSha(plainDir, 2_000);
+    expect(result).toEqual({ value: null, reason: 'command-failed' });
+  });
+});
+
+describe('computeCommitsBehindHead (behavioral, real temp git repos)', () => {
+  let repoDir: string;
+  let gitDir: string;
+  let firstCommitSha = '';
+
+  beforeAll(async () => {
+    repoDir = mkdtempSync(join(tmpdir(), 'stats-distance-repo-'));
+    gitDir = join(repoDir, '.git');
+    const run = async (...args: string[]) => {
+      const p = Bun.spawn(['git', ...args], { cwd: repoDir, stdout: 'pipe', stderr: 'pipe' });
+      await p.exited;
+    };
+    const runCapture = async (...args: string[]) => {
+      const p = Bun.spawn(['git', ...args], { cwd: repoDir, stdout: 'pipe', stderr: 'pipe' });
+      const out = await new Response(p.stdout).text();
+      await p.exited;
+      return out.trim();
+    };
+    await run('init', '-b', 'main');
+    await run('config', 'user.email', 't@t');
+    await run('config', 'user.name', 't');
+    writeFileSync(join(repoDir, 'a.txt'), 'one\n');
+    await run('add', '.');
+    await run('commit', '-m', 'one');
+    firstCommitSha = await runCapture('rev-parse', 'HEAD');
+    writeFileSync(join(repoDir, 'a.txt'), 'two\n');
+    await run('commit', '-am', 'two');
+    writeFileSync(join(repoDir, 'a.txt'), 'three\n');
+    await run('commit', '-am', 'three');
+  });
+  afterAll(() => { rmSync(repoDir, { recursive: true, force: true }); });
+
+  test('a sha 2 commits behind HEAD reports 2', async () => {
+    expect(await computeCommitsBehindHead(firstCommitSha, gitDir, 2_000)).toBe(2);
+  });
+
+  test('HEAD itself is 0 commits behind HEAD (in sync)', async () => {
+    const head = await resolveHeadSha(gitDir, 2_000);
+    expect(await computeCommitsBehindHead(head.value!, gitDir, 2_000)).toBe(0);
+  });
+
+  test('a plausible-looking sha absent from history returns null, never 0', async () => {
+    expect(await computeCommitsBehindHead('deadbeef', gitDir, 2_000)).toBeNull();
+  });
+
+  test('a value failing isPlausibleSha never reaches git — returns null immediately', async () => {
+    expect(await computeCommitsBehindHead('unknown', gitDir, 2_000)).toBeNull();
+    expect(await computeCommitsBehindHead('', gitDir, 2_000)).toBeNull();
+    expect(await computeCommitsBehindHead('--upload-pack=x', gitDir, 2_000)).toBeNull();
+  });
+
+  test('an unmounted git-dir returns null, not 0', async () => {
+    expect(await computeCommitsBehindHead(firstCommitSha, join(repoDir, 'nope', '.git'), 2_000)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // SQL shape — source-text assertions (no DB connection; mirrors
 // tests/db/pg-pr-review-store-mapper.test.ts's approach for the same reason:
 // DATABASE_URL is the live production database, so nothing here may execute
@@ -623,9 +812,40 @@ describe('stats.ts SQL shape', () => {
     expect(fn![0]).toContain("image_sha <> 'unknown'");
   });
 
-  test('getDriftStats never shells out to git or reads a filesystem HEAD', () => {
+  // Historical invariant (this test used to assert the OPPOSITE): HEAD used
+  // to be a hardcoded `{value: null, reason: 'not-observable-in-container'}`
+  // literal. Decision (Task 5, ruling from the human partner): the
+  // watcher/dashboard ARE compose services, so a ribbon that cannot observe
+  // HEAD cannot detect compose drifting from source at all — the exact
+  // 2026-08-01 failure. HEAD is now resolved LIVE from a read-only
+  // `.git` bind mount (see docker-compose.yml). `getDriftStats` itself must
+  // not shell out directly, though — it delegates to `resolveHeadSha`/
+  // `computeCommitsBehindHead`, which are independently tested above against
+  // real temporary git repos.
+  test('getDriftStats resolves HEAD live via resolveHeadSha(), not a hardcoded literal', () => {
     const fn = src.match(/export async function getDriftStats[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
-    expect(fn![0]).not.toMatch(/git |rev-parse|readFileSync|Bun\.spawn/);
+    expect(fn![0]).toContain('resolveHeadSha()');
+    expect(fn![0]).not.toContain("not-observable-in-container");
+  });
+
+  test('getDriftStats delegates the actual git invocation rather than shelling out inline', () => {
+    const fn = src.match(/export async function getDriftStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    // The function orchestrates SQL + the two git-touching helpers; it must
+    // not itself call Bun.spawn/statSync — that would duplicate (and could
+    // silently diverge from) the timeout/error handling already pinned on
+    // resolveHeadSha/computeCommitsBehindHead above.
+    expect(fn![0]).not.toMatch(/Bun\.spawn|statSync\(/);
+    expect(fn![0]).toContain('computeCommitsBehindHead(');
+  });
+
+  test('getDriftStats only computes commitsBehindHead once HEAD itself resolved', () => {
+    const fn = src.match(/export async function getDriftStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    // Guards against ever reporting a distance anchored to nothing — see
+    // computeCommitsBehindHead's own doc comment on why null (never 0) is
+    // the only safe default.
+    expect(fn![0]).toMatch(/if\s*\(head\.value\)\s*\{/);
   });
 });

@@ -33,10 +33,10 @@ function driftFixture(sampleSize: number): DriftStats {
     since: '2026-01-01T00:00:00.000Z',
     sampleSize,
     lowSample: sampleSize < 10,
-    head: { value: null, reason: 'not-observable-in-container' },
-    composeService: { value: 'abc123', classification: 'sha', source: 'BUILD_SHA env var' },
+    head: { value: '8129ee0', reason: null },
+    composeService: { value: 'abc123', classification: 'sha', source: 'BUILD_SHA env var', commitsBehindHead: 2 },
     spawnedImage: {
-      mostRecentSha: { value: null, recordedAt: null },
+      mostRecentSha: { value: null, classification: 'not-recorded', recordedAt: null, commitsBehindHead: null },
       distribution: [],
     },
     provenanceRecorded: false,
