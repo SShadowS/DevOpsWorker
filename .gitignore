@@ -18,6 +18,13 @@ logs
 # dotenv (never commit real secrets)
 .env
 .env.*.local
+# Backups made before a config change are byte copies of .env, secrets included.
+# Not covered by the patterns above, and `.env.*` cannot be used because
+# `.env.example` is tracked. Without this a reflexive `git add .` sweeps real
+# credentials into a PUBLIC repo.
+.env.bak*
+.env.backup*
+.env.*.bak
 
 # caches
 .eslintcache
