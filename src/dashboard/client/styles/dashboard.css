@@ -2360,13 +2360,18 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
    this panel reads as part of the same system, not a fifth one.
    ============================================================ */
 
+/* M-1: was a --color-warning-tinted box, inconsistent with the plain italic
+   treatment .integrity-panel__low-sample / .cost-panel__low-sample /
+   .quality-panel__low-sample already use for the identical "Small sample:
+   n=X ... every statistic below is a small-sample reading" text. A
+   sample-size caveat is not a warning state (design-constraints.md's
+   caveat-tag table has no tier for it) — made consistent with the quieter
+   treatment rather than promoting the other three to a warning box. */
 .operational-panel__low-sample {
   margin: 0 0 var(--space-sm) 0;
-  padding: 6px 10px;
-  font-size: 0.82rem;
   color: var(--color-text-secondary);
-  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
-  border-radius: 4px;
+  font-size: 0.8rem;
+  font-style: italic;
 }
 
 .operational-section {

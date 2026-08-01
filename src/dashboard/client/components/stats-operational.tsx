@@ -177,10 +177,14 @@ export function buildReviewsChartView(
 // covers the card"). No separate low-sample threshold is computed for these
 // two specifically: unlike `sub_agents`/`findings_list` (recently-added
 // instrumentation columns with a real historical gap, per Tasks 2/6/8),
-// `duration_ms`/`turns` are populated on every completed review, so their
-// `sampleSize` is expected to equal the window's total `sampleSize` in
-// practice — disclosed as a plain number, not a computed coverage percentage
-// like the Cost/Quality cards use for their genuinely gappy columns.
+// `duration_ms`/`turns` are populated on nearly every completed review —
+// measured live at 99.1% (30d) / 97.2% (90d), not literally 100%; the small
+// gap is rows that error out before these fields are ever written, not a
+// genuine instrumentation gap the way `sub_agents`/`findings_list` have —
+// so their `sampleSize` is expected to closely track the window's total
+// `sampleSize` in practice, disclosed as a plain number, not a computed
+// coverage percentage like the Cost/Quality cards use for their genuinely
+// gappy columns.
 // ---------------------------------------------------------------------------
 
 function formatMsOrNA(ms: number | null): string {
@@ -232,8 +236,31 @@ export function buildToolMixSectionView(toolMix: ToolMixEntry[]): ToolMixSection
   }
   const zero = rows.filter((r) => r.isZero);
   if (zero.length === 0) {
-    return { status: 'ok', summary: `${rows.length} tool(s) used in this window, none at zero calls.`, rows };
+    // I-5: "none at zero calls" used to read as coverage this section does
+    // not have. `tool_calls[toolName]` (agent-stream.ts) only ever creates a
+    // key on a real call and always increments by +1 — no row this codebase
+    // writes can contain a zero-count key (verified live: 329 rows, 34
+    // distinct keys, zero entries at value 0, ever). A tool that never fires
+    // is ABSENT from tool_calls, not present at zero, so this table can only
+    // ever speak to tools that were called at least once — it cannot detect
+    // (and must not imply it detects) a tool that has gone silent, `lsp`
+    // being the live example the plan names by name.
+    return {
+      status: 'ok',
+      summary:
+        `None of the ${rows.length} observed tool(s) had zero calls in this window. A tool that is never called ` +
+        'does not appear in tool_calls at all and therefore cannot be listed here — this table can only speak to ' +
+        'tools that fired at least once, not to ones that have gone silent.',
+      rows,
+    };
   }
+  // Currently UNREACHABLE in production for the reason given in the
+  // zero-length branch above: a real tool_calls row cannot contain a
+  // zero-count key. Kept, not deleted — it is correct defensive rendering
+  // if that invariant ever changes (e.g. a future writer starts recording
+  // explicit zeros), and every branch here is still exercised directly by
+  // fixture-fed unit tests (buildToolMixSectionView is a pure function, not
+  // wired to the live shape it can never receive).
   return {
     status: 'attention',
     summary:

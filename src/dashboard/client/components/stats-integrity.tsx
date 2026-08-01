@@ -141,16 +141,30 @@ export function buildContaminationSectionView(
       };
     case 'ready': {
       const rows = availability.rows;
-      const pinnedRows = rows.filter((r) => r.status !== 'unpinned');
-      const contaminated = pinnedRows.filter((r) => r.status === 'attention');
+      // 'ok'/'attention' rows are pins that were actually EVALUATED this
+      // window (they dispatched at least once); 'not-observed' rows are
+      // pins the config declares but that never ran — see
+      // buildAgentModelRows's doc comment (I-4). Both are real declared
+      // pins, so `totalPins` (the denominator for the disclosure clause
+      // below) is their sum, not just `evaluated.length` — a summary built
+      // only from `evaluated` can otherwise assert an all-clear over
+      // whichever pins happened to be exercised, silently dropping the rest
+      // of the declared roster.
+      const evaluated = rows.filter((r) => r.status === 'ok' || r.status === 'attention');
+      const notObserved = rows.filter((r) => r.status === 'not-observed');
+      const contaminated = evaluated.filter((r) => r.status === 'attention');
       const totalOffPinRuns = contaminated.reduce((s, r) => s + r.offPinRuns, 0);
-      const totalPinnedRuns = pinnedRows.reduce((s, r) => s + r.totalRuns, 0);
+      const totalEvaluatedRuns = evaluated.reduce((s, r) => s + r.totalRuns, 0);
+      const totalPins = evaluated.length + notObserved.length;
+      const notObservedClause = notObserved.length > 0
+        ? ` — ${notObserved.length} of ${totalPins} declared pin(s) produced zero observed runs this window and could not be evaluated`
+        : '';
       const summary =
-        pinnedRows.length === 0
-          ? 'No pinned sub-agent runs recorded in this window.'
+        evaluated.length === 0
+          ? `No pinned sub-agent runs recorded in this window${notObserved.length > 0 ? ` (${notObserved.length} declared pin(s) produced zero observed runs)` : ''}.`
           : contaminated.length === 0
-            ? `n=${totalPinnedRuns} · all ${pinnedRows.length} pinned sub-agent(s) ran only on their declared model`
-            : `${totalOffPinRuns}/${totalPinnedRuns} runs across ${contaminated.length} of ${pinnedRows.length} pinned sub-agent(s) ran on a model other than their declared pin`;
+            ? `n=${totalEvaluatedRuns} · all ${evaluated.length} pinned sub-agent(s) ran only on their declared model${notObservedClause}`
+            : `${totalOffPinRuns}/${totalEvaluatedRuns} runs across ${contaminated.length} of ${evaluated.length} pinned sub-agent(s) ran on a model other than their declared pin${notObservedClause}`;
       return { status: contaminated.length > 0 ? 'attention' : 'ok', message: null, summary, rows, undercountNote };
     }
   }
@@ -406,9 +420,13 @@ function ContaminationTable({ rows }: { rows: AgentModelRow[] }) {
                 ? <span class="integrity-section__empty">unpinned</span>
                 : <>declared: <span class="integrity-table__model">{r.declaredModel}</span></>}
             </td>
-            <td>{formatObservedBreakdown(r.observed)}</td>
             <td>
-              {r.status === 'unpinned' ? 'n/a' : `${r.offPinRuns}/${r.totalRuns}`}
+              {r.status === 'not-observed'
+                ? <span class="integrity-section__empty">not observed this window</span>
+                : formatObservedBreakdown(r.observed)}
+            </td>
+            <td>
+              {r.status === 'unpinned' || r.status === 'not-observed' ? 'n/a' : `${r.offPinRuns}/${r.totalRuns}`}
               {r.status === 'attention' && (
                 <span class="integrity-table__flag" title="Ran on a model other than its declared pin"> ⚠ off-pin</span>
               )}

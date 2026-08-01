@@ -464,12 +464,32 @@ function CostOverviewSection({ data }: { data: CostStats }) {
   );
 }
 
+/**
+ * I-1: this is the decisive cost metric on the whole card, and it used to
+ * render a bare `n=X` with no coverage disclosure — while the Quality card's
+ * read-band gauge, over the SAME eligible population (live: 76/1081 at 90d,
+ * 76/334 at 30d — the two sample sizes match because in production no row
+ * carries findings without also carrying cost), discloses `Coverage: 76/1081
+ * (7.0%)` plus a "Known instrument caveat:" headline 130 lines below. Reuses
+ * `computeReadBandCoverage`/`describeReadBandCoverage`/
+ * `buildReadBandLowCoverageHeadline` verbatim rather than writing a second
+ * coverage computation that could drift from the gauge's own.
+ */
 function CostPerItemSection({ data }: { data: CostStats }) {
   const c = data.costPerReadBandItem;
+  const coverage = computeReadBandCoverage(c.sampleSize, data.sampleSize);
+  const lowCoverageHeadline = buildReadBandLowCoverageHeadline(coverage);
   return (
     <CostSection title="Cost per read-band item" status="neutral">
       <p class="cost-section__summary">{formatCostPerReadBandItem(c)}</p>
       <p class="cost-section__note">Eligible rows carry both cost and findings ({c.sampleSize} in this window).</p>
+      <p class="cost-section__summary">Coverage: {describeReadBandCoverage(coverage)}</p>
+      {lowCoverageHeadline && (
+        <p class="cost-section__note">
+          <strong class="cost-tag cost-tag--caveat">Known instrument caveat: </strong>
+          {lowCoverageHeadline}
+        </p>
+      )}
     </CostSection>
   );
 }
@@ -514,6 +534,16 @@ function ModelBreakdownSection({ data }: { data: CostStats }) {
         {a.text}
       </p>
       <ModelCostTable rows={data.modelBreakdown} />
+      {/* I-2: this table and the Integrity panel's "Model usage" table are
+          both `aggregateModelUsage` over the same window predicate — same
+          columns, same `flagged` chip, same title in spirit. Without this
+          note a reader has no way to tell they are not two independent
+          measurements; the page would otherwise assert the same `[1m]`
+          finding three times without ever saying so. */}
+      <p class="cost-section__note">
+        Same model_usage breakdown as the Integrity panel's "Model usage" table (one query, aggregateModelUsage) —
+        shown here through a cost lens, not a second, independent measurement.
+      </p>
     </CostSection>
   );
 }
@@ -548,6 +578,16 @@ function PerRepoCostSection({ data }: { data: CostStats }) {
   return (
     <CostSection title="Cost by repo" status="neutral">
       <PerRepoCostTable rows={data.perRepo} />
+      {/* I-3: this "Reviews" column counts only rows with cost recorded
+          (cost_usd IS NOT NULL); the Operational panel's own per-repo
+          "Reviews" column counts every row regardless of cost. The two can
+          legitimately disagree for the same repo (measured live at 90d, 5
+          of 8 repos differ) — the Operational panel already discloses this
+          on its side; this is the other half of that same disclosure. */}
+      <p class="cost-section__note">
+        "Reviews" here counts only rows with cost recorded — the Operational panel's own per-repo "Reviews" column
+        counts every row, so the two can legitimately disagree for the same repo.
+      </p>
     </CostSection>
   );
 }
@@ -639,9 +679,13 @@ function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
           {lowCoverageHeadline}
         </p>
       )}
-      {view.lowSample && (
-        <p class="quality-section__note">Small sample this window — treat this reading as a coin flip, not a trend.</p>
-      )}
+      {/* Deferred #8: the panel-wide "Small sample: n=X ... every statistic
+          below is a small-sample reading" banner (QualityCardBody, above
+          this section) already covers this gauge — a second, narrower
+          "Small sample this window" note here duplicated it every time
+          `lowSample` was true. Deleted rather than the panel-wide one: the
+          panel-wide banner is the one that actually says "every statistic
+          below", so it is the more complete of the two. */}
     </QualitySection>
   );
 }

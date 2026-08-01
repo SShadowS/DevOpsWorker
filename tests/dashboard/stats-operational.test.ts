@@ -232,6 +232,16 @@ describe('buildToolMixSectionView', () => {
     expect(view.summary).not.toContain('ZERO');
   });
 
+  // I-5: the all-clear wording must state the observed count (not a vague
+  // "none at zero calls") AND disclose that an absent tool (never appearing
+  // in tool_calls at all, e.g. the live `lsp` case) cannot be represented
+  // here — the check has no way to see a tool that has gone silent.
+  test('all tools nonzero -> summary states the observed count and discloses the absent-tool blind spot', () => {
+    const view = buildToolMixSectionView([toolMixFixture({ tool: 'Grep' }), toolMixFixture({ tool: 'Read', totalCalls: 40 })]);
+    expect(view.summary).toContain('None of the 2 observed tool(s) had zero calls');
+    expect(view.summary).toContain('does not appear in tool_calls at all');
+  });
+
   test('the live lsp:0 case -> attention, named explicitly, not silently sorted to the tail', () => {
     const view = buildToolMixSectionView([
       toolMixFixture({ tool: 'Grep', totalCalls: 300 }),

@@ -161,6 +161,50 @@ describe('buildContaminationSectionView', () => {
     const view = buildContaminationSectionView(pinnedEntries, note, configReady(declaredConfig));
     expect(view.undercountNote).toBe(note);
   });
+
+  // I-4: a declared pin that produced zero observed runs must be disclosed,
+  // never silently dropped from the "all-clear" summary — this is the exact
+  // false all-clear the finding named (7 of 20 declared pins observed).
+  describe('declared pins with zero observed runs (I-4)', () => {
+    const twoFilesConfig = configFixture([subAgentGroup([
+      { file: 'al-performance-analyzer.md', declaredModel: 'claude-sonnet-5' },
+      { file: 'al-integration-analyzer.md', declaredModel: 'claude-sonnet-5' },
+    ])]);
+
+    test('all-clear summary states how many declared pins were never observed, not just how many ran clean', () => {
+      const matchedOnly: SubAgentModelAttributionEntry[] = [{ agent: 'al-performance-analyzer', model: 'claude-sonnet-5', count: 95 }];
+      const view = buildContaminationSectionView(matchedOnly, 'note', configReady(twoFilesConfig));
+      expect(view.status).toBe('ok');
+      expect(view.summary).toContain('ran only on their declared model');
+      expect(view.summary).toContain('1 of 2 declared pin(s) produced zero observed runs');
+      // The unobserved pin still gets its own row, not silence.
+      expect(view.rows).toHaveLength(2);
+      expect(view.rows!.find((r) => r.agent === 'al-integration-analyzer')?.status).toBe('not-observed');
+    });
+
+    test('a contamination finding still discloses the never-observed pins alongside it', () => {
+      const view = buildContaminationSectionView(pinnedEntries, 'note', configReady(twoFilesConfig));
+      expect(view.status).toBe('attention');
+      expect(view.summary).toContain('9/95');
+      expect(view.summary).toContain('1 of 2 declared pin(s) produced zero observed runs');
+    });
+
+    test('zero pinned runs at all still discloses the unobserved pin count, not a bare "no runs" message', () => {
+      const view = buildContaminationSectionView([], 'note', configReady(twoFilesConfig));
+      expect(view.status).toBe('ok');
+      expect(view.summary).toContain('No pinned sub-agent runs recorded');
+      expect(view.summary).toContain('2 declared pin(s) produced zero observed runs');
+    });
+
+    test('when every declared pin was observed, no disclosure clause is added (nothing to disclose)', () => {
+      const bothObserved: SubAgentModelAttributionEntry[] = [
+        { agent: 'al-performance-analyzer', model: 'claude-sonnet-5', count: 95 },
+        { agent: 'al-integration-analyzer', model: 'claude-sonnet-5', count: 95 },
+      ];
+      const view = buildContaminationSectionView(bothObserved, 'note', configReady(twoFilesConfig));
+      expect(view.summary).not.toContain('produced zero observed runs');
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

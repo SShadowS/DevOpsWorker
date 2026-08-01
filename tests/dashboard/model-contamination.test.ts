@@ -117,16 +117,24 @@ describe('buildAgentModelRows', () => {
   test('no declared pin found for the agent -> unpinned, never counted as contamination', () => {
     const entries: SubAgentModelAttributionEntry[] = [{ agent: 'general-purpose', model: 'claude-opus-5', count: 7 }];
     const rows = buildAgentModelRows(entries, pins); // 'general-purpose' is not in `pins` at all
-    expect(rows).toEqual([{
+    // Asserts the one row under test by agent, not the whole array (I-4):
+    // `pins`' OTHER entry, 'al-performance-analyzer', is a real declared pin
+    // that never dispatched in these `entries`, so it now legitimately gets
+    // its own 'not-observed' row alongside this one — see the dedicated
+    // 'a declared pin with no observed runs' tests below for that behaviour.
+    const row = rows.find((r) => r.agent === 'general-purpose');
+    expect(row).toEqual({
       agent: 'general-purpose', declaredModel: null,
       observed: [{ model: 'claude-opus-5', count: 7 }], totalRuns: 7, offPinRuns: 0, status: 'unpinned',
-    }]);
+    });
   });
 
   test('a declared pin explicitly recorded as null (frontmatter has no model: line) is ALSO unpinned', () => {
     const entries: SubAgentModelAttributionEntry[] = [{ agent: 'no-pin-file', model: 'claude-sonnet-5', count: 3 }];
     const rows = buildAgentModelRows(entries, pins);
-    expect(rows[0]!.status).toBe('unpinned');
+    // Not rows[0] (I-4): 'al-performance-analyzer' (unobserved here) sorts
+    // ahead of 'no-pin-file' alphabetically as its own 'not-observed' row.
+    expect(rows.find((r) => r.agent === 'no-pin-file')?.status).toBe('unpinned');
   });
 
   test('rows are sorted by agent name', () => {
@@ -136,6 +144,57 @@ describe('buildAgentModelRows', () => {
     ];
     const rows = buildAgentModelRows(entries, pins);
     expect(rows.map((r: { agent: string }) => r.agent)).toEqual(['al-performance-analyzer', 'zebra-analyzer']);
+  });
+
+  // I-4: a declared pin with ZERO observed runs used to be silently absent
+  // from this function's output entirely (it only ever walked `entries`) —
+  // which is exactly how "all N pinned sub-agent(s) ran only on their
+  // declared model" ended up reporting an all-clear over 7 of 20 declared
+  // pins on the live 30d window. These cases start from a PIN, not an
+  // observed entry — the blind spot the other tests above never exercise.
+  describe('a declared pin with no observed runs', () => {
+    test('produces its own row, status not-observed, never silently absent', () => {
+      const rows = buildAgentModelRows([], pins);
+      const notRun = rows.find((r) => r.agent === 'al-performance-analyzer');
+      expect(notRun).toEqual({
+        agent: 'al-performance-analyzer', declaredModel: 'claude-sonnet-5',
+        observed: [], totalRuns: 0, offPinRuns: 0, status: 'not-observed',
+      });
+    });
+
+    test('a pin with no model: line (declaredModel null) and no runs is simply absent, not a not-observed row', () => {
+      const rows = buildAgentModelRows([], pins);
+      expect(rows.find((r) => r.agent === 'no-pin-file')).toBeUndefined();
+    });
+
+    test('a mix of an observed pin, an unobserved pin, and an unpinned observed agent are all distinct rows', () => {
+      // Local pins map (not the describe-level `pins`) so the "unobserved"
+      // agent in this test is unambiguous: `pins` above only has one
+      // non-null declared pin, and it IS observed in this test's `entries`.
+      const localPins = new Map<string, string | null>([
+        ['al-performance-analyzer', 'claude-sonnet-5'],
+        ['al-integration-analyzer', 'claude-sonnet-5'], // never dispatched this window
+      ]);
+      const entries: SubAgentModelAttributionEntry[] = [
+        { agent: 'al-performance-analyzer', model: 'claude-sonnet-5', count: 40 },
+        { agent: 'general-purpose', model: 'claude-opus-5', count: 3 }, // no declared pin at all
+      ];
+      const rows = buildAgentModelRows(entries, localPins);
+      expect(rows).toHaveLength(3);
+      expect(rows.find((r) => r.agent === 'al-performance-analyzer')?.status).toBe('ok');
+      expect(rows.find((r) => r.agent === 'general-purpose')?.status).toBe('unpinned');
+      expect(rows.find((r) => r.agent === 'al-integration-analyzer')?.status).toBe('not-observed');
+    });
+
+    test('not-observed is never contamination, regardless of how many declared pins go unobserved', () => {
+      const manyPins = new Map<string, string | null>([
+        ['a', 'claude-sonnet-5'], ['b', 'claude-sonnet-5'], ['c', 'claude-sonnet-5'],
+      ]);
+      const rows = buildAgentModelRows([], manyPins);
+      expect(rows).toHaveLength(3);
+      expect(rows.every((r) => r.status === 'not-observed')).toBe(true);
+      expect(rows.every((r) => r.offPinRuns === 0)).toBe(true);
+    });
   });
 });
 

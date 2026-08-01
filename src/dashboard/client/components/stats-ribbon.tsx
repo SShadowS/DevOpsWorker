@@ -262,12 +262,23 @@ export function assessModelIntegrity(integrity: IntegrityStats, contamination: S
     };
   }
 
-  const pinnedRows = contamination.rows.filter((r) => r.status !== 'unpinned');
-  const contaminatedRows = pinnedRows.filter((r) => r.status === 'attention');
+  // 'not-observed' rows (I-4) are declared pins that never dispatched this
+  // window — real pins, but not evaluated, so they must stay OUT of
+  // `evaluatedRows` (never contamination) while still being counted in the
+  // disclosure clause below. Without that clause, "no model contamination"
+  // reads as an all-clear over the whole declared roster when it was only
+  // ever computed over whichever pins happened to run.
+  const evaluatedRows = contamination.rows.filter((r) => r.status === 'ok' || r.status === 'attention');
+  const notObservedRows = contamination.rows.filter((r) => r.status === 'not-observed');
+  const contaminatedRows = evaluatedRows.filter((r) => r.status === 'attention');
+  const totalPins = evaluatedRows.length + notObservedRows.length;
+  const notObservedText = notObservedRows.length > 0
+    ? ` (${notObservedRows.length} of ${totalPins} declared pin(s) never observed this window)`
+    : '';
   const contaminationText = contaminatedRows.length === 0
-    ? 'no model contamination'
-    : `at least ${contaminatedRows.reduce((s, r) => s + r.offPinRuns, 0)}/${pinnedRows.reduce((s, r) => s + r.totalRuns, 0)} ` +
-      `runs off declared pin across ${contaminatedRows.length} sub-agent(s) (floor — sub_agents undercounts, see Integrity panel)`;
+    ? `no model contamination${notObservedText}`
+    : `at least ${contaminatedRows.reduce((s, r) => s + r.offPinRuns, 0)}/${evaluatedRows.reduce((s, r) => s + r.totalRuns, 0)} ` +
+      `runs off declared pin across ${contaminatedRows.length} sub-agent(s) (floor — sub_agents undercounts, see Integrity panel)${notObservedText}`;
 
   return {
     severity: flagged.length > 0 || contaminatedRows.length > 0 ? 'attention' : 'ok',

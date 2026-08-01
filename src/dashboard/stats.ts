@@ -842,6 +842,15 @@ export async function getQualityStats(sql: postgres.Sql, window: StatsWindow): P
 
   const withFindings = rows.filter((r) => r.findings_list != null);
   const readBandCounts = withFindings.map((r) => readBandCount(r.findings_list));
+  // Per-REVIEW count: a row whose findings_list contains ZERO critical/major
+  // findings (readBandCount === 0) — distinct from the per-FINDING severity
+  // breakdown (severityDistribution's minor+nitpick total, computed below
+  // from the same rows). A review with one critical finding and five minor
+  // findings has readBandCount > 0 and is NOT a below-band row here, even
+  // though it contributes five findings to the "below-band" side of the
+  // per-finding split. The UI (stats-costquality.tsx's BelowBandRowsSection)
+  // explicitly warns readers not to conflate the two — this comment is that
+  // same distinction, at its source.
   const belowBandCount = readBandCounts.filter((c) => c === 0).length;
 
   return {

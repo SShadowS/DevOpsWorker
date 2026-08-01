@@ -45,7 +45,7 @@ export function collectDeclaredPins(config: ConfigReport): Map<string, string | 
   return pins;
 }
 
-export type ContaminationRowStatus = 'ok' | 'attention' | 'unpinned';
+export type ContaminationRowStatus = 'ok' | 'attention' | 'unpinned' | 'not-observed';
 
 export interface AgentModelRow {
   agent: string;
@@ -70,6 +70,26 @@ export interface AgentModelRow {
  * pin that shows even one run on a different model is `'attention'` — this
  * is not a documented, expected instrument fault the way the dispatch
  * mismatch is.
+ *
+ * A declared pin that produced NO observed runs at all this window is
+ * `'not-observed'` (I-4) — distinct from both of the above. Before this fix,
+ * this function only ever walked OBSERVED entries (`entries`/`byAgent`), so
+ * a caller building an "all-clear" summary from its output could only ever
+ * cover whichever pins happened to dispatch, never the declared roster: on
+ * a live 30d window, 12 of 19 declared frontmatter pins — every
+ * plan-reviewer/code-reviewer sub-agent — produced zero observed runs, and
+ * "all 7 pinned sub-agent(s) ran only on their declared model" read as an
+ * all-clear over those 7 alone, silently dropping the other 12. A
+ * `'not-observed'` row is explicitly NOT contamination (nothing ran, so
+ * nothing can be off-pin) and must stay out of any contamination count the
+ * same way `'unpinned'` already does — but unlike `'unpinned'`, it IS a
+ * declared pin, so a caller must disclose the count rather than silently
+ * drop it (see `buildContaminationSectionView` in stats-integrity.tsx and
+ * `assessModelIntegrity` in stats-ribbon.tsx, both updated alongside this).
+ * A pin with no declared model at all (`collectDeclaredPins` maps a
+ * frontmatter file with no `model:` line to `null`) is excluded from this
+ * second pass — there is no pin to have gone unobserved, same reasoning as
+ * the `'unpinned'` branch below.
  */
 export function buildAgentModelRows(
   entries: SubAgentModelAttributionEntry[],
@@ -91,6 +111,10 @@ export function buildAgentModelRows(
     }
     const offPinRuns = observed.filter((o) => o.model !== declaredModel).reduce((s, o) => s + o.count, 0);
     rows.push({ agent, declaredModel, observed, totalRuns, offPinRuns, status: offPinRuns > 0 ? 'attention' : 'ok' });
+  }
+  for (const [agent, declaredModel] of declaredPins) {
+    if (byAgent.has(agent) || declaredModel == null) continue;
+    rows.push({ agent, declaredModel, observed: [], totalRuns: 0, offPinRuns: 0, status: 'not-observed' });
   }
   return rows.sort((a, b) => a.agent.localeCompare(b.agent));
 }

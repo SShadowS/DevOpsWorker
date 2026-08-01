@@ -350,6 +350,32 @@ describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin conta
     expect(result.text.toLowerCase()).toContain('cannot verify');
     expect(result.text).toContain('500');
   });
+
+  // I-4: a 'not-observed' row (a declared pin that never dispatched this
+  // window) must never be silently folded into "no model contamination" —
+  // that phrase must state how many pins it could not evaluate.
+  test('a not-observed-only row -> ok, "no model contamination" states it never observed the pin, not a bare all-clear', () => {
+    const result = assessModelIntegrity(
+      integrityFixture(),
+      readyContamination([agentModelRow({ agent: 'al-integration-analyzer', observed: [], totalRuns: 0, offPinRuns: 0, status: 'not-observed' })]),
+    );
+    expect(result.severity).toBe('ok');
+    expect(result.text).toContain('no model contamination');
+    expect(result.text).toContain('1 of 1 declared pin(s) never observed this window');
+  });
+
+  test('a real contaminated pin AND a never-observed pin at once -> attention text discloses both', () => {
+    const result = assessModelIntegrity(
+      integrityFixture(),
+      readyContamination([
+        agentModelRow(),
+        agentModelRow({ agent: 'al-integration-analyzer', observed: [], totalRuns: 0, offPinRuns: 0, status: 'not-observed' }),
+      ]),
+    );
+    expect(result.severity).toBe('attention');
+    expect(result.text).toContain('at least 9/95');
+    expect(result.text).toContain('1 of 2 declared pin(s) never observed this window');
+  });
 });
 
 describe('assessLevers', () => {
