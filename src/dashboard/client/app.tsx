@@ -6,6 +6,7 @@ import { MobileSessionCard } from './components/mobile-session-card.tsx';
 import { MobileSessionDetail } from './components/mobile-session-detail.tsx';
 import { LogViewer } from './components/log-viewer.tsx';
 import { PRReviewList } from './components/pr-review-list.tsx';
+import { StatsView } from './components/stats-view.tsx';
 import { forcePull } from './sse.ts';
 
 const editingConcurrency = signal(false);
@@ -20,7 +21,7 @@ async function handleForcePull() {
     pulling.value = false;
   }
 }
-const activeView = signal<'sessions' | 'pr-reviews'>('sessions');
+const activeView = signal<'sessions' | 'pr-reviews' | 'stats'>('sessions');
 
 async function updateConcurrency() {
   const val = parseInt(concurrencyInput.value, 10);
@@ -128,6 +129,17 @@ export function App() {
           >
             PR Reviews
           </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-stats"
+            aria-selected={activeView.value === 'stats'}
+            aria-controls="panel-stats"
+            class={`view-tabs__tab ${activeView.value === 'stats' ? 'view-tabs__tab--active' : ''}`}
+            onClick={() => { activeView.value = 'stats'; }}
+          >
+            Stats & Config
+          </button>
         </div>
         {activeView.value === 'sessions' ? (
           <div id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions">
@@ -154,9 +166,13 @@ export function App() {
               </div>
             )}
           </div>
-        ) : (
+        ) : activeView.value === 'pr-reviews' ? (
           <div id="panel-pr-reviews" role="tabpanel" aria-labelledby="tab-pr-reviews">
             <PRReviewList />
+          </div>
+        ) : (
+          <div id="panel-stats" role="tabpanel" aria-labelledby="tab-stats">
+            <StatsView />
           </div>
         )}
       </main>

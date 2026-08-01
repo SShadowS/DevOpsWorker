@@ -1509,3 +1509,120 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .badge--running  { background: color-mix(in srgb, var(--color-warning, #f59e0b) 18%, transparent); color: var(--color-warning, #f59e0b); animation: pulse 1.5s infinite; }
 .badge--success  { background: color-mix(in srgb, var(--color-success, #10b981) 18%, transparent); color: var(--color-success, #10b981); }
 .badge--error    { background: color-mix(in srgb, var(--color-error, #ef4444) 18%, transparent);   color: var(--color-error, #ef4444); }
+
+/* ============================================================
+   Stats & Config tab — shell (Task 4)
+   The window selector and the placeholder slots below are chrome, not a
+   warning, so neither spends --color-accent (reserved for "needs
+   attention" per design-constraints.md). Slot border colour reuses
+   --color-stage-* so this tab reads identically to the sessions view, and
+   every colour is paired with text saying the same thing in words.
+   ============================================================ */
+
+.stats-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.stats-view__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.window-selector {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.window-selector__btn {
+  padding: 6px 14px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.window-selector__btn:hover { color: var(--color-text-primary); }
+.window-selector__btn--active {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+/* Placeholder slot — one per Task 5-9. Each later task replaces the
+   `__sources` list + placeholder note with its real panel body; the
+   loading/empty/error branching that produces `--loading|--error|--empty|--ready`
+   is meant to survive that swap unchanged. */
+.stats-slot {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-stage-pending);
+  border-radius: 6px;
+  padding: var(--space-md);
+}
+.stats-slot--loading { border-left-color: var(--color-stage-active); }
+.stats-slot--error   { border-left-color: var(--color-stage-error); }
+.stats-slot--empty   { border-left-color: var(--color-stage-pending); }
+.stats-slot--ready   { border-left-color: var(--color-stage-completed); }
+
+.stats-slot__header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.stats-slot__title { font-size: 1rem; font-weight: 600; color: var(--color-text-primary); }
+
+.stats-slot__window {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.stats-slot__task-tag {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stats-slot__sources {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stats-slot__source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  font-size: 0.85rem;
+}
+
+.stats-slot__source-label { color: var(--color-text-secondary); min-width: 140px; }
+.stats-slot__source-message { color: var(--color-text-primary); }
+.stats-slot__source--error .stats-slot__source-message { color: var(--color-error); }
+.stats-slot__source--loading .stats-slot__source-message { color: var(--color-text-muted); }
+
+.stats-slot__placeholder-note {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px dashed var(--color-border-muted);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
