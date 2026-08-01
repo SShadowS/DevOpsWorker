@@ -230,3 +230,109 @@ describe('checkArmCompliance', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dispatch evidence (SG-1a) and model-billing evidence (SG-1b).
+//
+// Both exist because the `sub_agents` roster lies. It undercounts
+// nondeterministically — row 1715 recorded ONE agent while emitting seven
+// dispatches and billing $1.58 of sub-agent work — so every check built on its
+// COUNT is unreliable. `tool_calls->'Agent'` and `model_usage` are not.
+// ---------------------------------------------------------------------------
+
+describe('dispatch evidence — tool_calls->Agent, not the sub_agents roster', () => {
+  const roster = (n: number, model = 'claude-sonnet-5') =>
+    Object.fromEntries(Array.from({ length: n }, (_, i) => [`a${i}`, { model }]));
+
+  test('an under-counted roster does NOT void when dispatch evidence says all seven ran', () => {
+    // The real row-1714 shape: 5 recorded, 7 emitted. Before this, the roster count
+    // was the only signal and looked like under-dispatch.
+    const v = checkArmCompliance('baseline', null, 'claude-sonnet-5', roster(5), null, null, {
+      dispatchCount: 7,
+      expectedDispatch: 7,
+    });
+    expect(v.compliant).toBe(true);
+  });
+
+  test('a roster recording ONE agent still passes when seven were emitted — row 1715', () => {
+    const v = checkArmCompliance('inverted', null, 'claude-opus-4-8', roster(1, 'claude-opus-4-8'), null, null, {
+      dispatchCount: 7,
+      expectedDispatch: 7,
+    });
+    expect(v.compliant).toBe(true);
+  });
+
+  test('VOIDs when the arm restricted the roster but seven dispatches were emitted', () => {
+    // THE routing failure: prompt written, model ignored it, 7 dispatched anyway.
+    // Previously this scored compliant because the roster happened to record fewer.
+    const v = checkArmCompliance('routed', null, 'claude-sonnet-5', roster(3), null, null, {
+      dispatchCount: 7,
+      expectedDispatch: 6,
+    });
+    expect(v.compliant).toBe(false);
+    expect(v.reason).toContain('emitted 7');
+    expect(v.reason).toContain('expected 6');
+  });
+
+  test('VOIDs when the orchestrator dispatched nothing at all', () => {
+    const v = checkArmCompliance('baseline', null, null, roster(1), null, null, {
+      dispatchCount: 0,
+      expectedDispatch: 7,
+    });
+    expect(v.compliant).toBe(false);
+    expect(v.reason).toContain('no sub-agent dispatches');
+  });
+
+  test('the old roster-based note is suppressed once dispatch evidence exists', () => {
+    // The note was a hint standing in for this check; keeping both would double-report.
+    const withEvidence = checkArmCompliance('routed', null, null, roster(7), null, null, {
+      dispatchCount: 7,
+      expectedDispatch: 7,
+    });
+    expect(withEvidence.compliant).toBe(true);
+    expect(withEvidence.note).toBeUndefined();
+
+    const withoutEvidence = checkArmCompliance('routed', null, null, roster(7), null, null);
+    expect(withoutEvidence.note).toContain('verify this arm');
+  });
+});
+
+describe('model billing evidence — model_usage keys', () => {
+  const roster = { a0: { model: 'claude-sonnet-5' } };
+
+  test('VOIDs a premium [1m] long-context variant — row 1715 billed one silently', () => {
+    const v = checkArmCompliance('inverted', null, null, roster, null, null, {
+      modelUsageKeys: ['claude-opus-4-8[1m]', 'claude-sonnet-5'],
+      allowedModels: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'],
+    });
+    expect(v.compliant).toBe(false);
+    expect(v.reason).toContain('claude-opus-4-8[1m]');
+  });
+
+  test('VOIDs a model that billed on an UNATTRIBUTED sub-agent', () => {
+    // The per-agent check reads sub_agents, which undercounts — so opus billing on a
+    // lost entry is invisible to it. model_usage misses nothing.
+    const v = checkArmCompliance('baseline', null, 'claude-sonnet-5', roster, null, null, {
+      modelUsageKeys: ['claude-opus-5', 'claude-sonnet-5'],
+      allowedModels: ['claude-sonnet-5', 'claude-haiku-4-5-20251001'],
+    });
+    expect(v.compliant).toBe(false);
+    expect(v.reason).toContain('claude-opus-5');
+  });
+
+  test('accepts exactly the expected set, including SDK-internal haiku', () => {
+    const v = checkArmCompliance('baseline', null, 'claude-sonnet-5', roster, null, null, {
+      modelUsageKeys: ['claude-haiku-4-5-20251001', 'claude-opus-5', 'claude-sonnet-5'],
+      allowedModels: ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5-20251001'],
+    });
+    expect(v.compliant).toBe(true);
+  });
+
+  test('a dated model id still matches its undated allowed entry', () => {
+    const v = checkArmCompliance('baseline', null, null, roster, null, null, {
+      modelUsageKeys: ['claude-sonnet-5-20260101'],
+      allowedModels: ['claude-sonnet-5'],
+    });
+    expect(v.compliant).toBe(true);
+  });
+});

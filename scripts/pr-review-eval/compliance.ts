@@ -135,6 +135,40 @@ function normalizeModel(model: string): string {
  * read as compliant here — no such mechanism exists in this stack today, but
  * this check proves "started on the right model", not "every turn ran on it".
  */
+/**
+ * Signals the `sub_agents` roster cannot provide.
+ *
+ * Grouped into one object rather than more positional parameters: the signature was
+ * already four nullable slots deep, and two adjacent nullables invite a silent
+ * transposition that still type-checks.
+ */
+export interface DispatchEvidence {
+  /**
+   * `pr_reviews.tool_calls->'Agent'` — how many sub-agent dispatches the orchestrator
+   * actually EMITTED. This is the authoritative dispatch signal.
+   *
+   * The `sub_agents` roster is not: it undercounts nondeterministically because
+   * `src/sdk/agent-stream.ts` only records an entry from an assistant message carrying
+   * `subagent_type`, while background-task sub-agents stream as system messages and are
+   * lost. Row 1715 recorded ONE agent while emitting seven dispatches and billing $1.58
+   * of sub-agent work.
+   *
+   * This is also how the routing lever was caught doing nothing: every routed run
+   * emitted 7 dispatches, so the prompt was written and ignored.
+   */
+  dispatchCount?: number | null;
+  /** How many dispatches this arm's configuration should produce. */
+  expectedDispatch?: number | null;
+  /** Keys of `pr_reviews.model_usage` — every model that actually billed. */
+  modelUsageKeys?: string[] | null;
+  /**
+   * Models this arm may legitimately bill: sub-agent model, orchestrator model, and
+   * SDK-internal haiku. Anything else VOIDs — including long-context `[1m]` premium
+   * variants, which row 1715 billed silently.
+   */
+  allowedModels?: string[] | null;
+}
+
 export function checkArmCompliance(
   armName: string,
   expected: string[] | null,
@@ -142,6 +176,7 @@ export function checkArmCompliance(
   subAgents: Record<string, SubAgentTelemetryEntry> | null,
   expectedLevers: LeverFlags | null = null,
   appliedLevers: AppliedLevers | null = null,
+  evidence: DispatchEvidence = {},
 ): ComplianceVerdict {
   if (!subAgents || typeof subAgents !== 'object') {
     return { arm: armName, compliant: false, actual: 0, reason: 'no sub_agents telemetry recorded' };
@@ -256,7 +291,60 @@ export function checkArmCompliance(
     }
   }
 
-  const note = actual === 7 && armName !== 'baseline'
+  // ---- Dispatch, from tool_calls rather than the roster ------------------------
+  //
+  // Deliberately AFTER the roster/model/lever checks: those produce more specific
+  // reasons, and a run failing several should report the most actionable one.
+  const { dispatchCount, expectedDispatch, modelUsageKeys, allowedModels } = evidence;
+
+  if (typeof dispatchCount === 'number') {
+    if (dispatchCount === 0) {
+      return {
+        arm: armName,
+        compliant: false,
+        actual,
+        reason: 'orchestrator emitted no sub-agent dispatches — the review ran but delegated nothing',
+      };
+    }
+    if (typeof expectedDispatch === 'number' && dispatchCount !== expectedDispatch) {
+      // Both directions VOID. Under-dispatch means the arm reviewed less than it
+      // claims; over-dispatch means its roster instruction was ignored — which is
+      // exactly how the routing lever looked "applied" while changing nothing.
+      return {
+        arm: armName,
+        compliant: false,
+        actual,
+        reason: `emitted ${dispatchCount} sub-agent dispatches, expected ${expectedDispatch}`
+          + ` — the arm's roster instruction did not take effect`,
+      };
+    }
+  }
+
+  // ---- Model billing: nothing outside the arm's expected set -------------------
+  //
+  // The per-agent model check above reads `sub_agents`, which undercounts, so a
+  // model that billed on an unattributed sub-agent is invisible to it. `model_usage`
+  // is the SDK's billing aggregate and misses nothing.
+  if (modelUsageKeys && allowedModels) {
+    const allowed = new Set(allowedModels.map(normalizeModel));
+    // Compared WITHOUT stripping a `[...]` suffix: `claude-opus-4-8[1m]` is the
+    // long-context premium tier at different pricing, so treating it as its base
+    // model would hide a real cost difference.
+    const unexpected = modelUsageKeys.filter((k) => !allowed.has(normalizeModel(k)));
+    if (unexpected.length > 0) {
+      return {
+        arm: armName,
+        compliant: false,
+        actual,
+        reason: `billed models outside the arm's expected set: ${unexpected.join(', ')}`
+          + ` (allowed: ${allowedModels.join(', ')})`,
+      };
+    }
+  }
+
+  // Only meaningful when dispatch evidence is absent; with `dispatchCount` the check
+  // above states the same thing definitively rather than as a hint.
+  const note = typeof dispatchCount !== 'number' && actual === 7 && armName !== 'baseline'
     ? `ran all 7 sub-agents — verify this arm's instruction took effect`
     : undefined;
 

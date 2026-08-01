@@ -220,12 +220,49 @@ export function leverFlagsFor(arm: Arm): LeverFlags {
  * that only holds if `expectedModelFor`/`leverFlagsFor` are wired in here,
  * not bypassed.
  */
+/** The full roster when an arm sets no `agentSet` restriction. */
+export const FULL_ROSTER = SEVEN.length;
+
+/** SDK-internal; bills a fraction of a cent and appears in every run. */
+const SDK_INTERNAL_MODEL = 'claude-haiku-4-5-20251001';
+
+/**
+ * Models this arm may legitimately bill: its sub-agent model, the orchestrator's, and
+ * SDK-internal haiku. Anything else VOIDs.
+ *
+ * The orchestrator model is read from `DEFAULT_MODEL` at call time, mirroring
+ * `src/cli/config.ts` — including the `||` (an empty string must fall through to the
+ * default, not be treated as a model id).
+ */
+export function allowedModelsFor(arm: Arm): string[] {
+  return [expectedModelFor(arm), process.env['DEFAULT_MODEL'] || 'claude-opus-5', SDK_INTERNAL_MODEL];
+}
+
 export function buildComplianceVerdict(
   arm: Arm,
   subAgents: Record<string, SubAgentTelemetryEntry> | null,
   appliedLevers: AppliedLevers | null,
+  // Dispatch evidence from the recorded row. Optional so existing callers and tests
+  // keep working; when supplied it is strictly stronger than the roster.
+  dispatchCount: number | null = null,
+  modelUsageKeys: string[] | null = null,
 ): ComplianceVerdict {
-  return checkArmCompliance(arm.name, arm.agentSet, expectedModelFor(arm), subAgents, leverFlagsFor(arm), appliedLevers);
+  return checkArmCompliance(
+    arm.name,
+    arm.agentSet,
+    expectedModelFor(arm),
+    subAgents,
+    leverFlagsFor(arm),
+    appliedLevers,
+    {
+      dispatchCount,
+      // An arm that restricts the roster should emit exactly that many dispatches;
+      // one that does not should emit the full seven.
+      expectedDispatch: arm.agentSet?.length ?? FULL_ROSTER,
+      modelUsageKeys,
+      allowedModels: allowedModelsFor(arm),
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -714,7 +751,17 @@ for (const prId of prIds) {
       // a missing measurement (its lever, or its roster, never actually took
       // effect this run) and must be excluded from the scoring table, reported
       // separately, rather than averaged in as if the arm produced nothing.
-      const verdict = buildComplianceVerdict(arm, recorded.subAgents, recorded.appliedLevers);
+      // `tool_calls->'Agent'` is the authoritative dispatch signal, not the
+      // `sub_agents` roster — the roster undercounts (row 1715: 1 recorded, 7
+      // emitted). `model_usage` keys catch a model that billed on an unattributed
+      // sub-agent, which the per-agent check cannot see for the same reason.
+      const verdict = buildComplianceVerdict(
+        arm,
+        recorded.subAgents,
+        recorded.appliedLevers,
+        typeof recorded.toolCalls?.['Agent'] === 'number' ? recorded.toolCalls['Agent'] : null,
+        recorded.modelUsage ? Object.keys(recorded.modelUsage) : null,
+      );
       if (!verdict.compliant) {
         console.log(`  VOID  ${arm.name} PR ${prId}: ${verdict.reason}`);
       } else if (verdict.note) {
