@@ -7,6 +7,19 @@ function togglePR(id: number): void {
   selectedPRReviewId.value = selectedPRReviewId.value === id ? null : id;
 }
 
+/**
+ * A test run (an A/B arm or an ad-hoc probe) is a fact, not a problem — it is
+ * excluded from production statistics elsewhere in this dashboard, but this
+ * list still shows every row (per the plan: labelling only, no filtering).
+ * `isTest` is optional here even though `DashboardPRReview.isTest` is not:
+ * this asymmetry is deliberate. A legacy row (any row from before this field
+ * existed) must read as production, not as "unknown" or, worse, as flagged —
+ * so a missing field takes the same `false` branch as an explicit `false`.
+ */
+export function badgeForReview(review: { isTest?: boolean }): 'test' | null {
+  return review.isTest === true ? 'test' : null;
+}
+
 export function PRReviewList() {
   const reviews = prReviews.value;
 
@@ -54,6 +67,9 @@ export function PRReviewList() {
                 <span class="pr-review-row__branch" title={r.sourceBranch}>{r.sourceBranch}</span>
                 <RecommendationBadge rec={r.recommendation} hasError={!!r.error} pendingStatus={r.pendingStatus} />
                 <FindingsPills findings={r.findings} />
+                {badgeForReview(r) && (
+                  <span class="pr-review__badge pr-review__badge--test" title="Excluded from production statistics">test</span>
+                )}
               </div>
               <div class="pr-review-row__meta">
                 {r.costUsd != null && <span class="pr-review-row__cost">{formatCost(r.costUsd)}</span>}

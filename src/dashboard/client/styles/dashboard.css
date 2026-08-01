@@ -883,6 +883,12 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review__badge--error { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error); }
 .pr-review__badge--legacy { background: color-mix(in srgb, var(--color-stage-pending) 25%, transparent); color: var(--color-text-muted); }
 .pr-review__badge--pending { background: color-mix(in srgb, var(--color-text-muted) 18%, transparent); color: var(--color-text-muted); animation: pulse 1.5s infinite; }
+/* Task 5: a test run (A/B arm, ad-hoc probe) is a fact, not a problem — borrows
+   the same neutral tier as `.status-ribbon__scope-badge` (bg-tertiary/border/
+   text-secondary, no semantic colour, no --color-accent) rather than any of
+   this badge family's approve/changes/discussion/error colours, which are all
+   reserved for a verdict about the review itself. */
+.pr-review__badge--test { background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
 
 .pr-review__findings { display: inline-flex; gap: 6px; }
 .pr-review__no-findings { font-size: 0.75rem; color: var(--color-text-muted); }

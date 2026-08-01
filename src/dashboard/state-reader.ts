@@ -319,6 +319,7 @@ export async function readPRReviews(store: IPRReviewStore, actionStore?: IAction
     createdAt: r.createdAt,
     webUrl: buildPrWebUrl(r.repoKey, r.prId),
     pendingStatus: undefined as 'queued' | 'reviewing' | undefined,
+    isTest: r.isTest,
   }));
 
   // Merge pending/in-progress reviews from the action queue
@@ -345,6 +346,10 @@ export async function readPRReviews(store: IPRReviewStore, actionStore?: IAction
         createdAt: p.createdAt,
         webUrl: buildPrWebUrl(p.repoKey, p.prId),
         pendingStatus: p.status,
+        // No DB row exists yet for a queued/in-progress review — it cannot be
+        // a test run by construction (isTestRun() is only evaluated once
+        // review-pr.ts actually saves a completed or errored row).
+        isTest: false,
       });
     }
   }
@@ -361,6 +366,6 @@ export async function readPRReviewDetail(store: IPRReviewStore, id: number): Pro
     findings: r.findings, findingsCount: r.findingsCount, costUsd: r.costUsd,
     durationMs: r.durationMs, turns: r.turns, toolCalls: r.toolCalls, error: r.error,
     createdAt: r.createdAt, webUrl: buildPrWebUrl(r.repoKey, r.prId),
-    pendingStatus: undefined, reviewBody: r.reviewBody,
+    pendingStatus: undefined, reviewBody: r.reviewBody, isTest: r.isTest,
   };
 }
