@@ -1,5 +1,6 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
+import type postgres from 'postgres';
 import { readAllSessions, readSession, readPRReviews, readPRReviewDetail } from './state-reader.ts';
 import { SessionPoller } from './session-poller.ts';
 import { validateAction } from './actions.ts';
@@ -11,6 +12,8 @@ import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
 import type { ILogSink } from '../pipeline/log-sink.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import { LogPoller } from './log-poller.ts';
+import { parseWindow, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getDriftStats } from './stats.ts';
+import { buildConfigReport } from './config-report.ts';
 
 // ---------------------------------------------------------------------------
 // Learn-rules in-progress tracking
@@ -50,10 +53,14 @@ export interface DashboardOptions {
   logSink: (workItemId: number) => ILogSink;
   prReviewStore: IPRReviewStore;
   prReviewLogSink: (prId: number, reviewRunId: string) => ILogSink;
+  /** Raw Postgres connection for `/api/stats/*` and `/api/drift` — those
+   *  endpoints need `percentile_cont` and per-row JSONB shaping that the
+   *  typed store interfaces don't expose (see `src/dashboard/stats.ts`). */
+  sql: postgres.Sql;
 }
 
 export function startDashboard(options: DashboardOptions): void {
-  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink } = options;
+  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql } = options;
 
   const logPoller = new LogPoller(logSink, stateStore, broadcastSSE);
 
@@ -394,6 +401,43 @@ export function startDashboard(options: DashboardOptions): void {
         } catch {
           return Response.json({ error: 'Invalid request' }, { status: 400 });
         }
+      }
+
+      // Stats & Config tab — resolved-configuration snapshot. No DB access;
+      // computed live from process env + static agent config + overlay manifest
+      // via the same functions production code calls (see config-report.ts).
+      if (path === '/api/config' && req.method === 'GET') {
+        return Response.json(await buildConfigReport());
+      }
+
+      // Stats & Config tab — data layer. Each handler clamps ?window= itself
+      // (parseWindow whitelists to '7d'|'30d'|'90d', defaulting to '30d');
+      // nothing here forwards the raw query-string value into SQL.
+      if (path === '/api/stats/cost' && req.method === 'GET') {
+        const window = parseWindow(url.searchParams.get('window'));
+        return Response.json(await getCostStats(sql, window));
+      }
+
+      if (path === '/api/stats/quality' && req.method === 'GET') {
+        const window = parseWindow(url.searchParams.get('window'));
+        return Response.json(await getQualityStats(sql, window));
+      }
+
+      if (path === '/api/stats/integrity' && req.method === 'GET') {
+        const window = parseWindow(url.searchParams.get('window'));
+        return Response.json(await getIntegrityStats(sql, window));
+      }
+
+      if (path === '/api/stats/operational' && req.method === 'GET') {
+        const window = parseWindow(url.searchParams.get('window'));
+        return Response.json(await getOperationalStats(sql, window));
+      }
+
+      // Build provenance comparison — see src/dashboard/stats.ts for why HEAD
+      // is an explicit null rather than a guess.
+      if (path === '/api/drift' && req.method === 'GET') {
+        const window = parseWindow(url.searchParams.get('window'));
+        return Response.json(await getDriftStats(sql, window));
       }
 
       // Serve built client assets from dist/

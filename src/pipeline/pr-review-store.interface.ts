@@ -64,6 +64,15 @@ export interface PRReviewRow {
    *  or a row recorded before this was captured — never a map of zeros, which
    *  would be indistinguishable from "every enabled lever failed to apply". */
   appliedLevers: AppliedLevers | null;
+  /** The core repo's short HEAD sha baked into the image that produced this
+   *  review (`process.env.BUILD_SHA`, set from the Dockerfile `ARG`/`ENV` —
+   *  see `docker-build.ps1`). Null for rows recorded before this was captured,
+   *  and for any container built without the `BUILD_SHA` build-arg (e.g. a
+   *  plain `docker compose build`, which bakes the literal string `"unknown"`
+   *  rather than leaving the env var unset — that case reads back as the
+   *  string `"unknown"`, not null). Answers "which build produced this row",
+   *  independent of what HEAD is checked out today. */
+  imageSha: string | null;
 }
 
 export interface IPRReviewStore {

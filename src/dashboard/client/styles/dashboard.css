@@ -1509,3 +1509,995 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .badge--running  { background: color-mix(in srgb, var(--color-warning, #f59e0b) 18%, transparent); color: var(--color-warning, #f59e0b); animation: pulse 1.5s infinite; }
 .badge--success  { background: color-mix(in srgb, var(--color-success, #10b981) 18%, transparent); color: var(--color-success, #10b981); }
 .badge--error    { background: color-mix(in srgb, var(--color-error, #ef4444) 18%, transparent);   color: var(--color-error, #ef4444); }
+
+/* ============================================================
+   Stats & Config tab — shell (Task 4)
+   The window selector and the placeholder slots below are chrome, not a
+   warning, so neither spends --color-accent (reserved for "needs
+   attention" per design-constraints.md). Slot border colour reuses
+   --color-stage-* so this tab reads identically to the sessions view, and
+   every colour is paired with text saying the same thing in words.
+   ============================================================ */
+
+.stats-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.stats-view__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.window-selector {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.window-selector__btn {
+  padding: 6px 14px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.window-selector__btn:hover { color: var(--color-text-primary); }
+.window-selector__btn--active {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+/* Placeholder slot — one per Task 5-9. Each later task replaces the
+   `__sources` list + placeholder note with its real panel body; the
+   loading/empty/error branching that produces `--loading|--error|--empty|--ready`
+   is meant to survive that swap unchanged. */
+.stats-slot {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-stage-pending);
+  border-radius: 6px;
+  padding: var(--space-md);
+}
+.stats-slot--loading { border-left-color: var(--color-stage-active); }
+.stats-slot--error   { border-left-color: var(--color-stage-error); }
+.stats-slot--empty   { border-left-color: var(--color-stage-pending); }
+.stats-slot--ready   { border-left-color: var(--color-stage-completed); }
+
+.stats-slot__header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.stats-slot__title { font-size: 1rem; font-weight: 600; color: var(--color-text-primary); }
+
+.stats-slot__window {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+/* Task 10: `.stats-slot__task-tag`, `.stats-slot__sources`,
+   `.stats-slot__source*`, and `.stats-slot__placeholder-note` were the Task 4
+   placeholder's `<ul>` + note, rendered for every not-yet-built panel.
+   Task 6-9 each replaced that placeholder with a real panel body (see
+   stats-view.tsx's own module doc comment); grepping the component tree
+   turned up zero remaining users of any of these five classes — only a
+   reference inside a code COMMENT in stats-integrity.tsx. Removed as dead
+   CSS found during this pass, alongside the assigned `.operational-mono`
+   removal below. `.stats-slot`/`.stats-slot__header`/`.stats-slot__title`/
+   `.stats-slot__window`/`.stats-slot__status-text` are NOT touched — every
+   current panel still renders through that wrapper. */
+
+/* ============================================================
+   Status ribbon (Task 5) — "the reason this entire feature exists."
+   Four independent indicator cards. Each card's border-left colour reuses
+   --color-stage-* for loading/error/empty/ok, exactly like .stats-slot
+   above so this tab reads as one system; --color-accent is spent ONLY on
+   `--attention`, and only here — see design-constraints.md. Every
+   `--attention` card also carries literal warning text ("Needs attention:",
+   "config may be inert") — colour is never the only signal.
+   ============================================================ */
+
+.status-ribbon {
+  display: flex;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.status-ribbon__item {
+  flex: 1 1 220px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-stage-pending);
+  border-radius: 6px;
+  padding: var(--space-md);
+}
+/* Deployment drift is the centrepiece — give it more room than the other
+   three compact indicators when there is space to spare. */
+.status-ribbon__item:first-child { flex: 2 1 320px; }
+
+.status-ribbon__item--loading   { border-left-color: var(--color-stage-active); }
+.status-ribbon__item--error     { border-left-color: var(--color-stage-error); }
+.status-ribbon__item--empty     { border-left-color: var(--color-stage-pending); }
+.status-ribbon__item--ok        { border-left-color: var(--color-stage-completed); }
+.status-ribbon__item--attention {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-secondary));
+}
+
+.status-ribbon__item-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.status-ribbon__item-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 var(--space-sm) 0;
+}
+.status-ribbon__item-header .status-ribbon__item-label { margin-bottom: 0; }
+
+.status-ribbon__window {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.status-ribbon__item-text {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.status-ribbon__attention-tag { color: var(--color-accent); }
+
+.status-ribbon__warning {
+  margin: var(--space-sm) 0 0 0;
+  padding-top: var(--space-sm);
+  border-top: 1px dashed var(--color-border-muted);
+  color: var(--color-accent);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+/* Three-sha provenance table — shas render in --font-mono per
+   design-constraints.md; the decorative bar is aria-hidden, so every fact
+   it conveys (the sha itself, the distance) is ALSO present as text. */
+.status-ribbon__provenance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.status-ribbon__provenance-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  font-size: 0.82rem;
+}
+
+.status-ribbon__provenance-label {
+  min-width: 100px;
+  color: var(--color-text-secondary);
+}
+
+.status-ribbon__provenance-value { color: var(--color-text-primary); }
+.status-ribbon__sha { font-family: var(--font-mono); }
+
+.status-ribbon__bar {
+  position: relative;
+  flex: 1 1 60px;
+  min-width: 40px;
+  max-width: 120px;
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+.status-ribbon__bar-dot {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-secondary);
+  transform: translate(-50%, -50%);
+}
+
+.status-ribbon__distance {
+  /* Task 10: was --color-text-muted (2.6-3.1:1 on this card's backgrounds —
+     fails WCAG AA's 4.5:1 for normal text). This is the exact commit-count
+     fact the drift card exists to report, not decoration — bumped to
+     --color-text-secondary (4.86-5.71:1, passes AA). Same reasoning applies
+     to every *__note/*__empty/*__exemplar/*__qualifier rule touched in this
+     pass below. */
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .status-ribbon { flex-direction: column; }
+  .status-ribbon__item:first-child { flex: 1 1 auto; }
+  .status-ribbon__provenance-row { align-items: flex-start; }
+  .status-ribbon__bar { display: none; }
+}
+
+/* ============================================================
+   Integrity panel (Task 6) — replaces the stats-slot-integrity
+   placeholder. Keeps the .stats-slot / .stats-slot--{status} wrapper and
+   header from the Task 4 shell (loading/error/empty border colour is
+   unchanged); everything below .stats-slot__header is new.
+
+   Three section states, not two — see stats-integrity.tsx's module doc
+   comment for why: 'neutral' (dispatch mismatch, effort drift) is
+   deliberately NOT on the ok/attention scale, because a known-instrument
+   caveat measured at 69% would otherwise paint this panel permanently
+   amber. --color-accent is spent only on --attention, exactly like
+   .status-ribbon__item--attention, and always paired with literal text.
+   ============================================================ */
+
+.stats-slot__status-text {
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  margin: 0;
+}
+.stats-slot__status-text--error { color: var(--color-error); }
+
+.integrity-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* Fix round 1: --color-text-muted measured 2.6-3.1:1, fails WCAG AA. This is
+   the "Small sample: n=X ... every statistic below is a small-sample
+   reading" text — non-negotiable #5 in design-constraints.md ("Small
+   samples say so") — missed in the first sweep. */
+.integrity-panel__low-sample {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.integrity-section {
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-stage-pending);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+}
+.integrity-section--ok        { border-left-color: var(--color-stage-completed); }
+.integrity-section--attention {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-tertiary));
+}
+.integrity-section--neutral   { border-left-color: var(--color-stage-pending); }
+
+.integrity-section__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: 4px;
+}
+
+.integrity-section__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.integrity-section__badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
+.integrity-section__summary,
+.integrity-section__note {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 on this card's
+   background — fails WCAG AA (4.5:1) for the caveat/explanation prose this
+   class carries (e.g. "Known instrument caveat: ..."). --color-text-secondary
+   passes (4.86-5.71:1) without a new token. */
+.integrity-section__note { color: var(--color-text-secondary); }
+.integrity-section__empty { margin: 4px 0 0 0; font-size: 0.82rem; color: var(--color-text-secondary); font-style: italic; }
+
+.integrity-section__tag { font-weight: 600; }
+.integrity-section__tag--attention { color: var(--color-accent); }
+.integrity-section__tag--caveat    { color: var(--color-text-secondary); }
+
+.integrity-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+/* Fix round 1: this and the other three new tables' `th` rules
+   (.config-table, .cost-table/.quality-table, .operational-table) were
+   --color-text-muted (2.6-3.1:1, fails AA) — checked against the incumbent
+   tables at 8129ee0 (before this plan started): .plan-table/.telemetry-table/
+   .tool-table all use --color-text-secondary and pass. These five new
+   tables were the deviation from the house convention, not the other way
+   round — bumped to match. */
+.integrity-table th {
+  text-align: left;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.integrity-table td {
+  padding: 3px 8px 3px 0;
+  color: var(--color-text-secondary);
+}
+.integrity-table__model { font-family: var(--font-mono); color: var(--color-text-primary); }
+.integrity-table__flag { color: var(--color-accent); font-weight: 600; }
+.integrity-table__row--flagged { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+
+@media (max-width: 767px) {
+  .integrity-table { display: block; overflow-x: auto; }
+}
+
+/* ============================================================
+   Config panel (Task 7) — replaces the stats-slot-config placeholder.
+   Keeps the .stats-slot / .stats-slot--{status} wrapper and header from the
+   Task 4 shell (loading/error border colour is unchanged); everything below
+   .stats-slot__header is new.
+
+   Collapsed by default — the summary row IS the disclosure control (a real
+   <button>, aria-expanded/aria-controls driving .config-panel__body's
+   `hidden` attribute), never a decorative chevron with no ARIA behind it.
+
+   --color-accent is spent in exactly two places here: the two independent
+   config builders (loadConfig/buildConfigFromRepo) disagreeing, and an eval
+   lever that should be off in production being active — both real,
+   previously-seen bug classes, never on chrome. Every other section is
+   --neutral (this reports what's DECLARED and RESOLVED, not a pass/fail
+   measurement) or --ok. Mono is reserved for identifiers (model ids, env
+   var names, file names, tool names) — never for prose words like
+   "none declared" or the "→" separator, matching design-constraints.md.
+   ============================================================ */
+
+.config-panel { display: flex; flex-direction: column; gap: var(--space-sm); }
+
+.config-panel__toggle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  /* Task 10: was `padding: 0`, measuring 23px tall live — under the WCAG 2.2
+     Target Size (Minimum) 24px floor (SC 2.5.8) for the only disclosure
+     control in this panel. Vertical padding alone (no horizontal, it's
+     already full-width) clears the floor without changing the visible text
+     size. */
+  padding: 5px 0;
+  cursor: pointer;
+  color: var(--color-text-primary);
+  font: inherit;
+}
+.config-panel__toggle:hover .config-panel__toggle-label { color: var(--color-text-primary); text-decoration: underline; }
+.config-panel__toggle:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.config-panel__chevron {
+  display: inline-block;
+  color: var(--color-text-muted);
+  transition: transform 0.12s ease;
+  flex-shrink: 0;
+}
+.config-panel__toggle[aria-expanded="true"] .config-panel__chevron { transform: rotate(90deg); }
+
+.config-panel__summary { flex: 1 1 auto; font-size: 0.9rem; color: var(--color-text-secondary); }
+.config-panel__summary--attention { color: var(--color-text-primary); }
+
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 here — fails WCAG AA
+   (4.5:1). This is the "fallback — DEFAULT_MODEL unset" qualifier text,
+   real content per design-constraints.md #4, not decoration. */
+.config-panel__qualifier { color: var(--color-text-secondary); }
+
+/* Fix round 1: live-verified — the resting (non-hover) colour is this rule's
+   own --color-text-muted (2.6-3.1:1, fails AA); an earlier live check
+   accidentally read the :hover override instead (Playwright's virtual
+   cursor stays over the element after a `.click()`), which reads
+   --color-text-primary and masked this. Confirmed by reading the actual
+   CSSOM rule for .config-panel__toggle-label, not just the hovered
+   computed style. This is the "Show details"/"Hide details" label — the
+   only affordance telling a reader the row is a disclosure control. */
+.config-panel__toggle-label {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.config-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border-muted);
+}
+/* Task 10 fix — real bug, confirmed live: the UA stylesheet's own
+   `[hidden] { display: none }` rule has the SAME specificity (0,1,0) as the
+   class selector above and loses the cascade because this author rule comes
+   later in the sheet. The result: `hidden={!expanded}` (stats-config.tsx)
+   set the attribute correctly, but `.config-panel__body` stayed
+   `display: flex` regardless — the ENTIRE ~2000px expanded body (every
+   section, every link) was always rendered, always in the accessibility
+   tree, and always in the keyboard tab order, even with the toggle showing
+   "▸ Show details" / `aria-expanded="false"`. "Collapsed by default" — the
+   panel's whole reason for a disclosure control, per task-7-brief.md and
+   design-constraints.md's Operate-mode scanability principle — was not
+   happening in the actual rendered page, only in the component's own state.
+   The attribute-selector override below has higher specificity (0,1,1) than
+   either rule above and wins regardless of source order. */
+.config-panel__body[hidden] { display: none; }
+
+.config-panel__generated-at { font-style: italic; }
+
+/* Two-column definition list — label : value pairs. Identifiers render
+   inside a nested <code class="config-mono">, not the whole <dd>, so prose
+   words sharing the cell ("fallback — ...", "none declared") stay in the
+   normal font per design-constraints.md ("mono for identifiers ... not for
+   label words"). */
+.config-dl {
+  display: grid;
+  grid-template-columns: minmax(180px, max-content) 1fr;
+  column-gap: var(--space-md);
+  row-gap: 6px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.config-dl dt { color: var(--color-text-secondary); }
+.config-dl dd { margin: 0; color: var(--color-text-primary); }
+
+.config-mono { font-family: var(--font-mono); color: var(--color-text-primary); }
+
+.config-section {
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-stage-pending);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+}
+.config-section--ok        { border-left-color: var(--color-stage-completed); }
+.config-section--attention {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-tertiary));
+}
+.config-section--neutral   { border-left-color: var(--color-stage-pending); }
+
+.config-section__header { display: flex; align-items: baseline; gap: var(--space-sm); margin-bottom: 4px; }
+.config-section__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+.config-section__badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
+.config-section__summary,
+.config-section__note { margin: 4px 0 0 0; font-size: 0.82rem; color: var(--color-text-secondary); }
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 here — fails WCAG AA
+   (4.5:1) for the note/empty/none prose these three rules render (the
+   "Declared, not guaranteed: ..." caveat, "no overlay override", etc.) —
+   --color-text-secondary passes (4.86-5.71:1). */
+.config-section__empty { margin: 4px 0 0 0; font-size: 0.82rem; color: var(--color-text-secondary); font-style: italic; }
+
+.config-tag { font-weight: 600; }
+.config-tag--attention { color: var(--color-accent); }
+.config-tag--caveat    { color: var(--color-text-secondary); }
+
+/* Task 10: was --color-info as link TEXT (3.39:1 on this section's
+   background — fails WCAG AA's 4.5:1 for normal-size text). See
+   .operational-section__link (Operational panel block, below) for the full
+   reasoning — both are the only two links this feature introduces. */
+.config-section__link { color: var(--color-text-secondary); text-decoration: underline; }
+
+.config-subagent-group { margin-top: var(--space-sm); }
+.config-subagent-group__title { font-size: 0.78rem; font-weight: 600; color: var(--color-text-secondary); margin: 0 0 4px 0; }
+
+.config-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+/* Fix round 1: see .integrity-table th's comment — same deviation, same fix. */
+.config-table th {
+  text-align: left;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.config-table td { padding: 3px 8px 3px 0; color: var(--color-text-secondary); vertical-align: top; }
+.config-table__mono { font-family: var(--font-mono); color: var(--color-text-primary); }
+/* Fix round 1: live-verified with getComputedStyle. `.config-table__none`
+   is a real, live AA failure — it's a <span> nested in a <td>, so it gets
+   its own directly-specified colour (2.6-3.1:1, fails) rather than
+   inheriting the td's --color-text-secondary. This is constraint #3's own
+   "none declared"/"no overlay override" word, mandated to read as a word,
+   not a blank — measured at rgb(100,116,139) live before this fix. */
+.config-table__none { color: var(--color-text-secondary); font-style: italic; }
+.config-table__row--active { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+/* `.config-table__row--inert` sets `color` on the <tr>, but every child
+   <td> in this table matches `.config-table td` directly (a MORE specific
+   selector for that element, 0,1,1 vs 0,1,0) — a direct match always wins
+   over an ancestor's value, so inheritance from this rule never even gets
+   consulted. Verified live by forcing a real present-but-inert lever
+   (PR_REVIEW_NO_POST=true): the <tr> itself computes to muted
+   (rgb(100,116,139)), but every cell — "present, but inert" included —
+   already renders at rgb(148,163,184), i.e. --color-text-secondary, and
+   already passes AA. The declared value was dead, not a live failure, but
+   it's also exactly backwards: this is the declared-but-silently-ignored
+   config scenario the whole plan is about (the PR_REVIEW_NO_POST case), so
+   dimming it was never the right call even if it had worked. Aligning the
+   source with what already (accidentally) renders removes the trap for
+   whoever next touches `.config-table td` and makes this row real muted. */
+.config-table__row--inert  { color: var(--color-text-secondary); }
+
+@media (max-width: 767px) {
+  .config-dl { grid-template-columns: 1fr; row-gap: 2px; }
+  .config-dl dt { font-weight: 600; }
+  .config-table { display: block; overflow-x: auto; }
+}
+
+/* ============================================================
+   Cost + Quality cards (Task 8) — replaces the stats-slot-cost-quality
+   placeholder. Keeps the .stats-slot / .stats-slot--{status} wrapper and
+   header from the Task 4 shell; everything below .stats-slot__header is new.
+   Own `.cost-*`/`.quality-*` namespaces, duplicated rather than shared with
+   .integrity-section/.config-section — the established per-panel pattern
+   (see design-constraints.md).
+
+   Series colour comes ONLY from the incumbent status tokens
+   (--color-success|info|warning|error, --color-stage-pending) — never
+   --color-accent, which is reserved for "Needs attention:" tag TEXT only,
+   exactly as in every other panel on this tab.
+   ============================================================ */
+
+.cost-quality-grid {
+  display: flex;
+  gap: var(--space-md);
+  align-items: flex-start;
+}
+
+.cost-card, .quality-card {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.cost-card__title, .quality-card__title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.cost-card__body, .quality-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* Fix round 1: same "Small sample: n=X ..." text, same missed muted/AA
+   failure as .integrity-panel__low-sample above. */
+.cost-panel__low-sample, .quality-panel__low-sample {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+@media (max-width: 1100px) {
+  .cost-quality-grid { flex-direction: column; }
+}
+
+/* ---- Section shells (own namespace, identical visual rules to
+   .integrity-section / .config-section by design — see block comment above) ---- */
+
+.cost-section, .quality-section {
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-stage-pending);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+}
+.cost-section--ok, .quality-section--ok               { border-left-color: var(--color-stage-completed); }
+.cost-section--attention, .quality-section--attention  {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-tertiary));
+}
+.cost-section--neutral, .quality-section--neutral      { border-left-color: var(--color-stage-pending); }
+
+.cost-section__title, .quality-section__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 4px 0;
+}
+
+.cost-section__summary, .cost-section__note,
+.quality-section__summary, .quality-section__note {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 here — fails WCAG AA
+   (4.5:1) for the "Known instrument caveat: ..." prose and empty-state text
+   these carry — --color-text-secondary (already the shared rule above)
+   passes (4.86-5.71:1); no override needed for __note anymore. */
+.cost-section__empty, .quality-section__empty {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.cost-tag, .quality-tag { font-weight: 600; }
+.cost-tag--attention, .quality-tag--attention { color: var(--color-accent); }
+.cost-tag--caveat, .quality-tag--caveat       { color: var(--color-text-secondary); }
+
+/* ---- Cost split — ONE stacked bar (chart B1). Total width is exact; the
+   dashed line at the segment boundary is the ONLY dashed element on this
+   tab — dashed specifically means "this exact position is a biased
+   estimate," contrasting with the severity divider below, which is solid
+   because that boundary is exact ground truth. ---- */
+
+.cost-bar {
+  position: relative;
+  display: flex;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+}
+
+.cost-bar__segment { height: 100%; }
+.cost-bar__segment--orchestrator { background: var(--color-info); }
+.cost-bar__segment--subagent     { background: var(--color-success); }
+
+.cost-bar__uncertain-boundary {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--color-text-primary);
+  transform: translateX(-1px);
+}
+
+.cost-dl {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  column-gap: var(--space-md);
+  row-gap: 4px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.cost-dl dt { color: var(--color-text-secondary); }
+.cost-dl dd { margin: 0; color: var(--color-text-primary); }
+
+.cost-table, .quality-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+/* Fix round 1: see .integrity-table th's comment — same deviation, same fix. */
+.cost-table th, .quality-table th {
+  text-align: left;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.cost-table td, .quality-table td { padding: 3px 8px 3px 0; color: var(--color-text-secondary); }
+.cost-table__mono, .quality-table__mono { font-family: var(--font-mono); color: var(--color-text-primary); }
+.cost-table__flag { color: var(--color-accent); font-weight: 600; }
+.cost-table__row--flagged { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+
+/* ---- Read-band gauge (chart C1). A single value positioned on a fixed
+   0-5 scale (READ_BAND_GAUGE_SCALE_MAX) against a shaded danger zone
+   (<2.5) and a shaded healthy band (3.5-4), so a value between the two
+   zones — today's live reading — visibly reads as "leaving healthy,
+   approaching danger" rather than collapsing into either extreme. ---- */
+
+.read-band-gauge__track {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--color-bg-secondary);
+  margin-top: 4px;
+}
+
+.read-band-gauge__zone { position: absolute; top: 0; bottom: 0; border-radius: 5px; }
+.read-band-gauge__zone--danger  { background: color-mix(in srgb, var(--color-error) 30%, transparent); }
+.read-band-gauge__zone--healthy { background: color-mix(in srgb, var(--color-success) 30%, transparent); }
+
+.read-band-gauge__marker {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--color-bg-tertiary);
+  transform: translate(-50%, -50%);
+}
+.read-band-gauge__marker--danger  { background: var(--color-error); }
+.read-band-gauge__marker--watch   { background: var(--color-warning); }
+.read-band-gauge__marker--healthy { background: var(--color-success); }
+.read-band-gauge__marker--unknown { background: var(--color-text-muted); }
+
+.read-band-gauge__scale-labels {
+  position: relative;
+  height: 14px;
+  margin-top: 2px;
+}
+.read-band-gauge__scale-label {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* ---- Severity distribution with a read-band divider (chart C2). The
+   divider is a SOLID border on the "major" segment — solid because,
+   unlike the cost split above, this boundary is exact (findings_list
+   severities are ground truth, not an apportioned estimate). ---- */
+
+.severity-bar {
+  display: flex;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+}
+.severity-bar__segment { height: 100%; }
+.severity-bar__segment--critical { background: var(--color-error); }
+.severity-bar__segment--major    { background: var(--color-warning); border-right: 3px solid var(--color-text-primary); }
+.severity-bar__segment--minor    { background: var(--color-info); }
+.severity-bar__segment--nitpick  { background: var(--color-stage-pending); }
+
+.severity-bar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-md);
+  margin: 6px 0 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+.severity-bar__legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.severity-bar__swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.severity-bar__swatch--critical { background: var(--color-error); }
+.severity-bar__swatch--major    { background: var(--color-warning); }
+.severity-bar__swatch--minor    { background: var(--color-info); }
+.severity-bar__swatch--nitpick  { background: var(--color-stage-pending); }
+/* Task 10: was --color-text-muted (2.6-3.1:1, fails WCAG AA 4.5:1). */
+.severity-bar__legend-divider-note { color: var(--color-text-secondary); font-style: italic; }
+
+@media (max-width: 767px) {
+  .cost-dl { grid-template-columns: 1fr; row-gap: 2px; }
+  .cost-dl dt { font-weight: 600; }
+  .cost-table, .quality-table { display: block; overflow-x: auto; }
+}
+
+/* ============================================================
+   Operational panel (Task 9) — own namespace per the plan's
+   instruction, even though the visual rules for .operational-section
+   are deliberately identical to .cost-section/.quality-section/
+   .integrity-section/.config-section (one shell rule, four names) so
+   this panel reads as part of the same system, not a fifth one.
+   ============================================================ */
+
+/* M-1: was a --color-warning-tinted box, inconsistent with the plain italic
+   treatment .integrity-panel__low-sample / .cost-panel__low-sample /
+   .quality-panel__low-sample already use for the identical "Small sample:
+   n=X ... every statistic below is a small-sample reading" text. A
+   sample-size caveat is not a warning state (design-constraints.md's
+   caveat-tag table has no tier for it) — made consistent with the quieter
+   treatment rather than promoting the other three to a warning box. */
+.operational-panel__low-sample {
+  margin: 0 0 var(--space-sm) 0;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.operational-section {
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-stage-pending);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+.operational-section--ok        { border-left-color: var(--color-stage-completed); }
+.operational-section--attention {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-tertiary));
+}
+.operational-section--neutral   { border-left-color: var(--color-stage-pending); }
+
+.operational-section__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 4px 0;
+}
+
+.operational-section__summary, .operational-section__note {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 here — fails WCAG AA
+   (4.5:1) for the caveat/empty-state prose these carry; --color-text-secondary
+   (already the shared rule above) passes (4.86-5.71:1) — no override needed
+   for __note. */
+.operational-section__empty {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+/* Task 10: was --color-info as link TEXT (3.39:1 on this section's
+   background — fails WCAG AA's 4.5:1 for normal-size text; the default
+   browser underline, still in effect here since no `a { text-decoration }`
+   reset exists in this file, is a separate, already-satisfied requirement
+   for distinguishing links from prose, not a substitute for text contrast).
+   --color-text-secondary passes (4.86:1); underline made explicit rather
+   than relying on the UA default. Mirrors .config-section__link, the only
+   other link this feature introduces. */
+.operational-section__link { color: var(--color-text-secondary); text-decoration: underline; }
+
+.operational-tag { font-weight: 600; }
+.operational-tag--attention { color: var(--color-accent); }
+.operational-tag--caveat    { color: var(--color-text-secondary); }
+
+.operational-dl {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  column-gap: var(--space-md);
+  row-gap: 4px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.operational-dl dt { color: var(--color-text-secondary); }
+.operational-dl dd { margin: 0; color: var(--color-text-primary); }
+
+.operational-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+/* Fix round 1: see .integrity-table th's comment — same deviation, same fix. */
+.operational-table th {
+  text-align: left;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.operational-table td { padding: 3px 8px 3px 0; color: var(--color-text-secondary); }
+.operational-table__mono { font-family: var(--font-mono); color: var(--color-text-primary); }
+.operational-table__flag { color: var(--color-accent); font-weight: 600; }
+.operational-table__row--flagged { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+/* Error-breakdown exemplars are prose (free-text error messages), never
+   identifiers — deliberately NOT --font-mono, unlike repo keys/tool names
+   above. Italic + muted marks it as an illustrative example, not a fact to
+   act on by itself (the count is the fact). */
+.operational-table__exemplar { font-style: italic; color: var(--color-text-muted); }
+
+/* ---- Reviews-per-day chart — one bar per CALENDAR day (gaps in the
+   server's sparse series are zero-filled client-side, see
+   buildDailyReviewBars), not one bar per series entry. A zero-count day
+   renders in the muted "pending" colour so it reads as a recorded zero,
+   not a gap in the chart itself. ---- */
+
+.operational-chart { margin-top: 4px; }
+.operational-chart__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 56px;
+  padding: 4px;
+  background: var(--color-bg-secondary);
+  border-radius: 4px;
+}
+.operational-chart__bar {
+  flex: 1 1 auto;
+  min-width: 2px;
+  min-height: 2px;
+  background: var(--color-info);
+  border-radius: 1px 1px 0 0;
+}
+.operational-chart__bar--zero { background: var(--color-stage-pending); }
+.operational-chart__axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 767px) {
+  .operational-dl { grid-template-columns: 1fr; row-gap: 2px; }
+  .operational-dl dt { font-weight: 600; }
+  .operational-table { display: block; overflow-x: auto; }
+}

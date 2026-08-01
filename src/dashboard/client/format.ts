@@ -21,6 +21,16 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
+/** A fractional rate (0..1) as a percentage, or `'n/a'` for a null rate — the
+ *  no-eligible-rows case every Stats & Config rate stat shares (see
+ *  `WindowMeta`-derived fields in `src/dashboard/stats.ts`). Promoted here
+ *  from `stats-view.tsx` (Task 4) once a second consumer (Task 6's integrity
+ *  panel: dispatch mismatch rate, findings mismatch rate) needed the exact
+ *  same formatting — see task-4-report.md's deferred note. */
+export function formatPct(rate: number | null): string {
+  return rate == null ? 'n/a' : `${(rate * 100).toFixed(1)}%`;
+}
+
 export function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);

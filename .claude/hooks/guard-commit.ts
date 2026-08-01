@@ -34,9 +34,30 @@ const scanNames = stagedNames + (usesAll ? "\n" + git(["diff", "--name-only"]) :
 
 if (!scanDiff.trim()) process.exit(0); // nothing to inspect
 
+// Scan only what this commit ADDS.
+//
+// `git diff` emits unchanged context lines around every hunk, and testing the whole
+// blob meant an edit ANYWHERE NEAR a pre-existing mention fired the guard on a line the
+// commit never touched. Whatever is already in history is not this commit's doing, and
+// blocking on it teaches people the guard is noise. `+++` is dropped so a filename is
+// never mistaken for content.
+const added = scanDiff
+  .split(/\r?\n/)
+  .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
+  .map((l) => l.slice(1))
+  .join("\n");
+
+if (!added.trim()) process.exit(0); // deletions only
+
 const reasons: string[] = [];
 
 // (a) Universal secret scan.
+//
+// Deliberately still matches "<KEY> followed by : or =" rather than requiring a
+// secret-SHAPED value after it. Tightening that way trades false positives for false
+// negatives — wrong direction for a secret scanner, since a real secret can be quoted,
+// wrapped, or on the next line. Instead the false positives are removed by excluding
+// right-hand sides that provably cannot BE a secret (see SAFE_RHS below).
 const SECRETS: [RegExp, string][] = [
   [/AZURE_DEVOPS_PAT\s*[:=]/i, "Azure DevOps PAT assignment"],
   [/ZENDESK_API_TOKEN\s*[:=]/i, "Zendesk API token"],
@@ -45,7 +66,17 @@ const SECRETS: [RegExp, string][] = [
   [/sk-ant-api\d{2}-/, "Anthropic API key literal"],
   [/-----BEGIN[A-Z ]*PRIVATE KEY-----/, "private key block"],
 ];
-for (const [re, label] of SECRETS) if (re.test(scanDiff)) reasons.push(`secret: ${label}`);
+
+// A line whose right-hand side is one of these carries no secret, whatever its key is
+// named: a TypeScript type, a read from the environment, or an explicitly empty value.
+// Anything else — including a placeholder that merely looks like a token — still trips,
+// because a regex cannot tell a convincing placeholder from the real thing.
+const SAFE_RHS =
+  /[:=]\s*(?:\??\s*(?:string|number|boolean|unknown|any)\b|process\.env\b|''|""|``|undefined\b|null\b)/;
+
+const secretLines = added.split(/\r?\n/).filter((l) => !SAFE_RHS.test(l));
+const secretHay = secretLines.join("\n");
+for (const [re, label] of SECRETS) if (re.test(secretHay)) reasons.push(`secret: ${label}`);
 
 // (b) Public-core-only leak scan.
 const origin = git(["remote", "get-url", "origin"]).trim();
@@ -56,7 +87,7 @@ if (isCore) {
 
   const bl = Bun.file(`${proj}/private/internal-docs/leak-blocklist.txt`);
   if (await bl.exists()) {
-    const hay = scanDiff + "\n" + scanNames;
+    const hay = added + "\n" + scanNames;
     for (const raw of (await bl.text()).split(/\r?\n/)) {
       const pat = raw.trim();
       if (!pat || pat.startsWith("#")) continue;

@@ -12,6 +12,7 @@ export async function connectStores() {
   if (!url) throw new Error('DATABASE_URL environment variable is required');
   const sql = await connectDatabase(url);
   return {
+    sql,
     stateStore: new PgStateStore(sql),
     actionStore: new PgActionStore(sql),
     runnerStatus: new PgRunnerStatus(sql),

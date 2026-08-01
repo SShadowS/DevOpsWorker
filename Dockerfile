@@ -69,6 +69,17 @@ RUN find src/agents -name '*.md' -exec sed -i 's/\r$//' {} +
 # image must build it — the dashboard compose service serves these static assets.
 RUN bun run dashboard:build
 
+# Build provenance: the core repo's short HEAD sha at image-build time, so a
+# PR review row can record which build produced it (process.env.BUILD_SHA —
+# see src/cli/review-pr.ts and the pr_reviews.image_sha column). ARG only
+# exists during the build; ENV persists it into the running container. Empty
+# when built without --build-arg BUILD_SHA=<sha> (docker-build.ps1 sets it;
+# docker-compose.yml defaults it to the literal string "unknown" rather than
+# leaving it unset, so a plain `docker compose build` is honest, not silently
+# wrong).
+ARG BUILD_SHA
+ENV BUILD_SHA=${BUILD_SHA}
+
 # Run as root with IS_SANDBOX=1 — Claude Code allows --dangerously-skip-permissions
 # in sandboxed environments. Running as root eliminates all permission issues with
 # vendored binaries (bun install strips +x), volume mounts, and cli.js patching.

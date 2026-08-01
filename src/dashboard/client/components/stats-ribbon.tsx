@@ -1,0 +1,512 @@
+import { driftStats, integrityStats, configReport, statsWindow } from '../stats-store.ts';
+import type { FetchState, StatsWindow } from '../stats-store.ts';
+import type { DriftStats, IntegrityStats, HeadUnresolvedReason, ImageShaClass } from '../../stats.ts';
+import type { ConfigReport, LeverStatus } from '../../config-report.ts';
+import { buildContaminationAvailability } from '../model-contamination.ts';
+import type { SettledContaminationAvailability } from '../model-contamination.ts';
+
+// ---------------------------------------------------------------------------
+// Status ribbon (Task 5) — "the reason this entire feature exists." Four
+// independent indicators: deployment drift, model integrity, active levers,
+// error rate. Each renders from its OWN fetch's loading/error/empty/ready
+// cycle rather than gating on the worst of all three underlying endpoints —
+// the drift comparison is worth reading even when the window holds zero PR
+// reviews, so it must not vanish behind a generic "no data" message just
+// because /api/stats/integrity came back empty for this window.
+//
+// 'ok' | 'attention' is a fifth state, reachable only once a card's data is
+// ready. --color-accent is spent ONLY for 'attention' — see
+// design-constraints.md: "the one place in the feature where spending it is
+// correct — but only on genuine drift, not on chrome or on the healthy
+// state." Every 'attention' state also carries a text explanation: colour is
+// the second signal here, never the only one.
+//
+// Fix round 2 (task-6): "Model integrity" now folds in model CONTAMINATION
+// (a sub-agent running on a model other than its declared frontmatter pin),
+// not just the `[1m]`-flagged-key pattern it originally covered — the plan
+// specifies four indicators, and contamination IS model integrity, not a
+// fifth thing. This makes the card depend on TWO fetches (`integrityStats`
+// AND `configReport`, the latter shared with the "Active levers" card below)
+// — see `assessModelIntegrity`/`buildModelIntegrityCard`.
+// ---------------------------------------------------------------------------
+
+export type RibbonStatus = 'loading' | 'error' | 'empty' | 'ok' | 'attention';
+
+// ---------------------------------------------------------------------------
+// Pure logic — unit-tested with fixture data, no rendering, no network.
+// ---------------------------------------------------------------------------
+
+/** Words for a non-sha `image_sha` state. Distinguishes the three non-value
+ *  states the design constraints require read as words, never as a blank or
+ *  a fake sha: `'unknown'` (plain `docker compose build`), `''` (raw
+ *  `docker build` skipping the arg), and `null`/`'not-recorded'` (row
+ *  predates the feature — every row in production today). `'sha'` is only
+ *  in the parameter type so the caller (`buildProvenanceRow`, whose
+ *  `classification === 'sha' && value` guard is not narrow enough for TS to
+ *  exclude it in the `else` branch) does not need an unsafe cast; it is
+ *  unreachable in practice — a real sha always renders through the sha
+ *  branch instead — and returns an empty string defensively rather than
+ *  throwing if it is ever hit. */
+export function describeNonShaState(classification: ImageShaClass): string {
+  switch (classification) {
+    case 'unknown':
+      return 'not recorded (plain docker compose build, no BUILD_SHA)';
+    case 'empty':
+      return 'not recorded (docker build without the BUILD_SHA arg)';
+    case 'not-recorded':
+      return 'no build provenance recorded yet';
+    case 'sha':
+      return '';
+  }
+}
+
+/** Words for why HEAD could not be resolved from the bind-mounted `.git`. */
+export function describeHeadUnresolved(reason: HeadUnresolvedReason): string {
+  switch (reason) {
+    case 'not-mounted':
+      return 'not observable (.git not mounted)';
+    case 'not-a-directory':
+      return 'not observable (.git is not a directory — worktree?)';
+    case 'command-failed':
+      return 'not observable (git command failed)';
+    case 'timeout':
+      return 'not observable (git timed out)';
+    case 'empty-output':
+      return 'not observable (git returned no output)';
+  }
+}
+
+/** `null` reads as "distance unknown", never as 0 — a coerced 0 would read
+ *  as "in sync" and is the exact lie this ribbon exists to prevent (see
+ *  `computeCommitsBehindHead` in stats.ts). `0` itself reads as "in sync",
+ *  a real, positive fact distinct from "we could not check". */
+export function formatDistance(commitsBehindHead: number | null): string {
+  if (commitsBehindHead == null) return 'distance unknown';
+  if (commitsBehindHead === 0) return 'in sync';
+  return `${commitsBehindHead} commit${commitsBehindHead === 1 ? '' : 's'} behind`;
+}
+
+/** One row of the three-sha provenance table. `display` is either a real
+ *  short sha (`isSha: true`, render in `--font-mono`) or a human word for a
+ *  non-sha state (`isSha: false`) — never a blank standing in for either.
+ *  `barPosition` is decorative only (0 = far behind, 1 = at HEAD); `null`
+ *  means "do not draw a dot", used whenever the value/distance itself is
+ *  unknown so the bar never implies a position we have not measured. */
+export interface ProvenanceRow {
+  label: string;
+  display: string;
+  isSha: boolean;
+  distanceText: string;
+  barPosition: number | null;
+}
+
+/** Commits are clamped to this many for the decorative bar's scale only —
+ *  the exact number is still shown in `distanceText` regardless of how far
+ *  off-scale it is. A judgement call, not a measured figure. */
+const BAR_MAX_COMMITS = 30;
+
+function distanceToBarPosition(commitsBehindHead: number): number {
+  const clamped = Math.min(Math.max(commitsBehindHead, 0), BAR_MAX_COMMITS);
+  return 1 - clamped / BAR_MAX_COMMITS;
+}
+
+export function buildHeadRow(head: DriftStats['head']): ProvenanceRow {
+  if (head.value) {
+    return { label: 'HEAD', display: head.value, isSha: true, distanceText: '', barPosition: 1 };
+  }
+  return { label: 'HEAD', display: describeHeadUnresolved(head.reason!), isSha: false, distanceText: '', barPosition: null };
+}
+
+export function buildProvenanceRow(
+  label: string,
+  classification: ImageShaClass,
+  value: string | null,
+  commitsBehindHead: number | null,
+): ProvenanceRow {
+  if (classification === 'sha' && value) {
+    return {
+      label,
+      display: value,
+      isSha: true,
+      distanceText: formatDistance(commitsBehindHead),
+      barPosition: commitsBehindHead == null ? null : distanceToBarPosition(commitsBehindHead),
+    };
+  }
+  return {
+    label,
+    display: describeNonShaState(classification),
+    isSha: false,
+    distanceText: '',
+    barPosition: null,
+  };
+}
+
+export function buildProvenanceRows(drift: DriftStats): ProvenanceRow[] {
+  return [
+    buildHeadRow(drift.head),
+    buildProvenanceRow('spawned image', drift.spawnedImage.mostRecentSha.classification, drift.spawnedImage.mostRecentSha.value, drift.spawnedImage.mostRecentSha.commitsBehindHead),
+    buildProvenanceRow('compose services', drift.composeService.classification, drift.composeService.value, drift.composeService.commitsBehindHead),
+  ];
+}
+
+export interface DriftAssessment {
+  severity: 'ok' | 'attention';
+  warning: string | null;
+}
+
+/**
+ * "Needs attention" unless the ribbon can POSITIVELY confirm the running
+ * compose services match HEAD — silence/unknown is treated the same as
+ * drift, never as sync, because unverifiable silence is exactly what let
+ * the 2026-08-01 incident run for four hours. Keyed on `composeService`
+ * specifically (not `spawnedImage`, which is informational only here) — the
+ * long-running watcher/dashboard containers are what silently ran stale
+ * code, not a one-shot spawned review container.
+ */
+export function assessDrift(drift: DriftStats): DriftAssessment {
+  if (!drift.head.value) {
+    return { severity: 'attention', warning: 'HEAD is not observable — deployment drift cannot be verified.' };
+  }
+  if (drift.composeService.classification !== 'sha') {
+    return { severity: 'attention', warning: 'Running compose services carry no build provenance — cannot verify they match HEAD.' };
+  }
+  const behind = drift.composeService.commitsBehindHead;
+  if (behind == null) {
+    return {
+      severity: 'attention',
+      warning: "Compose services' build sha is not in the mounted history — distance unknown, sync cannot be confirmed.",
+    };
+  }
+  if (behind > 0) {
+    return {
+      severity: 'attention',
+      warning: `Compose services are ${behind} commit${behind === 1 ? '' : 's'} behind HEAD — config may be inert.`,
+    };
+  }
+  return { severity: 'ok', warning: null };
+}
+
+export interface SimpleAssessment {
+  severity: 'ok' | 'attention';
+  text: string;
+}
+
+/** Flags contamination-pattern model keys (the specific `[1m]` long-context
+ *  premium-tier suffix data-shapes.md calls out) — a real cost-attribution
+ *  bug, not a stylistic nit, so any flagged key is 'attention'. Named
+ *  precisely for what it checks (fix round 2) — it used to be called
+ *  `assessModelIntegrity`, but "model integrity" now covers a SECOND signal
+ *  (declared-pin contamination, below) this function knows nothing about;
+ *  `stats-integrity.tsx`'s "Model usage" panel section still calls this one
+ *  directly, since that section is deliberately scoped to the `[1m]` pattern
+ *  only (contamination has its own dedicated panel section). */
+export function assessFlaggedModelKeys(integrity: IntegrityStats): SimpleAssessment {
+  const flagged = integrity.modelUsage.flaggedKeys;
+  if (flagged.length === 0) {
+    return { severity: 'ok', text: `n=${integrity.sampleSize} · no flagged model keys` };
+  }
+  return {
+    severity: 'attention',
+    text: `${flagged.length} flagged model key(s): ${flagged.map((m) => m.model).join(', ')}`,
+  };
+}
+
+/**
+ * The ribbon's combined "Model integrity" verdict (fix round 2) — folds
+ * `assessFlaggedModelKeys`'s `[1m]` signal together with declared-pin
+ * CONTAMINATION into one card, per the plan's four-indicator limit
+ * (contamination is not a fifth indicator, it's a second cause of the same
+ * one). Both signals are ALWAYS stated in the text, never just one, so a
+ * genuine finding on either axis can't be silently masked by the other
+ * being clean — this is the exact failure mode this function's own tests
+ * pin ("combined-signal case").
+ *
+ * The contamination count is phrased as a FLOOR ("at least N/M runs"), never
+ * an exact figure: `sub_agents` undercounts dispatches nondeterministically
+ * (see the Dispatch section of the Integrity panel), so a deviating run
+ * missing from the roster has no model recorded at all and cannot be
+ * counted here. The true count can only be higher than what's shown, never
+ * lower — the same direction stated in `IntegrityStats.subAgentModelAttribution.note`.
+ *
+ * `contamination.status === 'error'` (the declared-pin fetch failed) is
+ * `'attention'` regardless of the flagged-key half, worded as "cannot
+ * verify" — mirrors `assessDrift`'s "unverifiable is not probably-fine"
+ * precedent, and stays consistent with `stats-integrity.tsx`'s
+ * `ContaminationSection`'s own "Cannot verify: " tag (fix round 2, Finding 1)
+ * even though the ribbon's shared `SimpleCard` only has ONE generic
+ * "Needs attention: " prefix across all four cards — the distinguishing
+ * words live in this function's own `text`, not in new ribbon chrome.
+ *
+ * Takes `SettledContaminationAvailability`, not the full `ContaminationAvailability`
+ * (fix round 3) — this function is never called while `configState` is still
+ * loading. `buildModelIntegrityCard` holds the WHOLE card at the ribbon's own
+ * `'loading'` status until both fetches settle, same as every other card on
+ * the ribbon; computing a provisional `'ok'`/`'attention'` from the
+ * flagged-key half alone (the round-2 behaviour) risked a green-to-amber
+ * flip on the one card whose entire reason for existing is model-cost drift
+ * — the exact "unverifiable is not probably-fine" lesson `assessDrift`
+ * already encodes, just for a race instead of a permanent failure. The type
+ * change makes "assessed while unsettled" impossible to reintroduce by
+ * accident: there is no `'loading'` branch left to write here.
+ */
+export function assessModelIntegrity(integrity: IntegrityStats, contamination: SettledContaminationAvailability): SimpleAssessment {
+  const flagged = integrity.modelUsage.flaggedKeys;
+  const flaggedText = flagged.length === 0
+    ? 'no flagged model keys'
+    : `${flagged.length} flagged model key(s): ${flagged.map((m) => m.model).join(', ')}`;
+
+  if (contamination.status === 'error') {
+    return {
+      severity: 'attention',
+      text: `n=${integrity.sampleSize} · ${flaggedText} · cannot verify contamination — declared configuration failed to load: ${contamination.message}`,
+    };
+  }
+
+  // 'not-observed' rows (I-4) are declared pins that never dispatched this
+  // window — real pins, but not evaluated, so they must stay OUT of
+  // `evaluatedRows` (never contamination) while still being counted in the
+  // disclosure clause below. Without that clause, "no model contamination"
+  // reads as an all-clear over the whole declared roster when it was only
+  // ever computed over whichever pins happened to run.
+  const evaluatedRows = contamination.rows.filter((r) => r.status === 'ok' || r.status === 'attention');
+  const notObservedRows = contamination.rows.filter((r) => r.status === 'not-observed');
+  const contaminatedRows = evaluatedRows.filter((r) => r.status === 'attention');
+  const totalPins = evaluatedRows.length + notObservedRows.length;
+  const notObservedText = notObservedRows.length > 0
+    ? ` (${notObservedRows.length} of ${totalPins} declared pin(s) never observed this window)`
+    : '';
+  const contaminationText = contaminatedRows.length === 0
+    ? `no model contamination${notObservedText}`
+    : `at least ${contaminatedRows.reduce((s, r) => s + r.offPinRuns, 0)}/${evaluatedRows.reduce((s, r) => s + r.totalRuns, 0)} ` +
+      `runs off declared pin across ${contaminatedRows.length} sub-agent(s) (floor — sub_agents undercounts, see Integrity panel)${notObservedText}`;
+
+  return {
+    severity: flagged.length > 0 || contaminatedRows.length > 0 ? 'attention' : 'ok',
+    text: `n=${integrity.sampleSize} · ${flaggedText} · ${contaminationText}`,
+  };
+}
+
+/** Eval-only levers (`PR_REVIEW_NO_POST` and friends) are not expected to be
+ *  active in normal production operation — one left on by accident is a
+ *  silent behaviour change (e.g. `NO_POST=1` would mean nothing gets
+ *  posted). Any active lever is therefore 'attention', named explicitly. */
+export function assessLevers(levers: LeverStatus[]): SimpleAssessment {
+  const active = levers.filter((l) => l.state === 'active');
+  if (active.length === 0) {
+    return { severity: 'ok', text: `0/${levers.length} eval levers active` };
+  }
+  return {
+    severity: 'attention',
+    text: `${active.length}/${levers.length} eval levers active: ${active.map((l) => l.key).join(', ')}`,
+  };
+}
+
+/** A round, documented bar — not tuned to any observed value — mirroring
+ *  `MIN_RELIABLE_COVERAGE_PCT`'s precedent in stats.ts. */
+export const ERROR_RATE_ATTENTION_THRESHOLD = 0.1;
+
+/** Small samples say so: a 7d window can hold a handful of reviews, where a
+ *  single error swings the rate wildly. `lowSample` (from the endpoint's own
+ *  `WindowMeta`) gates the wording, never the number itself — the rate is
+ *  still shown, just annotated as unreliable rather than omitted. */
+export function assessErrorRate(errorRate: IntegrityStats['errorRate'], lowSample: boolean): SimpleAssessment {
+  if (errorRate.total === 0) {
+    return { severity: 'ok', text: 'no reviews recorded in this window' };
+  }
+  const pct = errorRate.rate == null ? 'n/a' : `${(errorRate.rate * 100).toFixed(1)}%`;
+  const sampleNote = lowSample ? `small sample, n=${errorRate.total}` : `n=${errorRate.total}`;
+  const attention = errorRate.rate != null && errorRate.rate > ERROR_RATE_ATTENTION_THRESHOLD;
+  return { severity: attention ? 'attention' : 'ok', text: `${errorRate.count}/${errorRate.total} errored — ${pct} (${sampleNote})` };
+}
+
+// ---------------------------------------------------------------------------
+// Per-card view models — fold a FetchState into the one shape the component
+// renders, so every loading/error/empty branch is exhaustively handled in
+// one place per card rather than repeated in JSX.
+// ---------------------------------------------------------------------------
+
+export interface DriftCardView {
+  status: RibbonStatus;
+  message: string | null;
+  rows: ProvenanceRow[] | null;
+  warning: string | null;
+}
+
+export function buildDriftCard(state: FetchState<DriftStats>): DriftCardView {
+  switch (state.status) {
+    case 'loading':
+      return { status: 'loading', message: 'Loading…', rows: null, warning: null };
+    case 'error':
+      return { status: 'error', message: `Failed to load: ${state.message}`, rows: null, warning: null };
+    case 'empty':
+      // Not reachable in practice — classifyDriftResponse never returns
+      // 'empty' (see stats-store.ts) — kept for exhaustiveness against the
+      // shared FetchState<T> union.
+      return { status: 'empty', message: 'No data recorded in this window.', rows: null, warning: null };
+    case 'ready': {
+      const { severity, warning } = assessDrift(state.data);
+      return { status: severity, message: null, rows: buildProvenanceRows(state.data), warning };
+    }
+  }
+}
+
+export interface SimpleCardView {
+  status: RibbonStatus;
+  text: string;
+}
+
+function simpleCardFromFetch<T>(state: FetchState<T>, assess: (data: T) => SimpleAssessment): SimpleCardView {
+  switch (state.status) {
+    case 'loading':
+      return { status: 'loading', text: 'Loading…' };
+    case 'error':
+      return { status: 'error', text: `Failed to load: ${state.message}` };
+    case 'empty':
+      return { status: 'empty', text: 'No data recorded in this window.' };
+    case 'ready': {
+      const a = assess(state.data);
+      return { status: a.severity, text: a.text };
+    }
+  }
+}
+
+/**
+ * Unlike the other three cards, this one depends on TWO fetches
+ * (`integrityState` for the observed side, `configState` for declared pins —
+ * fix round 2), so it cannot use the generic single-source
+ * `simpleCardFromFetch` helper below. `integrityState` still gates the
+ * card's own loading/error/empty exactly as before.
+ *
+ * `configState.status === 'loading'` holds the WHOLE card at `'loading'`
+ * (fix round 3) rather than computing a provisional verdict from the
+ * flagged-key half alone — matching every other ribbon card, which stays
+ * loading until ITS OWN source resolves. The round-2 version rendered a
+ * premature `'ok'`/`'attention'` here; if flagged keys were clean and
+ * contamination later resolved positive, that reads as a green-to-amber
+ * flip on the card whose entire job is catching model-cost drift. `'error'`
+ * is a DIFFERENT, deliberately NOT-loading state: a config fetch that has
+ * definitively failed still forces `'attention'` via `assessModelIntegrity`
+ * ("cannot verify" — Finding 1 from fix round 2 stays intact, only the
+ * in-flight case changed here).
+ */
+export function buildModelIntegrityCard(
+  integrityState: FetchState<IntegrityStats>,
+  configState: FetchState<ConfigReport>,
+): SimpleCardView {
+  switch (integrityState.status) {
+    case 'loading':
+      return { status: 'loading', text: 'Loading…' };
+    case 'error':
+      return { status: 'error', text: `Failed to load: ${integrityState.message}` };
+    case 'empty':
+      return { status: 'empty', text: 'No data recorded in this window.' };
+    case 'ready': {
+      const contamination = buildContaminationAvailability(integrityState.data.subAgentModelAttribution.entries, configState);
+      if (contamination.status === 'loading') {
+        return { status: 'loading', text: 'Loading…' };
+      }
+      const a = assessModelIntegrity(integrityState.data, contamination);
+      return { status: a.severity, text: a.text };
+    }
+  }
+}
+
+export function buildLeversCard(state: FetchState<ConfigReport>): SimpleCardView {
+  return simpleCardFromFetch(state, (d) => assessLevers(d.evalLevers));
+}
+
+export function buildErrorRateCard(state: FetchState<IntegrityStats>): SimpleCardView {
+  return simpleCardFromFetch(state, (d) => assessErrorRate(d.errorRate, d.lowSample));
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+function ProvenanceTable({ rows }: { rows: ProvenanceRow[] }) {
+  return (
+    <div class="status-ribbon__provenance">
+      {rows.map((row) => (
+        <div class="status-ribbon__provenance-row" key={row.label}>
+          <span class="status-ribbon__provenance-label">{row.label}</span>
+          <span class={`status-ribbon__provenance-value ${row.isSha ? 'status-ribbon__sha' : ''}`}>{row.display}</span>
+          {/* Task 10 fix: a `barPosition: null` row (today, EVERY production
+              "spawned image" row — image_sha is always null) used to still
+              render this track, just with no dot in it. A track with nothing
+              plotted on it reads as an unfinished/loading progress bar, not
+              as "there is no position to show" — the opposite of what
+              `describeNonShaState`'s text already says next to it. Omitting
+              the track entirely (rather than rendering an empty one) is the
+              fix: the row still has its label and word-based value, it just
+              has no decorative element implying a measurement that was never
+              taken. */}
+          {row.barPosition != null && (
+            <span class="status-ribbon__bar" aria-hidden="true">
+              <span class="status-ribbon__bar-dot" style={{ left: `${row.barPosition * 100}%` }} />
+            </span>
+          )}
+          {row.distanceText && <span class="status-ribbon__distance">{row.distanceText}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DriftCard() {
+  const view = buildDriftCard(driftStats.value);
+  return (
+    <div class={`status-ribbon__item status-ribbon__item--${view.status}`} role="group" aria-label="Deployment drift">
+      <h3 class="status-ribbon__item-label">Deployment drift</h3>
+      {view.rows ? <ProvenanceTable rows={view.rows} /> : <p class="status-ribbon__item-text">{view.message}</p>}
+      {view.warning && <p class="status-ribbon__warning">⚠ {view.warning}</p>}
+    </div>
+  );
+}
+
+interface SimpleCardProps {
+  label: string;
+  view: SimpleCardView;
+  /** Omit for unwindowed data (active levers) — the omission itself is the
+   *  correct signal, matching `StatsSlot`'s `window` prop in stats-view.tsx.
+   *  Model integrity and error rate ARE windowed (both read from
+   *  `IntegrityStats`, scoped to the shared `statsWindow`), so every
+   *  statistic here still shows the window it reads — constraint #2. */
+  window?: StatsWindow;
+}
+
+function SimpleCard({ label, view, window }: SimpleCardProps) {
+  return (
+    <div class={`status-ribbon__item status-ribbon__item--${view.status}`} role="group" aria-label={label}>
+      <div class="status-ribbon__item-header">
+        <h3 class="status-ribbon__item-label">{label}</h3>
+        {window && <span class="status-ribbon__window" title="Time window this indicator reads">{window}</span>}
+      </div>
+      <p class="status-ribbon__item-text">
+        {view.status === 'attention' && <strong class="status-ribbon__attention-tag">Needs attention: </strong>}
+        {view.text}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The status ribbon — persistent, directly under the tabs, above everything
+ * else in the Stats & Config tab. Reads its source signals directly (no
+ * props drilling, matching the rest of the tab's data-access pattern).
+ * Deployment drift and active levers are deliberately unwindowed (the shas
+ * are not time-series data, and `/api/config` has no window param at all);
+ * model integrity and error rate are, and show it.
+ */
+export function StatsRibbon() {
+  const integrity = integrityStats.value;
+  const config = configReport.value;
+  const window = statsWindow.value;
+  return (
+    <section class="status-ribbon" aria-label="Status ribbon">
+      <DriftCard />
+      <SimpleCard label="Model integrity" view={buildModelIntegrityCard(integrity, config)} window={window} />
+      <SimpleCard label="Active levers" view={buildLeversCard(config)} />
+      <SimpleCard label="Error rate" view={buildErrorRateCard(integrity)} window={window} />
+    </section>
+  );
+}

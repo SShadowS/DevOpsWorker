@@ -19,7 +19,14 @@ services:
       - pipeline-net
 
   watcher:
-    build: .
+    build:
+      context: .
+      # Build provenance (see Dockerfile). Compose cannot run git, so a plain
+      # `docker compose build` bakes the literal string "unknown" rather than
+      # a stale or fabricated sha. Pass the real sha with:
+      #   BUILD_SHA=$(git rev-parse --short HEAD) docker compose build
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
@@ -47,7 +54,10 @@ services:
       - pipeline-net
 
   dashboard:
-    build: .
+    build:
+      context: .
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
@@ -61,11 +71,19 @@ services:
       - "3000:3000"
     volumes:
       - ./private:/app/private:ro
+      # Read-only so the status ribbon can resolve a LIVE HEAD (src/dashboard/stats.ts
+      # resolveHeadSha) instead of the hardcoded "not observable" placeholder. The
+      # watcher/dashboard are themselves compose services, so this is what makes the
+      # ribbon able to detect compose drifting from source at all — see task-5-report.md.
+      - ./.git:/repo/.git:ro
     networks:
       - pipeline-net
 
   webhook-server:
-    build: .
+    build:
+      context: .
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }

@@ -125,6 +125,16 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_path TEXT;
 -- prompt-CONTENT levers (scoped payload, BC-only security) actually took
 -- effect, not just that the expected sub-agents dispatched.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS applied_levers JSONB;
+-- The core repo's short HEAD sha baked into the image that produced this
+-- review (Dockerfile ARG BUILD_SHA -> ENV BUILD_SHA, set at build time by
+-- docker-build.ps1 / docker-compose.yml). Null for rows recorded before this
+-- was captured. A container built without the BUILD_SHA build-arg (e.g. a
+-- plain docker compose build) bakes the literal string "unknown" rather
+-- than leaving the env var unset -- that case reads back as "unknown", not
+-- null (see the matching, correct comment on IPRReviewStore's imageSha field
+-- in src/pipeline/pr-review-store.interface.ts). Answers "which build
+-- produced this row" without needing a docker socket.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS image_sha TEXT;
 `;
 
 /**

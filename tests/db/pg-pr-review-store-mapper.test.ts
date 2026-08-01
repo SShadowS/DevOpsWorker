@@ -119,6 +119,32 @@ describe('rowToPRReview', () => {
     });
     expect(row.appliedLevers).toBeNull();
   });
+
+  test('maps image_sha to imageSha', () => {
+    const row = rowToPRReview({
+      id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',
+      title: null, recommendation: 'approve', findings: null, findings_count: null,
+      comment_id: null, cost_usd: null, duration_ms: null, turns: null,
+      tool_calls: null, session_id: null, error: null, review_body: null,
+      created_at: '2026-01-01T00:00:00Z', action_id: null, review_run_id: 'pr42-abc',
+      image_sha: '8129ee0',
+    });
+    expect(row.imageSha).toBe('8129ee0');
+  });
+
+  // Every row written before this feature, and any container built without
+  // the BUILD_SHA build-arg (a plain `docker compose build`), has no image_sha.
+  test('maps a null image_sha to null — rows predating build provenance', () => {
+    const row = rowToPRReview({
+      id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',
+      title: null, recommendation: 'approve', findings: null, findings_count: null,
+      comment_id: null, cost_usd: null, duration_ms: null, turns: null,
+      tool_calls: null, session_id: null, error: null, review_body: null,
+      created_at: '2026-01-01T00:00:00Z', action_id: null, review_run_id: 'pr42-abc',
+      image_sha: null,
+    });
+    expect(row.imageSha).toBeNull();
+  });
 });
 
 describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
@@ -144,6 +170,12 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
     expect(insert![1]).toContain('applied_levers');
   });
 
+  test('the INSERT names image_sha', () => {
+    const insert = /INSERT INTO pr_reviews \(([^)]*)\)/.exec(src);
+    expect(insert).not.toBeNull();
+    expect(insert![1]).toContain('image_sha');
+  });
+
   test('column count matches placeholder count in the INSERT', () => {
     const columnMatch = src.match(/INSERT INTO pr_reviews \(([^)]*)\)/);
     expect(columnMatch).not.toBeNull();
@@ -157,6 +189,7 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
     expect(columns).toContain('inline_threads');
     expect(columns).toContain('review_path');
     expect(columns).toContain('applied_levers');
+    expect(columns).toContain('image_sha');
     expect(placeholderCount).toBe(columns.length);
   });
 
@@ -169,6 +202,15 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
     expect(selects.length).toBeGreaterThanOrEqual(4);
     for (const select of selects) {
       expect(select).toContain('applied_levers');
+    }
+  });
+
+  // Same trap, same fix, for the newest column: image_sha.
+  test('every SELECT names image_sha', () => {
+    const selects = src.match(/SELECT id,[\s\S]*?FROM pr_reviews/g) ?? [];
+    expect(selects.length).toBeGreaterThanOrEqual(4);
+    for (const select of selects) {
+      expect(select).toContain('image_sha');
     }
   });
 });
