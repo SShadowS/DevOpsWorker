@@ -1,7 +1,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { ProposedRulesSchema, type ProposedRule, type ProposedRules } from '../agents/rule-learner/schema.ts';
-import { AGENT_DIR, AGENT_NAME, ALLOWED_TOOLS, DISALLOWED_TOOLS, SHARED_PROMPT_FRAGMENTS } from '../agents/rule-learner/config.ts';
+import { AGENT_DIR, AGENT_NAME, ALLOWED_TOOLS, DISALLOWED_TOOLS, SHARED_PROMPT_FRAGMENTS, MODEL, MAX_TURNS } from '../agents/rule-learner/config.ts';
 import { stageAgentWorkspace } from '../sdk/agent-workspace.ts';
 import { buildSharedFragmentContent } from '../sdk/prompt-loader.ts';
 import { fetchPRReviewComments } from '../sdk/azure-devops-client.ts';
@@ -80,9 +80,9 @@ export async function learnRules(args: string[]): Promise<void> {
         },
         allowedTools: ALLOWED_TOOLS,
         disallowedTools: DISALLOWED_TOOLS,
-        model: 'claude-sonnet-5',
+        model: MODEL,
         cwd: process.cwd(),
-        maxTurns: 20,
+        maxTurns: MAX_TURNS,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
       },

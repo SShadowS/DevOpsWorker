@@ -13,6 +13,7 @@ import type { ILogSink } from '../pipeline/log-sink.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import { LogPoller } from './log-poller.ts';
 import { parseWindow, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getDriftStats } from './stats.ts';
+import { buildConfigReport } from './config-report.ts';
 
 // ---------------------------------------------------------------------------
 // Learn-rules in-progress tracking
@@ -400,6 +401,13 @@ export function startDashboard(options: DashboardOptions): void {
         } catch {
           return Response.json({ error: 'Invalid request' }, { status: 400 });
         }
+      }
+
+      // Stats & Config tab — resolved-configuration snapshot. No DB access;
+      // computed live from process env + static agent config + overlay manifest
+      // via the same functions production code calls (see config-report.ts).
+      if (path === '/api/config' && req.method === 'GET') {
+        return Response.json(await buildConfigReport());
       }
 
       // Stats & Config tab — data layer. Each handler clamps ?window= itself

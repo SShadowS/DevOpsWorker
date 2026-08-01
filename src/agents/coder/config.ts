@@ -211,8 +211,10 @@ export function buildFixTestPrompt(state: PipelineState, workItemId: number): st
 
 const AGENT_DIR = dirname(fileURLToPath(import.meta.url));
 
-/** Model for the CI-waiter subagent. Cheap poller — Haiku by default, env-overridable. */
-const CI_WAITER_MODEL = process.env.CI_WAITER_MODEL ?? 'claude-haiku-4-5';
+/** Model for the CI-waiter subagent. Cheap poller — Haiku by default, env-overridable.
+ *  Exported so the dashboard's config-report can read the resolved value instead of
+ *  re-deriving the env-var/fallback formula (see src/dashboard/config-report.ts). */
+export const CI_WAITER_MODEL = process.env.CI_WAITER_MODEL ?? 'claude-haiku-4-5';
 
 /**
  * ci-waiter — a cheap Haiku subagent the coder delegates CI polling to.
@@ -222,8 +224,12 @@ const CI_WAITER_MODEL = process.env.CI_WAITER_MODEL ?? 'claude-haiku-4-5';
  * via the Task tool. The poll loop (one fresh turn per ~100s `--attach`
  * round-trip) runs here on a tiny context instead of replaying the coder's large
  * Sonnet context every cycle — the whole reason CI waits used to be expensive.
+ *
+ * Exported (not just `CI_WAITER_MODEL`) so config-report can report its
+ * `maxTurns` too, straight from the same object the coder actually dispatches —
+ * no separate literal to fall out of sync.
  */
-const ciWaiterAgent: SdkAgentDefinition = {
+export const ciWaiterAgent: SdkAgentDefinition = {
   description:
     'Waits for an Azure DevOps CI build to finish and reports PASSED/FAILED. Delegate the ' +
     '`await-pipeline.ts --attach <runId>` poll loop to this agent instead of polling inline.',

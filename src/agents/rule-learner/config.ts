@@ -26,3 +26,13 @@ export const DISALLOWED_TOOLS = ['Bash', 'Write', 'Edit', 'NotebookEdit', 'REPL'
 
 /** Shared prompt fragments appended to the system prompt. */
 export const SHARED_PROMPT_FRAGMENTS = ['al-review-patterns.md'];
+
+/**
+ * This agent runs through `query()` directly in `learn-rules.ts`, not through
+ * `runAgent()`/`resolveAgentKnobs()` — so `DEFAULT_MODEL`, `DEFAULT_EFFORT`, and
+ * any overlay `agents['rule-learner']` override are all silently inert here.
+ * Exported so the dashboard's config-report can report the real value that runs
+ * instead of a second hardcoded copy of it.
+ */
+export const MODEL = 'claude-sonnet-5';
+export const MAX_TURNS = 20;
