@@ -1371,6 +1371,7 @@ export async function reviewPR(args: string[]): Promise<void> {
           inlineThreads,
           reviewPath: reviewPath,
           appliedLevers,
+          imageSha: process.env['BUILD_SHA'] ?? null,
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -1415,6 +1416,7 @@ export async function reviewPR(args: string[]): Promise<void> {
         inlineThreads: null,
         reviewPath: reviewPath,
         appliedLevers,
+        imageSha: process.env['BUILD_SHA'] ?? null,
       });
     }
 

@@ -19,7 +19,14 @@ services:
       - pipeline-net
 
   watcher:
-    build: .
+    build:
+      context: .
+      # Build provenance (see Dockerfile). Compose cannot run git, so a plain
+      # `docker compose build` bakes the literal string "unknown" rather than
+      # a stale or fabricated sha. Pass the real sha with:
+      #   BUILD_SHA=$(git rev-parse --short HEAD) docker compose build
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
@@ -47,7 +54,10 @@ services:
       - pipeline-net
 
   dashboard:
-    build: .
+    build:
+      context: .
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
@@ -65,7 +75,10 @@ services:
       - pipeline-net
 
   webhook-server:
-    build: .
+    build:
+      context: .
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
