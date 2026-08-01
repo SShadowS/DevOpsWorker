@@ -20,10 +20,24 @@ interface HookInput { tool_input?: { command?: string } }
 const input: HookInput = await Bun.stdin.json().catch(() => ({}));
 const cmd = input.tool_input?.command ?? "";
 
-// Only gate commands that build or run this project's Linux images.
+// Only gate a command that is actually INVOKING docker.
+//
+// Matching the text anywhere is wrong and was actively obstructive: it fired on
+// `git add deploy/docker-build.ps1`, on a `grep` whose pattern named the script, and
+// on a commit message that merely described an image build — three times in one
+// session, each blocking unrelated work. A guard that cries wolf gets bypassed, which
+// costs more than the failure it prevents.
+//
+// So: split on shell separators, strip any leading `VAR=value` prefixes, and test only
+// the LEADING token of each segment. `docker …` as an argument or inside prose is then
+// invisible, while `docker run …` and `FOO=bar docker compose build` still match.
+const segments = cmd.split(/\n|;|&&|\|\||\|/);
+const leading = segments.map((s) => s.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/, ''));
 const touchesDocker =
-  /\bdocker\s+(compose|build|run)\b/.test(cmd) ||
-  /docker-build\.ps1/.test(cmd);
+  leading.some((s) => /^docker\s+(compose|build|run)\b/.test(s)) ||
+  // The deploy script is a docker build by another name — but only when RUN, not when
+  // merely named as a path to some other tool.
+  leading.some((s) => /^(?:pwsh|powershell)\b[^\n]*\bdocker-build\.ps1/.test(s));
 if (!touchesDocker) process.exit(0);
 
 // Inspecting or switching the context is never something to block.
