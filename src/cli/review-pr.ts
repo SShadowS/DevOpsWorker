@@ -1372,6 +1372,10 @@ export async function reviewPR(args: string[]): Promise<void> {
           reviewPath: reviewPath,
           appliedLevers,
           imageSha: process.env['BUILD_SHA'] ?? null,
+          // A run that was deliberately not posted, or explicitly flagged, is not production.
+          isTest:
+            process.env['PR_REVIEW_NO_POST'] === '1' ||
+            process.env['PR_REVIEW_TEST_RUN'] === '1',
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -1417,6 +1421,10 @@ export async function reviewPR(args: string[]): Promise<void> {
         reviewPath: reviewPath,
         appliedLevers,
         imageSha: process.env['BUILD_SHA'] ?? null,
+        // A run that was deliberately not posted, or explicitly flagged, is not production.
+        isTest:
+          process.env['PR_REVIEW_NO_POST'] === '1' ||
+          process.env['PR_REVIEW_TEST_RUN'] === '1',
       });
     }
 
