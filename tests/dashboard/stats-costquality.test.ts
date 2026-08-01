@@ -22,10 +22,10 @@ import {
   READ_BAND_DANGER_ZONE_PCT,
   READ_BAND_HEALTHY_ZONE_START_PCT,
   READ_BAND_HEALTHY_ZONE_END_PCT,
-  MIN_RELIABLE_READBAND_COVERAGE_PCT,
 } from '../../src/dashboard/client/components/stats-costquality.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { CostStats, QualityStats, SubAgentCoverage, CostPerReadBandItem, ModelUsageEntry } from '../../src/dashboard/stats.ts';
+import { MIN_RELIABLE_COVERAGE_PCT } from '../../src/dashboard/coverage-thresholds.ts';
 
 // No test in this file may open a database connection or render a component
 // tree (repo convention — see tests/dashboard/stats-integrity.test.ts). Every
@@ -321,6 +321,24 @@ describe('buildReadBandGaugeView', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Fix round 2, Finding 2 — the 50% bar is ONE shared constant, not two
+// identically-valued copies. Both stats.ts's cost-split coverage and this
+// file's read-band coverage import the SAME binding from
+// src/dashboard/coverage-thresholds.ts; this test proves that by importing
+// it from BOTH re-export paths and asserting reference equality — a genuine
+// shared constant, not two declarations that happen to agree today.
+// ---------------------------------------------------------------------------
+
+describe('MIN_RELIABLE_COVERAGE_PCT — shared, not duplicated', () => {
+  test('stats.ts re-exports the exact same binding stats-costquality.tsx imports directly', async () => {
+    const fromStats = await import('../../src/dashboard/stats.ts');
+    const fromLeafModule = await import('../../src/dashboard/coverage-thresholds.ts');
+    expect(fromStats.MIN_RELIABLE_COVERAGE_PCT).toBe(fromLeafModule.MIN_RELIABLE_COVERAGE_PCT);
+    expect(fromStats.MIN_RELIABLE_COVERAGE_PCT).toBe(MIN_RELIABLE_COVERAGE_PCT);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Read-band coverage — fix round 1: the gauge's average can be computed over
 // a small fraction of the window (findings_list is a recently-added column,
 // same structural issue sub_agents coverage already discloses on the cost
@@ -345,7 +363,7 @@ describe('computeReadBandCoverage', () => {
 
   test('exactly at the low-coverage boundary (50%) is NOT low; one row below it is', () => {
     const atBoundary = computeReadBandCoverage(50, 100);
-    expect(atBoundary.coveragePct).toBe(MIN_RELIABLE_READBAND_COVERAGE_PCT);
+    expect(atBoundary.coveragePct).toBe(MIN_RELIABLE_COVERAGE_PCT);
     expect(atBoundary.lowCoverage).toBe(false);
 
     const belowBoundary = computeReadBandCoverage(49, 100);

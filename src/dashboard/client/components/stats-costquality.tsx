@@ -1,7 +1,8 @@
 import { costStats, qualityStats, statsWindow } from '../stats-store.ts';
 import type { FetchState } from '../stats-store.ts';
 import type { CostStats, QualityStats, SubAgentCoverage, CostPerReadBandItem, ModelUsageEntry } from '../../stats.ts';
-import { formatCost } from '../format.ts';
+import { formatCost, formatPct } from '../format.ts';
+import { MIN_RELIABLE_COVERAGE_PCT } from '../../coverage-thresholds.ts';
 
 // ---------------------------------------------------------------------------
 // Cost + Quality cards (Task 8) — Sections B and C. Replaces the
@@ -18,9 +19,15 @@ import { formatCost } from '../format.ts';
 //
 // Unit convention used throughout this file (tests pin this so a mismatch
 // fails loudly, not silently): a value PURELY COMPUTED here (never sent by
-// the server) that pairs with `%`-suffixed prose is a 0..1 FRACTION —
-// matching `format.ts`'s `formatPct`, reused wherever possible. A value that
-// mirrors a server field already named `...Pct` (`orchestratorSharePctMax`,
+// the server) that pairs with `%`-suffixed prose is a 0..1 FRACTION,
+// formatted by CALLING `format.ts`'s `formatPct` — see the severity/read-band
+// split summary (`SeverityDistributionSection`) and the verdict table
+// (`VerdictTable`), both of which call it directly rather than re-deriving
+// the same `x == null ? 'n/a' : (x*100).toFixed(1)+'%'` string. The ONE
+// deliberate exception is the severity legend's swatch line
+// (`SeverityLegend`), which rounds to 0 decimals instead of `formatPct`'s
+// fixed 1 — commented at that call site, not silently inconsistent. A value
+// that mirrors a server field already named `...Pct` (`orchestratorSharePctMax`,
 // `coveragePct`, `belowBandPct`) is left at the server's OWN 0..100 scale and
 // formatted with this file's own `formatPctValue` — feeding one of those
 // straight into `formatPct` would silently re-multiply by 100. Position/width
@@ -194,19 +201,6 @@ export function readBandGaugePosition(value: number): number {
   return (clamped / READ_BAND_GAUGE_SCALE_MAX) * 100;
 }
 
-/** Below this, most of the window's reviews have no `findings_list`
- *  recorded at all — the gauge's average is dominated by absence of
- *  capture, not by measured quality. `findings_list` is a recently-added
- *  column (data-shapes.md), structurally the same situation `sub_agents`
- *  coverage already discloses on the cost card (`stats.ts`
- *  `computeSubAgentCoverage`/`MIN_RELIABLE_COVERAGE_PCT`). Re-declared here
- *  at the SAME value rather than imported: `stats.ts` is server-only
- *  (`node:fs`, `Bun.spawn`) and no client file may import a VALUE from it —
- *  see the module doc comment's unit-convention note. 50% (a plain
- *  majority) matches the cost card's bar deliberately, not independently
- *  tuned to any observed reading. */
-export const MIN_RELIABLE_READBAND_COVERAGE_PCT = 50;
-
 export interface ReadBandCoverage {
   rowsWithFindings: number;
   totalRows: number;
@@ -229,7 +223,7 @@ export function computeReadBandCoverage(readBandSampleSize: number, sampleSize: 
     rowsWithFindings: readBandSampleSize,
     totalRows: sampleSize,
     coveragePct,
-    lowCoverage: coveragePct != null && coveragePct < MIN_RELIABLE_READBAND_COVERAGE_PCT,
+    lowCoverage: coveragePct != null && coveragePct < MIN_RELIABLE_COVERAGE_PCT,
   };
 }
 
@@ -672,6 +666,11 @@ function SeverityLegend({ segments }: { segments: SeveritySegmentView[] }) {
       {segments.map((s, i) => (
         <span key={s.key} class="severity-bar__legend-item">
           <span class={`severity-bar__swatch severity-bar__swatch--${s.key}`} aria-hidden="true" />
+          {/* Deliberately 0 decimals, not `formatPct` (fixed at 1) — four
+              legend items already share one crowded line; an extra decimal
+              per item adds width without adding a decision-relevant digit
+              here (unlike the split summary below, where the two rates are
+              the whole point of the sentence). */}
           {s.key} {s.count} ({s.pct == null ? 'n/a' : `${(s.pct * 100).toFixed(0)}%`})
           {i === 1 && <span class="severity-bar__legend-divider-note"> │ read-band ends here</span>}
         </span>
@@ -692,9 +691,8 @@ function SeverityDistributionSection({ data }: { data: QualityStats }) {
           <SeverityBar segments={segments} />
           <SeverityLegend segments={segments} />
           <p class="quality-section__summary">
-            Read-band (critical+major): <strong>{split.readBandCount}</strong>{' '}
-            ({split.readBandRate == null ? 'n/a' : `${(split.readBandRate * 100).toFixed(1)}%`}) · below-band (minor+nitpick):{' '}
-            <strong>{split.belowBandCount}</strong> ({split.belowBandRate == null ? 'n/a' : `${(split.belowBandRate * 100).toFixed(1)}%`})
+            Read-band (critical+major): <strong>{split.readBandCount}</strong> ({formatPct(split.readBandRate)}) · below-band
+            (minor+nitpick): <strong>{split.belowBandCount}</strong> ({formatPct(split.belowBandRate)})
           </p>
         </>
       )}
@@ -735,7 +733,7 @@ function VerdictTable({ dist }: { dist: Record<string, number> }) {
           <tr key={verdict}>
             <td class="quality-table__mono">{verdict}</td>
             <td>{count}</td>
-            <td>{total > 0 ? `${((count / total) * 100).toFixed(1)}%` : 'n/a'}</td>
+            <td>{formatPct(total > 0 ? count / total : null)}</td>
           </tr>
         ))}
       </tbody>

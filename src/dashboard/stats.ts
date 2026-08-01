@@ -24,6 +24,7 @@
 import { statSync } from 'node:fs';
 import type postgres from 'postgres';
 import type { PRFinding } from '../agents/pr-reviewer/schema.ts';
+import { MIN_RELIABLE_COVERAGE_PCT } from './coverage-thresholds.ts';
 
 // ---------------------------------------------------------------------------
 // Window handling — the one piece of "user input" every endpoint accepts.
@@ -170,13 +171,18 @@ export function sumApportionedSubAgentCost(subAgents: Record<string, SubAgentCos
   return Object.values(subAgents).reduce((sum, u) => sum + (u.apportionedCostUsd ?? 0), 0);
 }
 
-/** Below this coverage fraction, the split is more instrumentation-shaped
- *  than data-shaped: a majority of the window has no sub_agents object at
- *  all, so `orchestratorCostUsdMax` is dominated by absence of capture
- *  rather than by measured orchestrator-only spend. 50% (a plain majority)
- *  was chosen as a round, easily-explained bar — not tuned to any observed
- *  value. */
-export const MIN_RELIABLE_COVERAGE_PCT = 50;
+/** Re-exported (imported at the top of this file) so existing
+ *  `import { MIN_RELIABLE_COVERAGE_PCT } from './stats.ts'` call sites
+ *  (`tests/dashboard/stats.test.ts`) keep working unchanged. The real
+ *  declaration lives in `coverage-thresholds.ts` — a zero-dependency leaf
+ *  module — because `stats-costquality.tsx` (client, browser-bundled) needs
+ *  this SAME value for its own `findings_list` coverage check and cannot
+ *  import it from here: this module is server-only (`node:fs`,
+ *  `Bun.spawn`), so a client file may only ever `import type` from it, never
+ *  a value. See `coverage-thresholds.ts`'s doc comment for the full
+ *  reasoning and why the two coverage checks share one constant rather than
+ *  two identically-valued copies. */
+export { MIN_RELIABLE_COVERAGE_PCT };
 
 export interface SubAgentCoverage {
   /** Rows carrying at least one named sub-agent entry — i.e. `rosterCount > 0`.
