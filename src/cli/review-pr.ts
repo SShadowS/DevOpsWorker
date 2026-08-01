@@ -728,6 +728,18 @@ export function collectAppliedLevers(counts: {
 }
 
 /**
+ * A run that was deliberately not posted, or explicitly flagged, is not production.
+ * Single source of truth — both `.save({` sites below consume this, so a third
+ * condition added here reaches both instead of drifting between two inlined copies.
+ */
+export function isTestRun(): boolean {
+  return (
+    process.env['PR_REVIEW_NO_POST'] === '1' ||
+    process.env['PR_REVIEW_TEST_RUN'] === '1'
+  );
+}
+
+/**
  * Render the marker + severity-labeled body shared by a thread's creation and
  * its later update — the only difference between the two call sites is which
  * ADO write carries this same string.
@@ -1372,10 +1384,7 @@ export async function reviewPR(args: string[]): Promise<void> {
           reviewPath: reviewPath,
           appliedLevers,
           imageSha: process.env['BUILD_SHA'] ?? null,
-          // A run that was deliberately not posted, or explicitly flagged, is not production.
-          isTest:
-            process.env['PR_REVIEW_NO_POST'] === '1' ||
-            process.env['PR_REVIEW_TEST_RUN'] === '1',
+          isTest: isTestRun(),
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -1421,10 +1430,7 @@ export async function reviewPR(args: string[]): Promise<void> {
         reviewPath: reviewPath,
         appliedLevers,
         imageSha: process.env['BUILD_SHA'] ?? null,
-        // A run that was deliberately not posted, or explicitly flagged, is not production.
-        isTest:
-          process.env['PR_REVIEW_NO_POST'] === '1' ||
-          process.env['PR_REVIEW_TEST_RUN'] === '1',
+        isTest: isTestRun(),
       });
     }
 
