@@ -9,6 +9,9 @@ import {
   classifyReadBandLevel,
   readBandGaugePosition,
   buildReadBandGaugeView,
+  computeReadBandCoverage,
+  describeReadBandCoverage,
+  buildReadBandLowCoverageHeadline,
   buildSeveritySegments,
   buildReadBandSplitView,
   buildCostPanelView,
@@ -19,6 +22,7 @@ import {
   READ_BAND_DANGER_ZONE_PCT,
   READ_BAND_HEALTHY_ZONE_START_PCT,
   READ_BAND_HEALTHY_ZONE_END_PCT,
+  MIN_RELIABLE_READBAND_COVERAGE_PCT,
 } from '../../src/dashboard/client/components/stats-costquality.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { CostStats, QualityStats, SubAgentCoverage, CostPerReadBandItem, ModelUsageEntry } from '../../src/dashboard/stats.ts';
@@ -299,6 +303,86 @@ describe('buildReadBandGaugeView', () => {
     const view = buildReadBandGaugeView(qualityFixture({ avgReadBandItems: 1.2 }));
     expect(view.level).toBe('danger');
     expect(view.text).toContain('danger zone');
+  });
+
+  test('fix round 1 — carries coverage alongside the value, computed from readBandSampleSize/sampleSize', () => {
+    const view = buildReadBandGaugeView(qualityFixture({ readBandSampleSize: 76, sampleSize: 334 }));
+    expect(view.coverage.rowsWithFindings).toBe(76);
+    expect(view.coverage.totalRows).toBe(334);
+    expect(view.coverage.coveragePct).toBeCloseTo((76 / 334) * 100, 10);
+    expect(view.coverage.lowCoverage).toBe(true);
+  });
+
+  test('fix round 1 — lowSample and coverage.lowCoverage are independent: today\'s live 30d reading is lowSample=false, lowCoverage=true', () => {
+    const view = buildReadBandGaugeView(qualityFixture({ lowSample: false, readBandSampleSize: 76, sampleSize: 334 }));
+    expect(view.lowSample).toBe(false);
+    expect(view.coverage.lowCoverage).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Read-band coverage — fix round 1: the gauge's average can be computed over
+// a small fraction of the window (findings_list is a recently-added column,
+// same structural issue sub_agents coverage already discloses on the cost
+// card).
+// ---------------------------------------------------------------------------
+
+describe('computeReadBandCoverage', () => {
+  test("matches the live 30d reading reported in fix round 1 (76/334 ~= 22.8%, low coverage)", () => {
+    const coverage = computeReadBandCoverage(76, 334);
+    expect(coverage.rowsWithFindings).toBe(76);
+    expect(coverage.totalRows).toBe(334);
+    expect(coverage.coveragePct).toBeCloseTo(22.75, 1);
+    expect(coverage.lowCoverage).toBe(true);
+  });
+
+  test('zero-denominator: totalRows=0 -> coveragePct null, lowCoverage false, never NaN or a fake 0%/100%', () => {
+    const coverage = computeReadBandCoverage(0, 0);
+    expect(coverage.coveragePct).toBeNull();
+    expect(coverage.lowCoverage).toBe(false);
+    expect(Number.isNaN(coverage.coveragePct as unknown as number)).toBe(false);
+  });
+
+  test('exactly at the low-coverage boundary (50%) is NOT low; one row below it is', () => {
+    const atBoundary = computeReadBandCoverage(50, 100);
+    expect(atBoundary.coveragePct).toBe(MIN_RELIABLE_READBAND_COVERAGE_PCT);
+    expect(atBoundary.lowCoverage).toBe(false);
+
+    const belowBoundary = computeReadBandCoverage(49, 100);
+    expect(belowBoundary.lowCoverage).toBe(true);
+  });
+
+  test('full coverage (all rows carry findings) -> not low', () => {
+    const coverage = computeReadBandCoverage(334, 334);
+    expect(coverage.coveragePct).toBe(100);
+    expect(coverage.lowCoverage).toBe(false);
+  });
+});
+
+describe('describeReadBandCoverage', () => {
+  test('renders the raw counts and the pre-scaled percentage without double-multiplying', () => {
+    const text = describeReadBandCoverage(computeReadBandCoverage(76, 334));
+    expect(text).toContain('76/334');
+    expect(text).toContain('22.8%');
+    expect(text).not.toContain('2280%'); // the double-scaling bug this file's doc comment warns about
+  });
+
+  test('zero-denominator renders n/a, not a fake percentage', () => {
+    const text = describeReadBandCoverage(computeReadBandCoverage(0, 0));
+    expect(text).toContain('n/a');
+  });
+});
+
+describe('buildReadBandLowCoverageHeadline', () => {
+  test('lowCoverage false -> null', () => {
+    expect(buildReadBandLowCoverageHeadline(computeReadBandCoverage(334, 334))).toBeNull();
+  });
+
+  test('lowCoverage true -> names the exact percentage and the recently-added column', () => {
+    const text = buildReadBandLowCoverageHeadline(computeReadBandCoverage(76, 334));
+    expect(text).not.toBeNull();
+    expect(text).toContain('22.8%');
+    expect(text).toContain('findings_list');
   });
 });
 

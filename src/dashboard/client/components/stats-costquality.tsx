@@ -194,29 +194,86 @@ export function readBandGaugePosition(value: number): number {
   return (clamped / READ_BAND_GAUGE_SCALE_MAX) * 100;
 }
 
+/** Below this, most of the window's reviews have no `findings_list`
+ *  recorded at all — the gauge's average is dominated by absence of
+ *  capture, not by measured quality. `findings_list` is a recently-added
+ *  column (data-shapes.md), structurally the same situation `sub_agents`
+ *  coverage already discloses on the cost card (`stats.ts`
+ *  `computeSubAgentCoverage`/`MIN_RELIABLE_COVERAGE_PCT`). Re-declared here
+ *  at the SAME value rather than imported: `stats.ts` is server-only
+ *  (`node:fs`, `Bun.spawn`) and no client file may import a VALUE from it —
+ *  see the module doc comment's unit-convention note. 50% (a plain
+ *  majority) matches the cost card's bar deliberately, not independently
+ *  tuned to any observed reading. */
+export const MIN_RELIABLE_READBAND_COVERAGE_PCT = 50;
+
+export interface ReadBandCoverage {
+  rowsWithFindings: number;
+  totalRows: number;
+  coveragePct: number | null;
+  lowCoverage: boolean;
+}
+
+/** What fraction of the window's reviews actually have `findings_list`
+ *  recorded — the population the gauge's `avgReadBandItems` is itself
+ *  averaged over (`readBandSampleSize`), against the window's total
+ *  (`sampleSize`). `totalRows === 0` (zero-denominator: not reachable in
+ *  practice once the panel is `'ready'` — `classifyWindowedResponse`
+ *  already routes a zero-row window to `'empty'` before this runs — but
+ *  this function is pure and must not divide by zero for a caller that
+ *  hands it one anyway) reads as `coveragePct: null`, never `NaN` or a
+ *  fake `0%`/`100%`. */
+export function computeReadBandCoverage(readBandSampleSize: number, sampleSize: number): ReadBandCoverage {
+  const coveragePct = sampleSize > 0 ? (readBandSampleSize / sampleSize) * 100 : null;
+  return {
+    rowsWithFindings: readBandSampleSize,
+    totalRows: sampleSize,
+    coveragePct,
+    lowCoverage: coveragePct != null && coveragePct < MIN_RELIABLE_READBAND_COVERAGE_PCT,
+  };
+}
+
+/** The structured coverage numbers, always shown next to the gauge —
+ *  mirrors `describeCoverage` (cost split) exactly: coverage is disclosed
+ *  regardless of whether it happens to be low this window. */
+export function describeReadBandCoverage(coverage: ReadBandCoverage): string {
+  return `${coverage.rowsWithFindings}/${coverage.totalRows} reviews in this window carry findings data (${formatPctValue(coverage.coveragePct)})`;
+}
+
+/** A short, glance-level callout shown ONLY when `coverage.lowCoverage` is
+ *  true — mirrors `buildLowCoverageHeadline` (cost split). Derives purely
+ *  from the already-computed boolean/percentage, not a re-derivation of the
+ *  50% threshold at the call site. */
+export function buildReadBandLowCoverageHeadline(coverage: ReadBandCoverage): string | null {
+  if (!coverage.lowCoverage) return null;
+  return `Only ${formatPctValue(coverage.coveragePct)} of this window's reviews carry findings data — the average above reflects that subset, not the full window. findings_list is a recently-added column; older rows have none recorded.`;
+}
+
 export interface ReadBandGaugeView {
   level: ReadBandLevel;
   value: number | null;
   /** 0..100, or `null` when there is no value to place on the track. */
   position: number | null;
   sampleSize: number;
-  /** From the endpoint's own `WindowMeta.lowSample` (whole-window row count),
-   *  not a second, client-invented threshold over `readBandSampleSize` —
-   *  `stats.ts` has no per-metric flag for that narrower population, and
-   *  `stats.ts` is out of scope for this task (duplicating its
-   *  `MIN_RELIABLE_SAMPLE` constant client-side would also be a value import
-   *  of a Node-only module — see the module doc comment's unit-convention
-   *  note and CostQualityPanel's own doc comment). Flagged in the task
-   *  report as a real, if minor, gap: `readBandSampleSize` CAN be smaller
-   *  than the window's total `sampleSize` (rows recorded with no
-   *  `findings_list`), and that narrower population has no small-sample
-   *  flag of its own. */
+  /** From the endpoint's own `WindowMeta.lowSample` (whole-window row
+   *  count) — deliberately DISTINCT from `coverage.lowCoverage` below, the
+   *  same way the cost card keeps `WindowMeta.lowSample` and
+   *  `orchestratorSubAgentSplit.coverage.lowCoverage` separate. A window can
+   *  be `lowSample: false` (plenty of total rows, e.g. 334 over 30d) and
+   *  still `coverage.lowCoverage: true` (few of those rows carry
+   *  `findings_list`) at the same time — exactly today's live 30d reading. */
   lowSample: boolean;
+  /** What fraction of the window's reviews the average is actually computed
+   *  over. Fix round 1: this was missing entirely — the gauge rendered
+   *  `avgReadBandItems` as if it summarised the whole window, when it can
+   *  reflect as little as ~23% of it (76 of 334 rows on the live 30d
+   *  window). */
+  coverage: ReadBandCoverage;
   text: string;
 }
 
 export function buildReadBandGaugeView(quality: QualityStats): ReadBandGaugeView {
-  const { avgReadBandItems, readBandSampleSize, lowSample } = quality;
+  const { avgReadBandItems, readBandSampleSize, lowSample, sampleSize } = quality;
   const level = classifyReadBandLevel(avgReadBandItems);
   const position = avgReadBandItems == null ? null : readBandGaugePosition(avgReadBandItems);
   const valueText = avgReadBandItems == null ? 'n/a' : avgReadBandItems.toFixed(2);
@@ -234,6 +291,7 @@ export function buildReadBandGaugeView(quality: QualityStats): ReadBandGaugeView
     position,
     sampleSize: readBandSampleSize,
     lowSample,
+    coverage: computeReadBandCoverage(readBandSampleSize, sampleSize),
     text: `avg read-band items (critical+major per review): ${valueText} — ${levelText} (n=${readBandSampleSize})`,
   };
 }
@@ -544,6 +602,7 @@ function QualitySection({ title, status, children }: { title: string; status: Se
 }
 
 function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
+  const lowCoverageHeadline = buildReadBandLowCoverageHeadline(view.coverage);
   return (
     <QualitySection title="Read-band health (avg critical+major findings per review)" status={view.level === 'danger' ? 'attention' : 'neutral'}>
       {view.value == null ? (
@@ -579,6 +638,13 @@ function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
         {view.level === 'danger' && <strong class="quality-tag quality-tag--attention">Needs attention: </strong>}
         {view.text}
       </p>
+      <p class="quality-section__summary">Coverage: {describeReadBandCoverage(view.coverage)}</p>
+      {lowCoverageHeadline && (
+        <p class="quality-section__note">
+          <strong class="quality-tag quality-tag--caveat">Known instrument caveat: </strong>
+          {lowCoverageHeadline}
+        </p>
+      )}
       {view.lowSample && (
         <p class="quality-section__note">Small sample this window — treat this reading as a coin flip, not a trend.</p>
       )}
