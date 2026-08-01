@@ -15,6 +15,7 @@ import {
   aggregateModelUsage,
   dispatchCount,
   rosterCount,
+  dispatchCountsForPercentile,
   aggregateToolMix,
   classifyEffort,
   orchestratorOutputTokens,
@@ -265,6 +266,36 @@ describe('rosterCount', () => {
   });
 });
 
+describe('dispatchCountsForPercentile — defines the dispatch median/p90 population', () => {
+  // Regression pin for the fix-round-1 finding: the SQL previously excluded
+  // rows with no 'Agent' key from the percentile while `dispatch.sampleSize`
+  // reported the full window, so the two numbers described different
+  // populations. This function is now the single source of truth for that
+  // population on the JS side, and the SQL is written to zero-fill with the
+  // identical convention (pinned separately below in the SQL-shape block).
+  test('zero-fills a row with no Agent key rather than excluding it', () => {
+    const rows: Array<{ tool_calls: Record<string, number> | null }> = [
+      { tool_calls: { Agent: 7 } },
+      { tool_calls: { Bash: 2 } },
+      { tool_calls: null },
+    ];
+    expect(dispatchCountsForPercentile(rows)).toEqual([7, 0, 0]);
+  });
+
+  test('its length always equals the input row count — the percentile population is the full window, never a filtered subset', () => {
+    const rows = [{ tool_calls: null }, { tool_calls: null }, { tool_calls: { Agent: 3 } }, { tool_calls: null }, { tool_calls: null }];
+    const result = dispatchCountsForPercentile(rows);
+    expect(result.length).toBe(rows.length);
+    // 4 of 5 rows have no Agent key — under the old "exclude" behaviour the
+    // population would have been 1, not 5.
+    expect(result.filter((n) => n === 0).length).toBe(4);
+  });
+
+  test('empty input is an empty population, not an error', () => {
+    expect(dispatchCountsForPercentile([])).toEqual([]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Tool mix
 // ---------------------------------------------------------------------------
@@ -456,6 +487,56 @@ describe('stats.ts SQL shape', () => {
     const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
     expect(fn![0]).toContain(`tool_calls->>'Agent'`);
+  });
+
+  // Fix-round-1 regression pin: the dispatch-percentile query previously
+  // filtered `WHERE tool_calls ? 'Agent'`, excluding zero-dispatch rows from
+  // the percentile while `dispatch.sampleSize` reported the full window —
+  // two fields silently describing different populations. A source-text test
+  // cannot verify two DECLARED NUMBERS agree at runtime, but it CAN verify the
+  // two queries share byte-identical WHERE clauses, which structurally
+  // guarantees they run over the same rows (the behavioral half of this pin —
+  // that the zero-fill convention itself is correct — lives in the
+  // `dispatchCountsForPercentile` describe block above, DB-free).
+  test('the dispatch-percentile query shares the exact WHERE clause with the main rows fetch — same population by construction', () => {
+    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const whereClauses = [...fn![0].matchAll(/WHERE\s+created_at[^\n]*/g)].map((m) => m[0].trim());
+    // The rows fetch and the dispatch-percentile query are the only two SQL
+    // blocks in this function; both must filter on the window and nothing else.
+    expect(whereClauses.length).toBe(2);
+    expect(new Set(whereClauses).size).toBe(1);
+  });
+
+  test('the dispatch-percentile query zero-fills a missing Agent key instead of excluding the row', () => {
+    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toContain("COALESCE((tool_calls->>'Agent')::numeric, 0)");
+    expect(fn![0]).not.toMatch(/tool_calls\s*\?\s*'Agent'/);
+  });
+
+  test('dispatch.dispatchSampleSize is reported alongside sampleSize, mirroring costSampleSize on /api/stats/cost', () => {
+    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toMatch(/dispatchSampleSize:\s*dispatchCounts\.length/);
+  });
+
+  // Fix-round-1 regression pin: the cost split previously exposed a plain
+  // `orchestratorCostUsd`/`subAgentCostUsd` pair with the bound direction
+  // stated only in prose. A renderer reading the payload had two numbers that
+  // look equally exact. The Max/Min suffixes are themselves the fix — a chart
+  // can key off the field name without parsing `note`.
+  test('the cost split exposes explicit bound field names, not an unlabeled pair', () => {
+    const fn = src.match(/export async function getCostStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    expect(body).toContain('orchestratorCostUsdMax');
+    expect(body).toContain('subAgentCostUsdMin');
+    expect(body).toContain('orchestratorSharePctMax');
+    // The old unlabeled field names must not resurface as if they were exact.
+    expect(body).not.toMatch(/orchestratorCostUsd:/);
+    expect(body).not.toMatch(/subAgentCostUsd:/);
+    expect(body).not.toMatch(/orchestratorSharePct:/);
   });
 
   test('getDriftStats excludes non-sha sentinel values when finding the most recent real sha', () => {

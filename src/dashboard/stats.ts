@@ -233,6 +233,29 @@ export function rosterCount(subAgents: Record<string, unknown> | null): number {
   return subAgents ? Object.keys(subAgents).length : 0;
 }
 
+/**
+ * Defines the population the dispatch median/p90 are computed over: EVERY
+ * row in the window, zero-filling a row with no `'Agent'` key via
+ * `dispatchCount` (already 0 for that case) rather than excluding it.
+ *
+ * A missing `'Agent'` key means the tool was never invoked that run — a real
+ * zero-dispatch observation (e.g. the cheap sanity/backport review path,
+ * which fans out to no sub-agents), not absent telemetry. Excluding those
+ * rows from the percentile — as the SQL previously did via
+ * `WHERE tool_calls ? 'Agent'` — silently drops a real cluster of the
+ * distribution and makes the reported `dispatch.sampleSize` (the full window)
+ * disagree with the population the percentile actually ran over. This
+ * function is the single source of truth for that population, on both the
+ * JS side (`dispatchSampleSize` below) and, by construction, the SQL side —
+ * `getIntegrityStats`'s dispatch-percentile query zero-fills with the same
+ * `COALESCE(..., 0)` convention and applies no additional row filter, so its
+ * population is provably this same one, not a query that has to be eyeballed
+ * to match.
+ */
+export function dispatchCountsForPercentile(rows: Array<{ tool_calls: Record<string, number> | null }>): number[] {
+  return rows.map((r) => dispatchCount(r.tool_calls));
+}
+
 // ---------------------------------------------------------------------------
 // Pure shaping — tool mix
 // ---------------------------------------------------------------------------
@@ -411,9 +434,16 @@ export interface CostStats extends WindowMeta {
   totalCostUsd: number;
   costSampleSize: number;
   orchestratorSubAgentSplit: {
-    orchestratorCostUsd: number;
-    subAgentCostUsd: number;
-    orchestratorSharePct: number | null;
+    /** True orchestrator spend is <= this. Forced by the apportionment
+     *  arithmetic, not an estimate we chose to round conservatively: see
+     *  `note`. */
+    orchestratorCostUsdMax: number;
+    /** True sub-agent spend is >= this. */
+    subAgentCostUsdMin: number;
+    /** = orchestratorCostUsdMax / totalCostUsd — an upper bound on the true
+     *  share, for the same reason orchestratorCostUsdMax is. Null with 0
+     *  total cost. */
+    orchestratorSharePctMax: number | null;
     note: string;
   };
   costPerReadBandItem: CostPerReadBandItem;
@@ -472,13 +502,16 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow): Prom
     totalCostUsd: totalCost,
     costSampleSize: Number(percentiles?.n ?? 0),
     orchestratorSubAgentSplit: {
-      orchestratorCostUsd: orchestratorCost,
-      subAgentCostUsd: subAgentCostTotal,
-      orchestratorSharePct: totalCost > 0 ? (orchestratorCost / totalCost) * 100 : null,
+      orchestratorCostUsdMax: orchestratorCost,
+      subAgentCostUsdMin: subAgentCostTotal,
+      orchestratorSharePctMax: totalCost > 0 ? (orchestratorCost / totalCost) * 100 : null,
       note:
-        "subAgentCostUsd sums sub_agents[*].apportionedCostUsd (model cost shared out by measured token count). " +
-        "sub_agents is a known undercount of actual dispatches relative to tool_calls->'Agent' (see /api/stats/integrity), " +
-        'so this is a LOWER BOUND on sub-agent spend and an UPPER BOUND on orchestrator spend.',
+        'subAgentCostUsdMin sums sub_agents[*].apportionedCostUsd (a model\'s total cost shared out by measured ' +
+        "token count among its COUNTED contributors — see SubAgentUsage in src/types/pipeline.types.ts). That sum " +
+        'always equals the model\'s true total by construction, so a dispatch missing from the sub_agents roster ' +
+        "(a known, nondeterministic undercount vs tool_calls->'Agent' — see /api/stats/integrity) does not merely " +
+        'go uncounted: its cost is forced into orchestratorCostUsdMax instead. The bias is one-directional and ' +
+        'not a rounding choice — subAgentCostUsdMin can only read low and orchestratorCostUsdMax can only read high.',
     },
     costPerReadBandItem: computeCostPerReadBandItem(rows.map((r) => ({ costUsd: r.cost_usd, findingsList: r.findings_list }))),
     modelBreakdown: aggregateModelUsage(rows.map((r) => r.model_usage)),
@@ -544,6 +577,12 @@ export interface IntegrityStats extends WindowMeta {
   };
   dispatch: {
     sampleSize: number;
+    /** The population medianDispatch/p90Dispatch are actually computed over.
+     *  Equal to `sampleSize` by construction — see `dispatchCountsForPercentile`
+     *  for why zero-fill-all-rows was chosen over excluding rows with no
+     *  'Agent' key. Reported explicitly rather than assumed equal, mirroring
+     *  `costSampleSize` on `/api/stats/cost`. */
+    dispatchSampleSize: number;
     medianDispatch: number | null;
     p90Dispatch: number | null;
     avgRosterCount: number | null;
@@ -583,16 +622,20 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow):
     WHERE created_at > now() - (${days}::int * interval '1 day')
   `;
 
+  // Zero-fills a missing 'Agent' key (COALESCE(...,0)) and applies no row
+  // filter beyond the window — same population as `rows` above, and the same
+  // convention `dispatchCountsForPercentile` uses on the JS side. See that
+  // function's doc comment for why zero-fill-all-rows was chosen over
+  // excluding rows with no dispatches.
   const [dispatchPercentiles] = await sql<Array<{ median: number | null; p90: number | null }>>`
     SELECT
-      percentile_cont(0.5) WITHIN GROUP (ORDER BY (tool_calls->>'Agent')::numeric) AS median,
-      percentile_cont(0.9) WITHIN GROUP (ORDER BY (tool_calls->>'Agent')::numeric) AS p90
+      percentile_cont(0.5) WITHIN GROUP (ORDER BY COALESCE((tool_calls->>'Agent')::numeric, 0)) AS median,
+      percentile_cont(0.9) WITHIN GROUP (ORDER BY COALESCE((tool_calls->>'Agent')::numeric, 0)) AS p90
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
-      AND tool_calls ? 'Agent'
   `;
 
-  const dispatchCounts = rows.map((r) => dispatchCount(r.tool_calls));
+  const dispatchCounts = dispatchCountsForPercentile(rows);
   const rosterCounts = rows.map((r) => rosterCount(r.sub_agents));
   const mismatchCount = rows.filter((_, i) => dispatchCounts[i] !== rosterCounts[i]).length;
   const avgRosterCount = rosterCounts.length > 0 ? rosterCounts.reduce((a, b) => a + b, 0) / rosterCounts.length : null;
@@ -617,6 +660,7 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow):
     },
     dispatch: {
       sampleSize: rows.length,
+      dispatchSampleSize: dispatchCounts.length,
       medianDispatch: numOrNull(dispatchPercentiles?.median),
       p90Dispatch: numOrNull(dispatchPercentiles?.p90),
       avgRosterCount,
@@ -624,7 +668,9 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow):
       mismatchRate: rows.length > 0 ? mismatchCount / rows.length : null,
       note:
         "tool_calls->'Agent' is the authoritative dispatch count. sub_agents roster undercounts nondeterministically " +
-        '— never report roster count alone as "how many agents ran".',
+        '— never report roster count alone as "how many agents ran". medianDispatch/p90Dispatch are computed over ' +
+        "EVERY row in the window (dispatchSampleSize == sampleSize by construction): a row with no 'Agent' key is a " +
+        'real zero-dispatch review (e.g. the cheap sanity path), zero-filled rather than excluded.',
     },
     inferredEffort: {
       inferred: true,
