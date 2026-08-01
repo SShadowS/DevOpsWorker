@@ -293,6 +293,21 @@ describe('buildConfigReport', () => {
     expect(report.orchestratorModel.buildConfigFromRepo.raw).toBe('claude-opus-4-8');
   });
 
+  test('DEFAULT_MODEL="" (set but empty): raw reports the empty string while model still falls through || to the literal', async () => {
+    // The one case where || and ?? diverge, and the case the brief explicitly called out —
+    // container-dispatcher.ts forwards an unset host var into a spawned container as '',
+    // so "configured but empty" is a real, not hypothetical, state this endpoint must show
+    // distinctly from both "unset" and "configured to a real model".
+    clearEnv();
+    process.env['DEFAULT_MODEL'] = '';
+    const report = await buildConfigReport({ manifest: {} });
+    expect(report.orchestratorModel.loadConfig.raw).toBe('');
+    expect(report.orchestratorModel.buildConfigFromRepo.raw).toBe('');
+    expect(report.orchestratorModel.loadConfig.model).toBe('claude-opus-5');
+    expect(report.orchestratorModel.buildConfigFromRepo.model).toBe('claude-opus-5');
+    expect(report.orchestratorModel.agree).toBe(true);
+  });
+
   test('DEFAULT_EFFORT=low resolves on both builders; unset reads as the SDK default label', async () => {
     clearEnv();
     process.env['DEFAULT_EFFORT'] = 'low';
