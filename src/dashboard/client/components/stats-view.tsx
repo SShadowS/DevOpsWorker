@@ -1,21 +1,23 @@
 import { useEffect } from 'preact/hooks';
 import {
-  statsWindow, costStats, qualityStats, operationalStats, configReport,
+  statsWindow, costStats, qualityStats, operationalStats,
   setStatsWindow, loadAllStats, STATS_WINDOWS,
 } from '../stats-store.ts';
 import type { FetchState, StatsWindow } from '../stats-store.ts';
 import { formatCost } from '../format.ts';
 import { StatsRibbon } from './stats-ribbon.tsx';
 import { StatsIntegrityPanel } from './stats-integrity.tsx';
+import { ConfigPanel } from './stats-config.tsx';
 
 // ---------------------------------------------------------------------------
 // Shell for the Stats & Config tab (Task 4). Owns: the third tab's panel
 // container, the shared window selector, and data fetching for all six
 // endpoints with loading/empty/error states. The remaining placeholder slots
-// below (Config/Task 7, Cost & Quality/Task 8, Operational/Task 9) still get
-// their body from a later task; Integrity (Task 6) has been replaced by its
-// own component (`stats-integrity.tsx`), matching the ribbon's precedent of
-// extracting a finished slot out of the generic `<StatsSlot>` placeholder.
+// below (Cost & Quality/Task 8, Operational/Task 9) still get their body
+// from a later task; Integrity (Task 6) and Config (Task 7) have each been
+// replaced by their own component (`stats-integrity.tsx`, `stats-config.tsx`),
+// matching the ribbon's precedent of extracting a finished slot out of the
+// generic `<StatsSlot>` placeholder.
 // ---------------------------------------------------------------------------
 
 type SlotStatus = 'loading' | 'error' | 'empty' | 'ready';
@@ -123,7 +125,6 @@ export function StatsView() {
   const cost = costStats.value;
   const quality = qualityStats.value;
   const operational = operationalStats.value;
-  const config = configReport.value;
 
   return (
     <div class="stats-view">
@@ -143,15 +144,7 @@ export function StatsView() {
 
       <StatsIntegrityPanel />
 
-      <StatsSlot
-        id="stats-slot-config"
-        title="Config"
-        taskLabel="Task 7"
-        sources={[
-          describeFetchState('Resolved configuration', config, (d) =>
-            `${d.perAgent.length} agents · generated ${new Date(d.generatedAt).toLocaleTimeString()}`),
-        ]}
-      />
+      <ConfigPanel />
 
       <StatsSlot
         id="stats-slot-cost-quality"
