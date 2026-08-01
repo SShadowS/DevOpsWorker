@@ -22,6 +22,8 @@ import {
   dispatchCountsForPercentile,
   aggregateSubAgentModelAttribution,
   aggregateToolMix,
+  classifyErrorMessage,
+  classifyErrors,
   classifyEffort,
   orchestratorOutputTokens,
   summarizeEffortMix,
@@ -444,6 +446,102 @@ describe('aggregateToolMix', () => {
 
   test('empty input returns an empty mix', () => {
     expect(aggregateToolMix([])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error classification (Task 9, fix round 1) — pinned against the EXACT
+// live production strings (queried read-only, not paraphrased), confirmed
+// via `mcp__postgres__query` against a 90-day window before writing this.
+// ---------------------------------------------------------------------------
+
+describe('classifyErrorMessage', () => {
+  test('rate-limit — matches the stable prefix, ignoring the varying reset-time suffix', () => {
+    expect(classifyErrorMessage('Rate limit hit during "pr-reviewer": 11am (UTC)')).toBe('rate-limit');
+    expect(classifyErrorMessage('Rate limit hit during "pr-reviewer": 11:50pm (UTC)')).toBe('rate-limit');
+    // A different stage and a differently-shaped resetInfo still match — the
+    // prefix, not the whole string, is what identifies this category.
+    expect(classifyErrorMessage('Rate limit hit during "coder": reset unknown')).toBe('rate-limit');
+  });
+
+  test('no-result — the exact AgentExecutionError default-message shape', () => {
+    expect(classifyErrorMessage('Agent "pr-reviewer" failed to produce a result')).toBe('no-result');
+    expect(classifyErrorMessage('Agent "cherry-pick-reviewer" failed to produce a result')).toBe('no-result');
+  });
+
+  test('schema-validation — the exact AgentValidationError message shape', () => {
+    expect(classifyErrorMessage('Agent "pr-reviewer" output failed schema validation')).toBe('schema-validation');
+  });
+
+  test('a TransientAgentError wrapping a recognisable inner message classifies by the INNER shape', () => {
+    // The live production row, verbatim: TransientAgentError wrapping an
+    // AgentExecutionError's own default message.
+    expect(classifyErrorMessage('Agent "pr-reviewer" failed after 1 attempt(s): Agent "pr-reviewer" failed to produce a result'))
+      .toBe('no-result');
+  });
+
+  test('a TransientAgentError wrapping an UNRECOGNISABLE inner message falls to other — never guessed as no-result', () => {
+    // The wrapped lastError.message is unconstrained (could be a network
+    // error, an auth timeout, anything) — this is the case the "never guess"
+    // constraint exists for.
+    expect(classifyErrorMessage('Agent "pr-reviewer" failed after 3 attempt(s): ECONNRESET')).toBe('other');
+  });
+
+  test('unrecognised text — including the live "Something went wrong" row — is other, not guessed', () => {
+    expect(classifyErrorMessage('Something went wrong')).toBe('other');
+  });
+
+  test('an AgentExecutionError constructed with custom string details does not collide with the default-message shape', () => {
+    // AgentExecutionError's constructor only produces the fixed
+    // "failed to produce a result" text when `details` is NOT a string —
+    // a string `details` becomes the message verbatim (errors.ts). That
+    // custom text has no guaranteed shape, so it must fall to `other`.
+    expect(classifyErrorMessage('Agent "pr-reviewer" hit an unexpected exception: boom')).toBe('other');
+  });
+});
+
+describe('classifyErrors', () => {
+  test('the exact live 90-day production distribution classifies to the reported 21/31 rate-limit share', () => {
+    const messages = [
+      ...Array(17).fill('Rate limit hit during "pr-reviewer": 11am (UTC)'),
+      ...Array(4).fill('Rate limit hit during "pr-reviewer": 11:50pm (UTC)'),
+      ...Array(4).fill('Agent "pr-reviewer" failed after 1 attempt(s): Agent "pr-reviewer" failed to produce a result'),
+      ...Array(2).fill('Agent "pr-reviewer" output failed schema validation'),
+      ...Array(2).fill('Agent "pr-reviewer" failed to produce a result'),
+      'Something went wrong',
+      'Agent "cherry-pick-reviewer" failed to produce a result',
+    ];
+    const summary = classifyErrors(messages);
+    expect(summary.total).toBe(31);
+    expect(summary.categories['rate-limit']).toBe(21);
+    expect(summary.categories['no-result']).toBe(7); // 4 wrapped + 2 + 1 (cherry-pick-reviewer)
+    expect(summary.categories['schema-validation']).toBe(2);
+    expect(summary.categories['other']).toBe(1); // "Something went wrong"
+    expect(summary.categories['rate-limit'] / summary.total).toBeCloseTo(21 / 31, 5);
+  });
+
+  test('the empty-window case — zero errors is a real, measured reading, not an omission', () => {
+    const summary = classifyErrors([]);
+    expect(summary.total).toBe(0);
+    expect(summary.categories).toEqual({ 'rate-limit': 0, 'no-result': 0, 'schema-validation': 0, other: 0 });
+    expect(summary.exemplars).toEqual({});
+  });
+
+  test('exemplars are truncated, never the full raw string, and only set for categories actually observed', () => {
+    const longMessage = `Agent "pr-reviewer" hit an unexpected exception: ${'x'.repeat(200)}`;
+    const summary = classifyErrors([longMessage]);
+    expect(summary.exemplars.other).toBeDefined();
+    expect(summary.exemplars.other!.length).toBeLessThan(longMessage.length);
+    expect(summary.exemplars.other).not.toBe(longMessage);
+    expect(summary.exemplars['rate-limit']).toBeUndefined();
+  });
+
+  test('the exemplar is the FIRST message per category in the given (caller-ordered, newest-first) array', () => {
+    const summary = classifyErrors([
+      'Rate limit hit during "pr-reviewer": 11:50pm (UTC)',
+      'Rate limit hit during "pr-reviewer": 11am (UTC)',
+    ]);
+    expect(summary.exemplars['rate-limit']).toBe('Rate limit hit during "pr-reviewer": 11:50pm (UTC)');
   });
 });
 
@@ -912,5 +1010,19 @@ describe('stats.ts SQL shape', () => {
     // computeCommitsBehindHead's own doc comment on why null (never 0) is
     // the only safe default.
     expect(fn![0]).toMatch(/if\s*\(head\.value\)\s*\{/);
+  });
+
+  // Task 9, fix round 1: error classification was added after the endpoint's
+  // initial ship, once production data showed the `error` column classifies
+  // cleanly (see the classifyErrorMessage/classifyErrors describe blocks
+  // above for the behavioural half). This pins the SQL side: the same
+  // `error IS NOT NULL` population `errorRate` counts elsewhere, and that
+  // the endpoint actually wires the real classifier rather than a stub.
+  test('getOperationalStats classifies every non-null error in the window, wired to the real classifier', () => {
+    const fn = src.match(/export async function getOperationalStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    expect(body).toContain('AND error IS NOT NULL');
+    expect(body).toMatch(/errorClassification:\s*classifyErrors\(errorRows\.map\(\(r\) => r\.error\)\)/);
   });
 });

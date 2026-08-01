@@ -2380,6 +2380,11 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .operational-table__mono { font-family: var(--font-mono); color: var(--color-text-primary); }
 .operational-table__flag { color: var(--color-accent); font-weight: 600; }
 .operational-table__row--flagged { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+/* Error-breakdown exemplars are prose (free-text error messages), never
+   identifiers — deliberately NOT --font-mono, unlike repo keys/tool names
+   above. Italic + muted marks it as an illustrative example, not a fact to
+   act on by itself (the count is the fact). */
+.operational-table__exemplar { font-style: italic; color: var(--color-text-muted); }
 
 /* ---- Reviews-per-day chart — one bar per CALENDAR day (gaps in the
    server's sparse series are zero-filled client-side, see

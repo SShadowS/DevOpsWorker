@@ -1011,6 +1011,110 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow):
 }
 
 // ---------------------------------------------------------------------------
+// Pure shaping — error classification (Task 9, fix round 1)
+//
+// `pr_reviews.error` is free text: whatever `err.message` was at the moment
+// a stage threw (src/cli/review-pr.ts). Initially treated as un-parseable and
+// left out of the Operational card entirely — reversed after checking real
+// production data: over a 90-day window, 21 of 31 recorded errors (68%) are
+// `RateLimitError`, and the remainder classify cleanly against the other two
+// PipelineError subtypes (src/sdk/errors.ts) that construct a fixed,
+// interpolation-free message shape:
+//
+//   RateLimitError        `Rate limit hit during "${stage}": ${resetInfo}`
+//   AgentExecutionError    `Agent "${stage}" failed to produce a result`        (only when `details` wasn't already a string — see its constructor)
+//   AgentValidationError   `Agent "${stage}" output failed schema validation`
+//
+// `resetInfo` (a reset time like "11am (UTC)") is the only part of any of
+// these that varies in a way that matters here, so every match below is
+// anchored on the STABLE portion of the message — a literal prefix for
+// RateLimitError, an exact full-string shape (via regex) for the other two —
+// never the variable suffix.
+//
+// `TransientAgentError` (`Agent "${stage}" failed after ${attempts}
+// attempt(s): ${lastError.message}`) is the one class that WRAPS another
+// error's message verbatim — confirmed the only such wrapper in the
+// PipelineError hierarchy by reading every constructor in errors.ts. Peeling
+// off that one fixed prefix and re-classifying the wrapped remainder is
+// still a code-derived fact, not a guess: if the wrapped message happens to
+// BE one of the three known shapes (as it is for 4 of the live rows —
+// `TransientAgentError` wrapping an `AgentExecutionError`'s default
+// message), that's real information. If the wrapped message is anything
+// else (a raw network error, an auth timeout — genuinely unconstrained),
+// classification falls through to `'other'` rather than assuming it means
+// "no result" too. Peeling happens exactly once — nothing in the codebase
+// double-wraps.
+//
+// Anything that doesn't match — including "Something went wrong" and any
+// `AgentExecutionError` constructed with a custom string `details` — is
+// `'other'`. This is deliberate, not a gap to close: a growing `'other'`
+// bucket is itself the signal that the parser has fallen behind the error
+// text, which is exactly why its count is always shown, never hidden.
+// ---------------------------------------------------------------------------
+
+export type ErrorCategory = 'rate-limit' | 'no-result' | 'schema-validation' | 'other';
+
+const RATE_LIMIT_PREFIX = 'Rate limit hit during "';
+const NO_RESULT_RE = /^Agent "[^"]*" failed to produce a result$/;
+const SCHEMA_VALIDATION_RE = /^Agent "[^"]*" output failed schema validation$/;
+const RETRY_WRAPPER_RE = /^Agent "[^"]*" failed after \d+ attempt\(s\): ([\s\S]*)$/;
+
+function classifyErrorShape(message: string): ErrorCategory {
+  if (message.startsWith(RATE_LIMIT_PREFIX)) return 'rate-limit';
+  if (NO_RESULT_RE.test(message)) return 'no-result';
+  if (SCHEMA_VALIDATION_RE.test(message)) return 'schema-validation';
+  return 'other';
+}
+
+/** Classifies one `error` message. Exported and unit-tested directly against
+ *  the exact live production strings (see tests/dashboard/stats.test.ts) —
+ *  not paraphrased fixtures. */
+export function classifyErrorMessage(message: string): ErrorCategory {
+  const direct = classifyErrorShape(message);
+  if (direct !== 'other') return direct;
+  const wrapped = RETRY_WRAPPER_RE.exec(message);
+  return wrapped ? classifyErrorShape(wrapped[1]!) : 'other';
+}
+
+/** Never render a raw error string wholesale (constraint: errors are free
+ *  text from upstream and can carry incidental detail) — truncated to a
+ *  short exemplar length. */
+const EXEMPLAR_MAX_LEN = 100;
+
+function truncateExemplar(message: string): string {
+  return message.length > EXEMPLAR_MAX_LEN ? `${message.slice(0, EXEMPLAR_MAX_LEN)}…` : message;
+}
+
+export interface ErrorClassificationSummary {
+  /** Total classified errors this window — expected to equal
+   *  `IntegrityStats.errorRate.count` for the same window (both filter the
+   *  same `error IS NOT NULL` population), though the two are computed by
+   *  independent endpoint functions and not cross-checked at runtime. */
+  total: number;
+  categories: Record<ErrorCategory, number>;
+  /** One truncated, real exemplar per category actually observed this
+   *  window — the MOST RECENT occurrence (rows are fetched newest-first),
+   *  so a reader sees a fresh example, not a stale historic one. A category
+   *  absent from this window has no key here — never a fabricated empty
+   *  string standing in for "none seen." */
+  exemplars: Partial<Record<ErrorCategory, string>>;
+}
+
+/** Pure aggregation over already-fetched, non-null error messages — no SQL,
+ *  no null-filtering (the caller's query already filters `error IS NOT
+ *  NULL`, matching `errorRate`'s own population in `getIntegrityStats`). */
+export function classifyErrors(messages: string[]): ErrorClassificationSummary {
+  const categories: Record<ErrorCategory, number> = { 'rate-limit': 0, 'no-result': 0, 'schema-validation': 0, other: 0 };
+  const exemplars: Partial<Record<ErrorCategory, string>> = {};
+  for (const message of messages) {
+    const category = classifyErrorMessage(message);
+    categories[category] += 1;
+    if (exemplars[category] === undefined) exemplars[category] = truncateExemplar(message);
+  }
+  return { total: messages.length, categories, exemplars };
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/stats/operational
 // ---------------------------------------------------------------------------
 
@@ -1023,6 +1127,12 @@ export interface OperationalStats extends WindowMeta {
   turns: { median: number | null; p90: number | null; sampleSize: number };
   toolMix: ToolMixEntry[];
   perRepo: Array<{ repoKey: string; count: number; medianDurationMs: number | null; medianTurns: number | null }>;
+  /** Classification of every `error` recorded in this window — see the
+   *  module doc comment above `ErrorCategory` for exactly what each bucket
+   *  matches and why. A `'rate-limit'` count of 0 is a real, verified
+   *  reading ("checked, none happened this window"), distinct from the
+   *  field simply being absent. */
+  errorClassification: ErrorClassificationSummary;
 }
 
 export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow): Promise<OperationalStats> {
@@ -1065,6 +1175,19 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
     ORDER BY count(*) DESC
   `;
 
+  // Same `error IS NOT NULL` population `getIntegrityStats`'s `errorRate`
+  // counts (`r.error != null`) — filtered here in SQL rather than in JS
+  // purely so `classifyErrors` never has to special-case `null`. Newest
+  // first so each category's exemplar (classifyErrors) is the most recent
+  // real occurrence, not an arbitrary or stale one.
+  const errorRows = await sql<Array<{ error: string }>>`
+    SELECT error
+    FROM pr_reviews
+    WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND error IS NOT NULL
+    ORDER BY created_at DESC
+  `;
+
   return {
     ...buildWindowMeta(window, totalN),
     reviewsPerDay: {
@@ -1088,6 +1211,7 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
       medianDurationMs: numOrNull(r.medianDuration),
       medianTurns: numOrNull(r.medianTurns),
     })),
+    errorClassification: classifyErrors(errorRows.map((r) => r.error)),
   };
 }
 

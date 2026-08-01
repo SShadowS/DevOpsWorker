@@ -1,6 +1,6 @@
 import { operationalStats, statsWindow } from '../stats-store.ts';
 import type { FetchState } from '../stats-store.ts';
-import type { OperationalStats, ToolMixEntry } from '../../stats.ts';
+import type { OperationalStats, ToolMixEntry, ErrorCategory, ErrorClassificationSummary } from '../../stats.ts';
 import { formatDurationDetailed } from '../format.ts';
 
 // ---------------------------------------------------------------------------
@@ -14,39 +14,48 @@ import { formatDurationDetailed } from '../format.ts';
 // `buildIntegrityPanelView`/`buildConfigPanelView` rather than Task 8's
 // `combinePanelStatus`.
 //
-// Five sections, all `status="neutral"` except Tool mix:
+// Five sections:
 //   - Reviews per day  — a real hand-rolled bar chart (chart geometry pulled
 //     into pure, tested functions: buildDailyReviewBars/buildReviewsChartView).
+//     `status="neutral"`.
 //   - Duration & turns — p50/p90, each with its own sample size.
-//   - Tool mix         — the one scored section. A tool with ZERO calls this
-//     window is 'attention', not 'ok': design-constraints.md is explicit that
-//     `lsp: 0` is "a finding, not an empty row," and the underlying
-//     `aggregateToolMix` (stats.ts) already sorts by totalCalls DESCENDING —
-//     without an explicit callout, a zero-call tool sinks to the tail of a
-//     long table and reads as absent rather than as a recorded, real zero.
-//     The check is generic (any zero-call tool, not a hardcoded "lsp" name)
-//     so it keeps working if a different tool goes quiet later.
+//     `status="neutral"`.
+//   - Tool mix         — a tool with ZERO calls this window is 'attention',
+//     not 'ok': design-constraints.md is explicit that `lsp: 0` is "a
+//     finding, not an empty row," and the underlying `aggregateToolMix`
+//     (stats.ts) already sorts by totalCalls DESCENDING — without an
+//     explicit callout, a zero-call tool sinks to the tail of a long table
+//     and reads as absent rather than as a recorded, real zero. The check is
+//     generic (any zero-call tool, not a hardcoded "lsp" name) so it keeps
+//     working if a different tool goes quiet later.
 //   - Repo breakdown   — a plain, unscored table (`perRepo` counts ALL rows,
 //     unlike /api/stats/cost's cost_usd-filtered population — see
 //     task-2-report.md's "Not touched" note — so no coverage caveat applies
-//     here the way it does on the Cost card).
-//   - Rate-limit events — GENUINELY MISSING from the API (see the module-level
-//     "Genuinely missing" note below the component). Rendered as an explicit
-//     "not available" statement, never a fabricated 0 — constraint #3 ("never
-//     render a non-value as a value").
+//     here the way it does on the Cost card). `status="neutral"`.
+//   - Error breakdown  — see the module doc comment on `classifyErrorMessage`
+//     in stats.ts for exactly what's classified and why. `status="attention"`
+//     specifically when this window recorded a rate-limit event (a real,
+//     actionable capacity signal), never merely because the total error
+//     count is nonzero — matching `stats-integrity.tsx`'s dispatch-mismatch
+//     precedent of not scoring a chronically-nonzero, non-actionable count as
+//     'attention'. An `other` (unclassified) count is disclosed as a "Known
+//     instrument caveat:" note instead — it's a fact about the CLASSIFIER's
+//     own coverage, not a confirmed pipeline health finding.
 //
-// Genuinely missing, not silently worked around: the brief asks for
-// "rate-limit events." `OperationalStats` has no such field, and
-// `IntegrityStats.errorRate` (the one error signal that DOES exist) counts
-// ANY pipeline error (`error != null`), never broken out by
-// `PipelineError` subtype. `RateLimitError` (src/sdk/errors.ts) writes a
-// message of the shape `Rate limit hit during "<stage>": <resetInfo>` into
-// the same free-text `error` column every other pipeline error uses, so the
-// raw text COULD be pattern-matched — but no endpoint does that today, and
-// `stats.ts` is explicitly out of scope for this task ("If something is
-// genuinely missing, say so ... rather than adding it"). The Rate-limit
-// events section says exactly this instead of showing a 0 that would read as
-// "verified zero rate-limit events," which would be false.
+// FIX ROUND 1 HISTORY: this section originally shipped as "Rate-limit
+// events," rendering an explicit "not available" statement — `stats.ts` was
+// off-limits for Task 9, and neither `OperationalStats` nor
+// `IntegrityStats.errorRate` broke errors out by `PipelineError` subtype.
+// The team lead re-checked production data before accepting that: over 90
+// days, 21 of 31 recorded errors (68%) are `RateLimitError`s with a clean,
+// parseable prefix, and the remainder classify just as cleanly against the
+// other two fixed-shape `PipelineError` messages — "not available"
+// understated what the column actually holds. `stats.ts` was reopened for
+// this task specifically to add `classifyErrorMessage`/`classifyErrors` and
+// wire `OperationalStats.errorClassification` — see that file for the full
+// classification design (which shapes are stable-prefix-matched, why
+// `TransientAgentError`'s wrapped messages are peeled exactly one layer, and
+// why an unrecognised message is conservatively `'other'`, never guessed).
 // ---------------------------------------------------------------------------
 
 export type OperationalSectionStatus = 'ok' | 'attention' | 'neutral';
@@ -232,6 +241,62 @@ export function buildToolMixSectionView(toolMix: ToolMixEntry[]): ToolMixSection
       '— an expected tool that never fired is a finding, not an empty row.',
     rows,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Error breakdown (fix round 1) — a report of what `pr_reviews.error`
+// actually classifies as, not a second error-RATE judgement (that already
+// exists on the Integrity panel's "Error rate" section, cross-referenced
+// below rather than duplicated).
+// ---------------------------------------------------------------------------
+
+const ERROR_CATEGORY_LABELS: Record<ErrorCategory, string> = {
+  'rate-limit': 'Rate limit',
+  'no-result': 'No result',
+  'schema-validation': 'Schema validation',
+  other: 'Other / unclassified',
+};
+
+/** Fixed display order — rate-limit first (it's the dominant category in
+ *  production, per the fix round's own finding), `other` last (it's the
+ *  catch-all, not a named failure mode). */
+const ERROR_CATEGORY_ORDER: readonly ErrorCategory[] = ['rate-limit', 'no-result', 'schema-validation', 'other'];
+
+export interface ErrorCategoryRowView {
+  key: ErrorCategory;
+  label: string;
+  count: number;
+  /** Already truncated server-side (`classifyErrors`, stats.ts) — never the
+   *  full raw error string. `null` means this category had zero occurrences
+   *  this window, not "an exemplar exists but was omitted." */
+  exemplar: string | null;
+}
+
+export interface ErrorBreakdownSectionView {
+  /** 'attention' specifically when a rate-limit event occurred this window —
+   *  see the module doc comment for why `other > 0` is a caveat note
+   *  instead, not a second path to 'attention'. */
+  status: 'ok' | 'attention';
+  summary: string;
+  rows: ErrorCategoryRowView[];
+  otherCount: number;
+}
+
+export function buildErrorBreakdownSectionView(errorClassification: ErrorClassificationSummary): ErrorBreakdownSectionView {
+  const rows = ERROR_CATEGORY_ORDER.map((key) => ({
+    key,
+    label: ERROR_CATEGORY_LABELS[key],
+    count: errorClassification.categories[key],
+    exemplar: errorClassification.exemplars[key] ?? null,
+  }));
+  const rateLimitCount = errorClassification.categories['rate-limit'];
+  const otherCount = errorClassification.categories.other;
+  const summary = errorClassification.total === 0
+    ? '0 errors recorded in this window — a real, verified reading, not "we cannot tell."'
+    : `${errorClassification.total} error(s) recorded in this window: ${rateLimitCount} rate-limit, ` +
+      `${errorClassification.categories['no-result']} no-result, ${errorClassification.categories['schema-validation']} ` +
+      `schema-validation, ${otherCount} unclassified.`;
+  return { status: rateLimitCount > 0 ? 'attention' : 'ok', summary, rows, otherCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -433,22 +498,58 @@ function RepoBreakdownSection({ data }: { data: OperationalStats }) {
   );
 }
 
-/** See the module doc comment's "Genuinely missing" note — this is not a
- *  placeholder awaiting a later task, it is the honest end state: the API
- *  has no rate-limit-specific field, so this section says so in words rather
- *  than rendering a fabricated 0 (constraint #3, "never render a non-value
- *  as a value"). */
-function RateLimitSection() {
+function ErrorBreakdownTable({ rows }: { rows: ErrorCategoryRowView[] }) {
   return (
-    <OperationalSection title="Rate-limit events" status="neutral">
-      <p class="operational-section__empty">
-        Not available — <code class="operational-mono">/api/stats/operational</code> reports no rate-limit-specific
-        event count. The <code class="operational-mono">error</code> column records that a pipeline error occurred
-        (as free text), not which <code class="operational-mono">PipelineError</code> subtype caused it — a{' '}
-        <code class="operational-mono">RateLimitError</code>'s message is embedded in that same text, but no endpoint
-        parses it out. See the{' '}
+    <table class="operational-table">
+      <thead>
+        <tr><th>Category</th><th>Count</th><th>Example</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.key} class={r.key === 'rate-limit' && r.count > 0 ? 'operational-table__row--flagged' : ''}>
+            <td>
+              {r.label}
+              {r.key === 'rate-limit' && r.count > 0 && (
+                <span class="operational-table__flag" title="A rate-limit event blocks review throughput"> ⚠</span>
+              )}
+            </td>
+            <td>{r.count}</td>
+            <td class="operational-table__exemplar">
+              {r.exemplar ?? <span class="operational-section__empty">none this window</span>}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** See stats.ts's module doc comment above `ErrorCategory` for exactly what
+ *  each bucket matches. Cross-references the Integrity panel's "Error rate"
+ *  section rather than duplicating it — that section reports the error RATE
+ *  (count/total, thresholded at 10% — `ERROR_RATE_ATTENTION_THRESHOLD`,
+ *  stats-ribbon.tsx); this one reports error CATEGORY, a different axis. */
+function ErrorBreakdownSection({ data }: { data: OperationalStats }) {
+  const view = buildErrorBreakdownSectionView(data.errorClassification);
+  return (
+    <OperationalSection title="Error breakdown" status={view.status}>
+      <p class="operational-section__summary">
+        {view.status === 'attention' && <strong class="operational-tag operational-tag--attention">Needs attention: </strong>}
+        {view.summary}
+      </p>
+      <ErrorBreakdownTable rows={view.rows} />
+      {view.otherCount > 0 && (
+        <p class="operational-section__note">
+          <strong class="operational-tag operational-tag--caveat">Known instrument caveat: </strong>
+          {view.otherCount} error(s) matched none of the three known failure shapes this classifier recognises — a
+          fact about this classifier's own coverage (it may need a new pattern), not necessarily a claim that the
+          pipeline itself got less reliable. A growing count here is the signal to watch.
+        </p>
+      )}
+      <p class="operational-section__note">
+        See the{' '}
         <a class="operational-section__link" href="#stats-slot-integrity">Integrity panel's "Error rate" section</a>{' '}
-        for the undifferentiated error count this window.
+        for the undifferentiated error RATE this window — this table is a breakdown by category, not a second rate.
       </p>
     </OperationalSection>
   );
@@ -485,7 +586,7 @@ export function OperationalPanel() {
           <DurationTurnsSection data={view.data!} />
           <ToolMixSection data={view.data!} />
           <RepoBreakdownSection data={view.data!} />
-          <RateLimitSection />
+          <ErrorBreakdownSection data={view.data!} />
         </div>
       )}
     </section>

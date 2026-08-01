@@ -5,10 +5,11 @@ import {
   buildDurationSectionView,
   buildTurnsSectionView,
   buildToolMixSectionView,
+  buildErrorBreakdownSectionView,
   buildOperationalPanelView,
 } from '../../src/dashboard/client/components/stats-operational.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
-import type { OperationalStats, ToolMixEntry } from '../../src/dashboard/stats.ts';
+import type { OperationalStats, ToolMixEntry, ErrorClassificationSummary } from '../../src/dashboard/stats.ts';
 
 // No test in this file may open a database connection or render a component
 // tree (repo convention — see tests/dashboard/stats-costquality.test.ts).
@@ -22,6 +23,15 @@ import type { OperationalStats, ToolMixEntry } from '../../src/dashboard/stats.t
 
 function toolMixFixture(overrides: Partial<ToolMixEntry> = {}): ToolMixEntry {
   return { tool: 'Grep', totalCalls: 120, avgPerReview: 0.8, reviewsUsing: 90, ...overrides };
+}
+
+function errorClassificationFixture(overrides: Partial<ErrorClassificationSummary> = {}): ErrorClassificationSummary {
+  return {
+    total: 0,
+    categories: { 'rate-limit': 0, 'no-result': 0, 'schema-validation': 0, other: 0 },
+    exemplars: {},
+    ...overrides,
+  };
 }
 
 function operationalFixture(overrides: Partial<OperationalStats> = {}): OperationalStats {
@@ -42,6 +52,7 @@ function operationalFixture(overrides: Partial<OperationalStats> = {}): Operatio
     turns: { median: 33, p90: 60, sampleSize: 150 },
     toolMix: [toolMixFixture()],
     perRepo: [{ repoKey: 'repo-a', count: 150, medianDurationMs: 689_618, medianTurns: 33 }],
+    errorClassification: errorClassificationFixture(),
     ...overrides,
   };
 }
@@ -249,6 +260,62 @@ describe('buildToolMixSectionView', () => {
     expect(view.summary).toContain('lsp');
     expect(view.summary).toContain('WebFetch');
     expect(view.summary).toContain('2 of 2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildErrorBreakdownSectionView (fix round 1) — 'attention' iff a
+// rate-limit event occurred this window; an unclassified ('other') count is
+// a caveat, not a second path to 'attention' (see the module doc comment).
+// ---------------------------------------------------------------------------
+
+describe('buildErrorBreakdownSectionView', () => {
+  test('the 30d live case (per the fix round finding) — zero rate-limit events is ok, stated as a real reading', () => {
+    const view = buildErrorBreakdownSectionView(errorClassificationFixture());
+    expect(view.status).toBe('ok');
+    expect(view.summary).toContain('0 errors');
+    // States plainly that this IS a verified zero, distinct from "we cannot
+    // tell" — the exact distinction the fix round's finding calls for.
+    expect(view.summary).toContain('verified reading');
+    expect(view.rows.find((r) => r.key === 'rate-limit')).toMatchObject({ count: 0, exemplar: null });
+  });
+
+  test('the 90d live case (per the fix round finding) — a nonzero rate-limit count is attention, named explicitly', () => {
+    const view = buildErrorBreakdownSectionView(errorClassificationFixture({
+      total: 31,
+      categories: { 'rate-limit': 21, 'no-result': 7, 'schema-validation': 2, other: 1 },
+      exemplars: {
+        'rate-limit': 'Rate limit hit during "pr-reviewer": 11:50pm (UTC)',
+        'no-result': 'Agent "pr-reviewer" failed to produce a result',
+        'schema-validation': 'Agent "pr-reviewer" output failed schema validation',
+        other: 'Something went wrong',
+      },
+    }));
+    expect(view.status).toBe('attention');
+    expect(view.summary).toContain('21 rate-limit');
+    expect(view.otherCount).toBe(1);
+    const rateLimitRow = view.rows.find((r) => r.key === 'rate-limit');
+    expect(rateLimitRow?.count).toBe(21);
+    expect(rateLimitRow?.exemplar).toBe('Rate limit hit during "pr-reviewer": 11:50pm (UTC)');
+  });
+
+  test('a nonzero OTHER count alone (no rate-limit) does not push status to attention', () => {
+    const view = buildErrorBreakdownSectionView(errorClassificationFixture({
+      total: 3,
+      categories: { 'rate-limit': 0, 'no-result': 2, 'schema-validation': 0, other: 1 },
+    }));
+    expect(view.status).toBe('ok');
+    expect(view.otherCount).toBe(1);
+  });
+
+  test('rows are always all four categories, in a fixed order, even when some are zero', () => {
+    const view = buildErrorBreakdownSectionView(errorClassificationFixture());
+    expect(view.rows.map((r) => r.key)).toEqual(['rate-limit', 'no-result', 'schema-validation', 'other']);
+  });
+
+  test('a category with zero count has a null exemplar, never a fabricated placeholder string', () => {
+    const view = buildErrorBreakdownSectionView(errorClassificationFixture({ total: 1, categories: { 'rate-limit': 1, 'no-result': 0, 'schema-validation': 0, other: 0 }, exemplars: { 'rate-limit': 'Rate limit hit during "pr-reviewer": 11am (UTC)' } }));
+    expect(view.rows.find((r) => r.key === 'no-result')?.exemplar).toBeNull();
   });
 });
 
