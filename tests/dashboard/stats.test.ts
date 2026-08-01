@@ -12,6 +12,8 @@ import {
   computeCostPerReadBandItem,
   findingsCountMismatch,
   sumApportionedSubAgentCost,
+  computeSubAgentCoverage,
+  MIN_RELIABLE_COVERAGE_PCT,
   aggregateModelUsage,
   dispatchCount,
   rosterCount,
@@ -202,6 +204,66 @@ describe('sumApportionedSubAgentCost', () => {
 
   test('an entry missing apportionedCostUsd contributes 0, not NaN', () => {
     expect(sumApportionedSubAgentCost({ x: {} })).toBe(0);
+  });
+});
+
+describe('computeSubAgentCoverage', () => {
+  // Post-completion fix: team-lead smoke-tested getCostStats against live
+  // production data and found sub_agents was only populated from 2026-07-26
+  // onward (verified independently: 107 rows, all >= that date). Over a 30d
+  // window, 227 of 334 rows had NO sub_agents object at all — not undercounted,
+  // simply not captured yet — and every one of those dollars was silently
+  // folded into orchestratorCostUsdMax. This describes that population.
+
+  test('counts a row with at least one named sub-agent entry as covered', () => {
+    const rows: Array<Record<string, unknown> | null> = [{ a: {} }, { b: {}, c: {} }];
+    const result = computeSubAgentCoverage(rows);
+    expect(result.rowsWithSubAgentData).toBe(2);
+    expect(result.totalRows).toBe(2);
+    expect(result.coveragePct).toBe(100);
+  });
+
+  test('null sub_agents counts as uncovered', () => {
+    const rows: Array<Record<string, unknown> | null> = [{ a: {} }, null, null];
+    const result = computeSubAgentCoverage(rows);
+    expect(result.rowsWithSubAgentData).toBe(1);
+    expect(result.totalRows).toBe(3);
+    expect(result.coveragePct).toBeCloseTo(33.333, 2);
+  });
+
+  test('an empty object ({}) counts as uncovered, same as null — neither has an actual entry to apportion', () => {
+    const rows: Array<Record<string, unknown> | null> = [{ a: {} }, {}];
+    const result = computeSubAgentCoverage(rows);
+    expect(result.rowsWithSubAgentData).toBe(1);
+    expect(result.coveragePct).toBe(50);
+  });
+
+  test('reproduces the live-data reading that triggered this fix: 107/334 ≈ 32%, below the reliability bar', () => {
+    const covered: Array<Record<string, unknown> | null> = Array.from({ length: 107 }, () => ({ x: {} }));
+    const uncovered: Array<Record<string, unknown> | null> = Array.from({ length: 334 - 107 }, () => null);
+    const result = computeSubAgentCoverage([...covered, ...uncovered]);
+    expect(result.rowsWithSubAgentData).toBe(107);
+    expect(result.totalRows).toBe(334);
+    expect(result.coveragePct).toBeCloseTo(32.04, 1);
+    expect(result.lowCoverage).toBe(true);
+  });
+
+  test('lowCoverage flips at the MIN_RELIABLE_COVERAGE_PCT threshold', () => {
+    const atThreshold: Array<Record<string, unknown> | null> = [
+      ...Array.from({ length: MIN_RELIABLE_COVERAGE_PCT }, () => ({ x: {} })),
+      ...Array.from({ length: 100 - MIN_RELIABLE_COVERAGE_PCT }, () => null),
+    ];
+    expect(computeSubAgentCoverage(atThreshold).lowCoverage).toBe(false); // exactly at the bar, not below it
+    const belowThreshold: Array<Record<string, unknown> | null> = [
+      ...Array.from({ length: MIN_RELIABLE_COVERAGE_PCT - 1 }, () => ({ x: {} })),
+      ...Array.from({ length: 101 - MIN_RELIABLE_COVERAGE_PCT }, () => null),
+    ];
+    expect(computeSubAgentCoverage(belowThreshold).lowCoverage).toBe(true);
+  });
+
+  test('empty input reports null coverage and lowCoverage: false — nothing to be unreliable about', () => {
+    const result = computeSubAgentCoverage([]);
+    expect(result).toEqual({ rowsWithSubAgentData: 0, totalRows: 0, coveragePct: null, lowCoverage: false });
   });
 });
 
@@ -537,6 +599,21 @@ describe('stats.ts SQL shape', () => {
     expect(body).not.toMatch(/orchestratorCostUsd:/);
     expect(body).not.toMatch(/subAgentCostUsd:/);
     expect(body).not.toMatch(/orchestratorSharePct:/);
+  });
+
+  // Post-completion fix: the split's bias has two distinct causes (roster
+  // undercount, already covered above, and instrumentation coverage — the
+  // sub_agents column not existing yet for most of a window's history). The
+  // note must name both so a reader doesn't conflate them, and the coverage
+  // field must actually be wired into the returned object, not just declared
+  // on the type.
+  test('the cost split reports sub-agent coverage and names it as a second, distinct bias cause', () => {
+    const fn = src.match(/export async function getCostStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    expect(body).toMatch(/coverage:\s*computeSubAgentCoverage\(/);
+    expect(body.toLowerCase()).toContain('instrumentation coverage');
+    expect(body.toLowerCase()).toContain('second, distinct cause');
   });
 
   test('getDriftStats excludes non-sha sentinel values when finding the most recent real sha', () => {

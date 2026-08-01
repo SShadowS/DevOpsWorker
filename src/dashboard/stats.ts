@@ -169,6 +169,57 @@ export function sumApportionedSubAgentCost(subAgents: Record<string, SubAgentCos
   return Object.values(subAgents).reduce((sum, u) => sum + (u.apportionedCostUsd ?? 0), 0);
 }
 
+/** Below this coverage fraction, the split is more instrumentation-shaped
+ *  than data-shaped: a majority of the window has no sub_agents object at
+ *  all, so `orchestratorCostUsdMax` is dominated by absence of capture
+ *  rather than by measured orchestrator-only spend. 50% (a plain majority)
+ *  was chosen as a round, easily-explained bar — not tuned to any observed
+ *  value. */
+export const MIN_RELIABLE_COVERAGE_PCT = 50;
+
+export interface SubAgentCoverage {
+  /** Rows carrying at least one named sub-agent entry — i.e. `rosterCount > 0`.
+   *  A row with `sub_agents: null` OR `sub_agents: {}` both count as
+   *  uncovered: neither tells us anything about that row's actual sub-agent
+   *  spend. */
+  rowsWithSubAgentData: number;
+  /** Same population `orchestratorCostUsdMax`/`subAgentCostUsdMin` are summed
+   *  over (every row in the window, not `costSampleSize` — that field is
+   *  scoped to rows with `cost_usd` recorded for the percentile stats, a
+   *  different query with a different population). */
+  totalRows: number;
+  coveragePct: number | null;
+  /** `coveragePct < MIN_RELIABLE_COVERAGE_PCT`. Null coverage (no rows) does
+   *  NOT count as low — there's nothing to be unreliable about. */
+  lowCoverage: boolean;
+}
+
+/**
+ * Quantifies what fraction of the cost-split's own population actually has
+ * sub-agent telemetry to apportion. `sub_agents` capture is recent — verified
+ * live against production: 107 rows carry a non-empty `sub_agents` object as
+ * of 2026-08-01, all dated 2026-07-26 or later, none before. Over a 30d
+ * window that is only ~32% coverage; a wider window's coverage is lower
+ * still. That absence is a SECOND, distinct cause of the orchestrator/
+ * sub-agent split's upward bias, separate from the roster undercount
+ * `orchestratorSubAgentSplit.note` already documents. A row missing
+ * `sub_agents` because the column didn't exist yet contributes its entire
+ * cost to `orchestratorCostUsdMax` the same way a row with an undercounted
+ * roster does, but for a reason that has nothing to do with dispatch
+ * counting — disclosure here lets a consumer tell the two apart.
+ */
+export function computeSubAgentCoverage(subAgentsColumn: Array<Record<string, unknown> | null>): SubAgentCoverage {
+  const totalRows = subAgentsColumn.length;
+  const rowsWithSubAgentData = subAgentsColumn.filter((sa) => rosterCount(sa) > 0).length;
+  const coveragePct = totalRows > 0 ? (rowsWithSubAgentData / totalRows) * 100 : null;
+  return {
+    rowsWithSubAgentData,
+    totalRows,
+    coveragePct,
+    lowCoverage: coveragePct != null && coveragePct < MIN_RELIABLE_COVERAGE_PCT,
+  };
+}
+
 interface ModelUsageCost {
   costUsd?: number;
   output?: number;
@@ -444,6 +495,11 @@ export interface CostStats extends WindowMeta {
      *  share, for the same reason orchestratorCostUsdMax is. Null with 0
      *  total cost. */
     orchestratorSharePctMax: number | null;
+    /** How much of THIS split's own population actually has sub-agent
+     *  telemetry to apportion — see `computeSubAgentCoverage`. A low value
+     *  means the split is dominated by rows with no sub_agents capture at
+     *  all, not by measured orchestrator-only spend. */
+    coverage: SubAgentCoverage;
     note: string;
   };
   costPerReadBandItem: CostPerReadBandItem;
@@ -505,13 +561,19 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow): Prom
       orchestratorCostUsdMax: orchestratorCost,
       subAgentCostUsdMin: subAgentCostTotal,
       orchestratorSharePctMax: totalCost > 0 ? (orchestratorCost / totalCost) * 100 : null,
+      coverage: computeSubAgentCoverage(rows.map((r) => r.sub_agents)),
       note:
         'subAgentCostUsdMin sums sub_agents[*].apportionedCostUsd (a model\'s total cost shared out by measured ' +
         "token count among its COUNTED contributors — see SubAgentUsage in src/types/pipeline.types.ts). That sum " +
         'always equals the model\'s true total by construction, so a dispatch missing from the sub_agents roster ' +
         "(a known, nondeterministic undercount vs tool_calls->'Agent' — see /api/stats/integrity) does not merely " +
         'go uncounted: its cost is forced into orchestratorCostUsdMax instead. The bias is one-directional and ' +
-        'not a rounding choice — subAgentCostUsdMin can only read low and orchestratorCostUsdMax can only read high.',
+        'not a rounding choice — subAgentCostUsdMin can only read low and orchestratorCostUsdMax can only read high. ' +
+        'A SECOND, distinct cause — instrumentation coverage, not roster undercount — has the same one-directional ' +
+        'effect: sub_agents capture is a recent addition to the write path, so a row from before it existed has NO ' +
+        'sub_agents object at all, regardless of how much it actually dispatched. See coverage for how much of ' +
+        'this split rests on rows that predate that capture entirely, as opposed to rows where capture ran but ' +
+        'undercounted the roster.',
     },
     costPerReadBandItem: computeCostPerReadBandItem(rows.map((r) => ({ costUsd: r.cost_usd, findingsList: r.findings_list }))),
     modelBreakdown: aggregateModelUsage(rows.map((r) => r.model_usage)),
