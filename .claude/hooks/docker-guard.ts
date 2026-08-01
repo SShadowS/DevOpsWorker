@@ -43,15 +43,20 @@ if (!touchesDocker) process.exit(0);
 // Inspecting or switching the context is never something to block.
 if (/\bdocker\s+context\s+(use|show|ls)\b/.test(cmd)) process.exit(0);
 
-// An explicit override in the command waives the CONTEXT check only. It must not
-// waive the staleness check below — the documented workaround is a prefix used on
-// nearly every docker command here, so treating it as a blanket bypass would silently
-// disable the half of this hook that guards against running stale code.
-const contextOverridden = /DOCKER_CONTEXT\s*=\s*desktop-linux/.test(cmd);
+// Probe the SAME daemon the command will actually talk to.
+//
+// A `DOCKER_CONTEXT=... docker …` prefix lives in the command STRING, not in this
+// hook's environment, so a probe spawned with the ambient env silently queries a
+// different daemon than the command targets. On a Windows-default host that made the
+// staleness check below unfalsifiable: it looked for a Linux image on the Windows
+// daemon, never found one, and fired on every single `docker run` no matter how fresh
+// the build. A guard that cannot pass is a guard people learn to route around.
+const ctxInCmd = cmd.match(/DOCKER_CONTEXT\s*=\s*(\S+)/)?.[1];
+const dockerEnv = ctxInCmd ? { ...process.env, DOCKER_CONTEXT: ctxInCmd } : process.env;
 
 const proj = process.env.CLAUDE_PROJECT_DIR ?? ".";
 const sh = (args: string[]): string =>
-  Bun.spawnSync({ cmd: args }).stdout?.toString().trim() ?? "";
+  Bun.spawnSync({ cmd: args, env: dockerEnv }).stdout?.toString().trim() ?? "";
 
 const reasons: string[] = [];
 
@@ -62,7 +67,9 @@ const reasons: string[] = [];
 // on a Linux host, where the context is legitimately `default`, with a message about
 // Windows-container mode that is false there. `OSType` is what decides whether a
 // linux/amd64 base image can be pulled at all.
-if (!contextOverridden) {
+// Probed under the effective context, so an explicit DOCKER_CONTEXT prefix resolves
+// this check by making it pass rather than by waiving it.
+{
   const osType = sh(["docker", "info", "--format", "{{.OSType}}"]);
   if (osType === "windows") {
     const ctx = sh(["docker", "context", "show"]);
@@ -87,7 +94,10 @@ const hasOverlayBuild = await Bun.file(`${proj}/${buildScript}`).exists();
 if (isRun && hasOverlayBuild) {
   const head = sh(["git", "-C", proj, "rev-parse", "--short", "HEAD"]);
   if (head) {
-    const probe = Bun.spawnSync({ cmd: ["docker", "image", "inspect", `devopsworker:${head}`] });
+    const probe = Bun.spawnSync({
+      cmd: ["docker", "image", "inspect", `devopsworker:${head}`],
+      env: dockerEnv,
+    });
     if (probe.exitCode !== 0) {
       reasons.push(
         `No devopsworker:${head} image — the spawned-container image predates HEAD (${head}).\n` +
