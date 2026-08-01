@@ -2041,3 +2041,250 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   .config-dl dt { font-weight: 600; }
   .config-table { display: block; overflow-x: auto; }
 }
+
+/* ============================================================
+   Cost + Quality cards (Task 8) — replaces the stats-slot-cost-quality
+   placeholder. Keeps the .stats-slot / .stats-slot--{status} wrapper and
+   header from the Task 4 shell; everything below .stats-slot__header is new.
+   Own `.cost-*`/`.quality-*` namespaces, duplicated rather than shared with
+   .integrity-section/.config-section — the established per-panel pattern
+   (see design-constraints.md).
+
+   Series colour comes ONLY from the incumbent status tokens
+   (--color-success|info|warning|error, --color-stage-pending) — never
+   --color-accent, which is reserved for "Needs attention:" tag TEXT only,
+   exactly as in every other panel on this tab.
+   ============================================================ */
+
+.cost-quality-grid {
+  display: flex;
+  gap: var(--space-md);
+  align-items: flex-start;
+}
+
+.cost-card, .quality-card {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.cost-card__title, .quality-card__title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.cost-card__body, .quality-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.cost-panel__low-sample, .quality-panel__low-sample {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+@media (max-width: 1100px) {
+  .cost-quality-grid { flex-direction: column; }
+}
+
+/* ---- Section shells (own namespace, identical visual rules to
+   .integrity-section / .config-section by design — see block comment above) ---- */
+
+.cost-section, .quality-section {
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-stage-pending);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+}
+.cost-section--ok, .quality-section--ok               { border-left-color: var(--color-stage-completed); }
+.cost-section--attention, .quality-section--attention  {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-tertiary));
+}
+.cost-section--neutral, .quality-section--neutral      { border-left-color: var(--color-stage-pending); }
+
+.cost-section__title, .quality-section__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 4px 0;
+}
+
+.cost-section__summary, .cost-section__note,
+.quality-section__summary, .quality-section__note {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+.cost-section__note, .quality-section__note { color: var(--color-text-muted); }
+.cost-section__empty, .quality-section__empty {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.cost-tag, .quality-tag { font-weight: 600; }
+.cost-tag--attention, .quality-tag--attention { color: var(--color-accent); }
+.cost-tag--caveat, .quality-tag--caveat       { color: var(--color-text-secondary); }
+
+/* ---- Cost split — ONE stacked bar (chart B1). Total width is exact; the
+   dashed line at the segment boundary is the ONLY dashed element on this
+   tab — dashed specifically means "this exact position is a biased
+   estimate," contrasting with the severity divider below, which is solid
+   because that boundary is exact ground truth. ---- */
+
+.cost-bar {
+  position: relative;
+  display: flex;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+}
+
+.cost-bar__segment { height: 100%; }
+.cost-bar__segment--orchestrator { background: var(--color-info); }
+.cost-bar__segment--subagent     { background: var(--color-success); }
+
+.cost-bar__uncertain-boundary {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--color-text-primary);
+  transform: translateX(-1px);
+}
+
+.cost-dl {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  column-gap: var(--space-md);
+  row-gap: 4px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.cost-dl dt { color: var(--color-text-secondary); }
+.cost-dl dd { margin: 0; color: var(--color-text-primary); }
+
+.cost-table, .quality-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+.cost-table th, .quality-table th {
+  text-align: left;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.cost-table td, .quality-table td { padding: 3px 8px 3px 0; color: var(--color-text-secondary); }
+.cost-table__mono, .quality-table__mono { font-family: var(--font-mono); color: var(--color-text-primary); }
+.cost-table__flag { color: var(--color-accent); font-weight: 600; }
+.cost-table__row--flagged { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+
+/* ---- Read-band gauge (chart C1). A single value positioned on a fixed
+   0-5 scale (READ_BAND_GAUGE_SCALE_MAX) against a shaded danger zone
+   (<2.5) and a shaded healthy band (3.5-4), so a value between the two
+   zones — today's live reading — visibly reads as "leaving healthy,
+   approaching danger" rather than collapsing into either extreme. ---- */
+
+.read-band-gauge__track {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--color-bg-secondary);
+  margin-top: 4px;
+}
+
+.read-band-gauge__zone { position: absolute; top: 0; bottom: 0; border-radius: 5px; }
+.read-band-gauge__zone--danger  { background: color-mix(in srgb, var(--color-error) 30%, transparent); }
+.read-band-gauge__zone--healthy { background: color-mix(in srgb, var(--color-success) 30%, transparent); }
+
+.read-band-gauge__marker {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--color-bg-tertiary);
+  transform: translate(-50%, -50%);
+}
+.read-band-gauge__marker--danger  { background: var(--color-error); }
+.read-band-gauge__marker--watch   { background: var(--color-warning); }
+.read-band-gauge__marker--healthy { background: var(--color-success); }
+.read-band-gauge__marker--unknown { background: var(--color-text-muted); }
+
+.read-band-gauge__scale-labels {
+  position: relative;
+  height: 14px;
+  margin-top: 2px;
+}
+.read-band-gauge__scale-label {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* ---- Severity distribution with a read-band divider (chart C2). The
+   divider is a SOLID border on the "major" segment — solid because,
+   unlike the cost split above, this boundary is exact (findings_list
+   severities are ground truth, not an apportioned estimate). ---- */
+
+.severity-bar {
+  display: flex;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+}
+.severity-bar__segment { height: 100%; }
+.severity-bar__segment--critical { background: var(--color-error); }
+.severity-bar__segment--major    { background: var(--color-warning); border-right: 3px solid var(--color-text-primary); }
+.severity-bar__segment--minor    { background: var(--color-info); }
+.severity-bar__segment--nitpick  { background: var(--color-stage-pending); }
+
+.severity-bar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-md);
+  margin: 6px 0 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+.severity-bar__legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.severity-bar__swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.severity-bar__swatch--critical { background: var(--color-error); }
+.severity-bar__swatch--major    { background: var(--color-warning); }
+.severity-bar__swatch--minor    { background: var(--color-info); }
+.severity-bar__swatch--nitpick  { background: var(--color-stage-pending); }
+.severity-bar__legend-divider-note { color: var(--color-text-muted); font-style: italic; }
+
+@media (max-width: 767px) {
+  .cost-dl { grid-template-columns: 1fr; row-gap: 2px; }
+  .cost-dl dt { font-weight: 600; }
+  .cost-table, .quality-table { display: block; overflow-x: auto; }
+}

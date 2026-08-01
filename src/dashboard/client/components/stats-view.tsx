@@ -1,23 +1,24 @@
 import { useEffect } from 'preact/hooks';
 import {
-  statsWindow, costStats, qualityStats, operationalStats,
+  statsWindow, operationalStats,
   setStatsWindow, loadAllStats, STATS_WINDOWS,
 } from '../stats-store.ts';
 import type { FetchState, StatsWindow } from '../stats-store.ts';
-import { formatCost } from '../format.ts';
 import { StatsRibbon } from './stats-ribbon.tsx';
 import { StatsIntegrityPanel } from './stats-integrity.tsx';
 import { ConfigPanel } from './stats-config.tsx';
+import { CostQualityPanel } from './stats-costquality.tsx';
 
 // ---------------------------------------------------------------------------
 // Shell for the Stats & Config tab (Task 4). Owns: the third tab's panel
 // container, the shared window selector, and data fetching for all six
-// endpoints with loading/empty/error states. The remaining placeholder slots
-// below (Cost & Quality/Task 8, Operational/Task 9) still get their body
-// from a later task; Integrity (Task 6) and Config (Task 7) have each been
-// replaced by their own component (`stats-integrity.tsx`, `stats-config.tsx`),
-// matching the ribbon's precedent of extracting a finished slot out of the
-// generic `<StatsSlot>` placeholder.
+// endpoints with loading/empty/error states. The remaining placeholder slot
+// below (Operational/Task 9) still gets its body from a later task;
+// Integrity (Task 6), Config (Task 7), and Cost & Quality (Task 8) have each
+// been replaced by their own component (`stats-integrity.tsx`,
+// `stats-config.tsx`, `stats-costquality.tsx`), matching the ribbon's
+// precedent of extracting a finished slot out of the generic `<StatsSlot>`
+// placeholder.
 // ---------------------------------------------------------------------------
 
 type SlotStatus = 'loading' | 'error' | 'empty' | 'ready';
@@ -122,8 +123,6 @@ export function StatsView() {
   useEffect(() => { loadAllStats(); }, []);
 
   const currentWindow = statsWindow.value;
-  const cost = costStats.value;
-  const quality = qualityStats.value;
   const operational = operationalStats.value;
 
   return (
@@ -146,16 +145,7 @@ export function StatsView() {
 
       <ConfigPanel />
 
-      <StatsSlot
-        id="stats-slot-cost-quality"
-        title="Cost & Quality"
-        taskLabel="Task 8"
-        window={currentWindow}
-        sources={[
-          describeFetchState('Cost', cost, (d) => `n=${d.sampleSize} · total ${formatCost(d.totalCostUsd)}`),
-          describeFetchState('Quality', quality, (d) => `n=${d.sampleSize} · avg read-band items ${d.avgReadBandItems?.toFixed(1) ?? 'n/a'}`),
-        ]}
-      />
+      <CostQualityPanel />
 
       <StatsSlot
         id="stats-slot-operational"
