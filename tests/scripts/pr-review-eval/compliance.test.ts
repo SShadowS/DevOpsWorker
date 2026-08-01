@@ -236,7 +236,7 @@ describe('checkArmCompliance', () => {
 //
 // Both exist because the `sub_agents` roster lies. It undercounts
 // nondeterministically — row 1715 recorded ONE agent while emitting seven
-// dispatches and billing $1.58 of sub-agent work — so every check built on its
+// dispatches and billing several dollars of sub-agent work — so every check built on its
 // COUNT is unreliable. `tool_calls->'Agent'` and `model_usage` are not.
 // ---------------------------------------------------------------------------
 

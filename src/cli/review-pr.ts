@@ -173,7 +173,7 @@ cannot: aliases, cross-file references, and inherited members.
  * `allowedTools`, but nothing in their prompts steers them there. Measured on
  * PR 52081: 207 Bash calls of which 168 were `sed`/`cat`/`head`/`tail` file
  * reads, 23 `Read` calls, and ZERO LSP calls — 10.0M cache-read tokens on a
- * two-file diff, $16.53.
+ * two-file diff, real money for two files.
  *
  * Guarded so this is a TRUE NO-OP unless `PR_REVIEW_SUBAGENT_TOOL_RULE=1`.
  * Idempotent — appends only to files that don't already carry the block.

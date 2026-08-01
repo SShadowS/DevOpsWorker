@@ -57,7 +57,7 @@ COPY tsconfig.json ./
 # silently does not register that agent. The orchestrator then falls back to
 # `general-purpose` and performs that domain's analysis itself, which costs far
 # more than the sub-agent would have — observed 2026-07-29: three agents dropped
-# out and the orchestrator's own spend tripled ($3.50 -> $11/review) with no
+# out and the orchestrator's own spend tripled per review with no
 # error anywhere.
 #
 # .gitattributes stores these LF, but the build context is the WORKING TREE, and

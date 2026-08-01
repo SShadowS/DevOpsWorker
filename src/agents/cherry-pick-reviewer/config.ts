@@ -56,7 +56,7 @@ export function createBackportReviewConfig(
     sharedPromptFragments: ['dependencies-folder.md'],
     outputSchema: BackportReviewSchema,
 
-    // No `Agent`, no `Task`. The full reviewer costs ~$10 because seven sub-agents
+    // No `Agent`, no `Task`. The full reviewer costs real money because seven sub-agents
     // each cache their own context; this agent has no sub-agents and cannot
     // dispatch any. That is the saving, made structural instead of instructed —
     // this codebase has twice measured a model ignoring an instruction of exactly
@@ -128,8 +128,8 @@ export function createBackportReviewConfig(
     cwd: config.paths.sessionRoot,
 
     // Pinned, not inherited. The model is the measured cost lever: seven
-    // sub-agents silently running opus rather than sonnet took one review from
-    // $10.06 to $18.77 on an identical image.
+    // sub-agents silently running opus rather than sonnet nearly doubled one
+    // review's cost on an identical image.
     model: 'claude-sonnet-5',
 
     // 30 was too tight and was measured failing. Two acceptance runs on the same PR

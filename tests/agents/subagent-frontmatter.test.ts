@@ -54,7 +54,7 @@ describe('sub-agent frontmatter', () => {
 
   test('pr-reviewer agents pin model: claude-sonnet-5 — measured, not assumed', () => {
     // Was `model: opus` on all 7. A/B on PR 52081 (2026-07-27, n=1 per arm):
-    // Sonnet cost $10.65 vs Opus $19.46 (-45%) and made 31 Bash calls vs 124,
+    // Sonnet cost meaningfully less than Opus (-45%) and made 31 Bash calls vs 124,
     // while producing the SAME seven core findings plus one the Opus arms
     // missed entirely (no HTTP timeout on the path — a hang inside an open
     // write transaction). Both arms returned `request changes` with 1 critical.
@@ -75,7 +75,7 @@ describe('sub-agent frontmatter', () => {
     // the Agent tool silently does not register that agent — no error, nothing in
     // the logs. Three pr-reviewer agents dropped out this way; the orchestrator
     // fell back to `general-purpose` and did their analysis itself, tripling its
-    // own spend ($3.50 -> $11/review).
+    // own spend per review.
     //
     // .gitattributes stores these LF, but the Docker build context is the WORKING
     // TREE and `text=auto` checks them out CRLF on Windows. The Dockerfile step is

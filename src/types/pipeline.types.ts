@@ -552,7 +552,7 @@ export interface RevisionLoopConfig {
    * The count failing to decrease is the only measured signal that separated both
    * observed non-convergence failures from the one success: a loop whose findings
    * plateau is not converging, and further rounds spend money to confirm it.
-   * WI 63396 ran 8 rounds for $146 and 0 merges.
+   * WI 63396 ran 8 rounds into three figures of spend and 0 merges.
    */
   convergence?: {
     /**

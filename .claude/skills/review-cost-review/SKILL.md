@@ -95,7 +95,7 @@ appeared in only 1 of 3 identical runs. Treat n=1 differences as unmeasured, not
 ## Sample sizes that mean something
 
 - **Cost**: stable. Same-config repeats vary ±8%. n=2 separates a >20% effect.
-- **Quality**: unstable. Detecting a 15-point recall drop needs ~$3,000-8,000 of runs. **Do not try.**
+- **Quality**: unstable. Detecting a 15-point recall drop needs four figures of runs. **Do not try.**
   Use consensus over runs already banked instead — cluster findings across all runs on one PR, treat
   what appears in ≥50% as real, and check whether a candidate config finds those. It costs nothing
   and reuses sunk spend.

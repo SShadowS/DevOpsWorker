@@ -134,7 +134,7 @@ export const ARMS: Arm[] = [
  *
  * `selectArms` returns the whole table when no `--arms` filter is given, so an entry
  * added to `ARMS` silently becomes an extra cell in every full matrix run — a 9th
- * arm nobody asked for, at ~$12 per PR. These are opt-in only: reachable by name via
+ * arm nobody asked for, at real cost per PR. These are opt-in only: reachable by name via
  * `--arms`, never by default.
  *
  * The ORCHESTRATOR model is not set here — it comes from `DEFAULT_MODEL`
@@ -332,7 +332,7 @@ export function buildArmEnv(base: Record<string, string>, arm: Arm, opts: ArmEnv
 // Fix round 2 (2026-08-01): the first cut used `row.commentId == null`, which
 // matches `null`/`undefined` but NOT `0` — and a NO-POST review records
 // `comment_id: 0`, not `null`. That rejected exactly the rows every arm
-// produces: a paid smoke run (PR 49388, row id 1687, $15.54, 14 findings)
+// produces: a paid smoke run (PR 49388, row id 1687, 14 findings)
 // recorded correctly and was then discarded by this predicate, which told the
 // operator to go debug DATABASE_URL. The database was never the problem.
 //
@@ -590,7 +590,7 @@ async function waitForRow(pr: number, since: string, timeoutMs = 30_000) {
  *
  * Runs a throwaway container on the same network with the same DATABASE_URL and
  * has it count rows. Costs seconds and no tokens; catches the exact failure that
- * wasted ~$60.
+ * wasted a full run's spend.
  */
 async function preflightDb(dbUrl: string): Promise<boolean> {
   const proc = Bun.spawn([
@@ -733,7 +733,7 @@ for (const prId of prIds) {
       // HARD GATE. A review that finishes but records nothing is worse than one
       // that fails: it costs the same and yields nothing, and the store swallows
       // connection errors so it looks like success. Eight arms once ran to
-      // completion against an unreachable DB — ~$60, zero rows. Never spend a
+      // completion against an unreachable DB — wasted a full run's spend, zero rows. Never spend a
       // second run without proof the first was recorded.
       const recorded = await waitForRow(prId, startedAt);
       if (!recorded) {
@@ -754,7 +754,7 @@ for (const prId of prIds) {
           `[ab] Candidate causes (not in order, not asserted): the container's DATABASE_URL not\n` +
           `[ab] resolving to the compose service; the review erroring before the save step; a real\n` +
           `[ab] row that saved but was rejected by matchesArmRow's attribution predicate (this\n` +
-          `[ab] exact bug voided a genuine $15.54 run once already); or the 30s polling window\n` +
+          `[ab] exact bug voided a genuine paid run once already); or the 30s polling window\n` +
           `[ab] being too short for a slow write.`,
         );
         process.exit(1);

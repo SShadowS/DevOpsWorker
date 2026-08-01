@@ -218,12 +218,12 @@ describe('assessModelBreakdownCost', () => {
   test('a flagged model -> attention, names the model and its cost', () => {
     const rows: ModelUsageEntry[] = [
       { model: 'claude-sonnet-5', rows: 10, totalCostUsd: 5, totalOutputTokens: 100, flagged: false },
-      { model: 'claude-opus-4-8[1m]', rows: 1, totalCostUsd: 2.09, totalOutputTokens: 500, flagged: true },
+      { model: 'claude-opus-4-8[1m]', rows: 1, totalCostUsd: 3.75, totalOutputTokens: 500, flagged: true },
     ];
     const a = assessModelBreakdownCost(rows);
     expect(a.status).toBe('attention');
     expect(a.text).toContain('claude-opus-4-8[1m]');
-    expect(a.text).toContain('$2.09');
+    expect(a.text).toContain('$3.75');
   });
 });
 

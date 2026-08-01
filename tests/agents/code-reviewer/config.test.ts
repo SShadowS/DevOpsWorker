@@ -93,7 +93,7 @@ describe('codeReviewerStage', () => {
 // reviews and discarded `issues`/`revisionInstructions` entirely. Round N+1's
 // sub-agents therefore could not see what round N demanded, and reviewers
 // contradicted each other across rounds without noticing — the loop could not
-// converge. WI 63396: 8 rounds, $146, 0 merges.
+// converge. WI 63396: 8 rounds, three figures of spend, 0 merges.
 // ---------------------------------------------------------------------------
 
 function review(

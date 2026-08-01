@@ -7,8 +7,8 @@ import { containerDatabaseUrl } from '../../src/sdk/docker.ts';
 // `.env` holds a host-facing DATABASE_URL because that is right for anything run
 // on the host. Handing it to a spawned container points that container at
 // itself: the review completes normally, the store swallows the connection
-// failure, and the row is never written. Eight arms once ran that way — ~$60 of
-// reviews, zero rows, and nothing in the logs to say so.
+// failure, and the row is never written. Eight arms once ran that way — wasted a
+// full run's spend, zero rows, and nothing in the logs to say so.
 // ---------------------------------------------------------------------------
 
 describe('containerDatabaseUrl', () => {
