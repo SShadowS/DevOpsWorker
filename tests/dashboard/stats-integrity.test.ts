@@ -32,6 +32,8 @@ function integrityFixture(overrides: Partial<IntegrityStats> = {}): IntegritySta
     since: '2026-07-01T00:00:00.000Z',
     sampleSize: 337,
     lowSample: false,
+    population: 'prod',
+    otherPopulationCount: 0,
     modelUsage: { breakdown: [], flaggedKeys: [] },
     dispatch: {
       sampleSize: 337, dispatchSampleSize: 337, medianDispatch: 10, p90Dispatch: 18,

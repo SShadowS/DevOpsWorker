@@ -41,6 +41,8 @@ function operationalFixture(overrides: Partial<OperationalStats> = {}): Operatio
     since: '2026-07-01T00:00:00.000Z',
     sampleSize: 150,
     lowSample: false,
+    population: 'prod',
+    otherPopulationCount: 0,
     reviewsPerDay: {
       average: 5.0,
       series: [

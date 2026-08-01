@@ -7,6 +7,8 @@ import {
   parseWindow,
   getWindowDays,
   buildWindowMeta,
+  parsePopulation,
+  isTestFlag,
   MIN_RELIABLE_SAMPLE,
   readBandCount,
   severityDistribution,
@@ -85,6 +87,38 @@ describe('buildWindowMeta', () => {
 
   test('carries the exact sampleSize through', () => {
     expect(buildWindowMeta('30d', 337, now).sampleSize).toBe(337);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Population handling (Task 3) — keeps A/B and probe runs out of production
+// statistics. Mirrors parseWindow's whitelist-clamp shape exactly: this is
+// the only place user input touches population selection, and the resulting
+// value is converted to a boolean (isTestFlag) before it reaches SQL, never
+// interpolated as text.
+// ---------------------------------------------------------------------------
+
+describe('parsePopulation', () => {
+  test('defaults to prod', () => {
+    expect(parsePopulation(undefined)).toBe('prod');
+    expect(parsePopulation(null)).toBe('prod');
+    expect(parsePopulation('')).toBe('prod');
+  });
+
+  test('accepts test', () => {
+    expect(parsePopulation('test')).toBe('test');
+  });
+
+  test('clamps anything else to prod, including injection attempts', () => {
+    expect(parsePopulation("'; DROP TABLE pr_reviews; --")).toBe('prod');
+    expect(parsePopulation('PROD')).toBe('prod'); // not case-insensitive — only the exact literal 'test' passes
+  });
+});
+
+describe('isTestFlag', () => {
+  test('true only for the test population', () => {
+    expect(isTestFlag('test')).toBe(true);
+    expect(isTestFlag('prod')).toBe(false);
   });
 });
 
@@ -1024,5 +1058,77 @@ describe('stats.ts SQL shape', () => {
     const body = fn![0];
     expect(body).toContain('AND error IS NOT NULL');
     expect(body).toMatch(/errorClassification:\s*classifyErrors\(errorRows\.map\(\(r\) => r\.error\)\)/);
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 3 — population predicate. getDriftStats (and the plain, unfiltered
+  // countInWindow() helper it alone still calls — see that helper's own doc
+  // comment) are explicitly exempt: drift is a fact about images, not about
+  // who ran the review, so it has no test population. Both are cut out of the
+  // scanned text BY NAME below, so this guard cannot be satisfied by is_test
+  // text that happens to sit somewhere else in the file — it only counts
+  // queries that are actually reachable from the four population-aware
+  // endpoints.
+  //
+  // Task 2 shipped a file-wide `occurrences` COUNT for its own is_test guard;
+  // the team-lead's post-mortem on that task flagged it as a blind spot: two
+  // guards landing on the wrong statements would still count correctly and
+  // pass. With ~12 queries here (vs. Task 2's 2), that blind spot is no
+  // longer tolerable — this asserts PER QUERY, and names the offender.
+  // -------------------------------------------------------------------------
+  test('every pr_reviews query in the population-aware endpoints filters on is_test', () => {
+    const withoutDrift = src.replace(/export async function getDriftStats[\s\S]*?\r?\n\}\r?\n/, '');
+    const withoutCountInWindow = withoutDrift.replace(/async function countInWindow\(sql[\s\S]*?\r?\n\}\r?\n/, '');
+    // Sanity: both exemptions must actually have been found and cut, or this
+    // test would silently pass over the whole file (including the exempt
+    // functions) and prove nothing.
+    expect(withoutDrift.length).toBeLessThan(src.length);
+    expect(withoutCountInWindow.length).toBeLessThan(withoutDrift.length);
+
+    const queries = withoutCountInWindow.match(/FROM pr_reviews[\s\S]*?(?=`)/g) ?? [];
+    // 3 (cost: percentiles/rows/repoRows) + 1 (quality: rows) + 2 (integrity:
+    // rows/dispatchPercentiles) + 5 (operational: durationTurns/dailyRows/
+    // toolRows/repoRows/errorRows) + 1 (countInWindowForPopulation, the
+    // shared totalN/otherPopulationCount helper) = 12.
+    expect(queries.length).toBe(12);
+    const missing = queries.filter((q) => !q.includes('is_test'));
+    expect(missing).toEqual([]); // a non-empty array here names the unguarded query verbatim
+  });
+
+  // Names the exact failure this task exists to prevent: the dispatch
+  // percentile sub-query silently filtering a different population than the
+  // main rows fetch it is supposed to describe (see the previous plan's
+  // Task 2 postmortem). A file-wide "is_test appears somewhere" check cannot
+  // catch this — it demands BOTH queries carry the SAME, non-negated
+  // `testFlag`, and fails if either one drifts to `!testFlag` (reserved for
+  // the opposite-population count) or drops the predicate entirely.
+  test('getIntegrityStats: the dispatch-percentile query and the main rows fetch filter on the identical, non-negated testFlag', () => {
+    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const queries = fn![0].match(/FROM pr_reviews[\s\S]*?(?=`)/g) ?? [];
+    expect(queries.length).toBe(2);
+    for (const q of queries) {
+      expect(q).toContain('is_test = ${testFlag}');
+      expect(q).not.toContain('is_test = ${!testFlag}');
+    }
+  });
+
+  test.each(['getCostStats', 'getQualityStats', 'getIntegrityStats', 'getOperationalStats'])(
+    '%s returns population and otherPopulationCount, computed via isTestFlag(population)',
+    (fnName) => {
+      const fn = src.match(new RegExp(`export async function ${fnName}[\\s\\S]*?\\n\\}`));
+      expect(fn).not.toBeNull();
+      const body = fn![0];
+      expect(body).toContain('isTestFlag(population)');
+      expect(body).toMatch(/\bpopulation,/);
+      expect(body).toMatch(/\botherPopulationCount,/);
+    },
+  );
+
+  test('getDriftStats and buildConfigReport stay untouched by the population parameter', () => {
+    const fn = src.match(/export async function getDriftStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).not.toContain('population');
+    expect(fn![0]).not.toContain('is_test');
   });
 });

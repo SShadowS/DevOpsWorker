@@ -12,7 +12,7 @@ import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
 import type { ILogSink } from '../pipeline/log-sink.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import { LogPoller } from './log-poller.ts';
-import { parseWindow, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getDriftStats } from './stats.ts';
+import { parseWindow, parsePopulation, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getDriftStats } from './stats.ts';
 import { buildConfigReport } from './config-report.ts';
 
 // ---------------------------------------------------------------------------
@@ -410,27 +410,33 @@ export function startDashboard(options: DashboardOptions): void {
         return Response.json(await buildConfigReport());
       }
 
-      // Stats & Config tab — data layer. Each handler clamps ?window= itself
-      // (parseWindow whitelists to '7d'|'30d'|'90d', defaulting to '30d');
-      // nothing here forwards the raw query-string value into SQL.
+      // Stats & Config tab — data layer. Each handler clamps ?window= and
+      // ?population= itself (parseWindow whitelists to '7d'|'30d'|'90d',
+      // defaulting to '30d'; parsePopulation whitelists to 'prod'|'test',
+      // defaulting to 'prod'); nothing here forwards either raw query-string
+      // value into SQL. /api/drift has no population concept — see stats.ts.
       if (path === '/api/stats/cost' && req.method === 'GET') {
         const window = parseWindow(url.searchParams.get('window'));
-        return Response.json(await getCostStats(sql, window));
+        const population = parsePopulation(url.searchParams.get('population'));
+        return Response.json(await getCostStats(sql, window, population));
       }
 
       if (path === '/api/stats/quality' && req.method === 'GET') {
         const window = parseWindow(url.searchParams.get('window'));
-        return Response.json(await getQualityStats(sql, window));
+        const population = parsePopulation(url.searchParams.get('population'));
+        return Response.json(await getQualityStats(sql, window, population));
       }
 
       if (path === '/api/stats/integrity' && req.method === 'GET') {
         const window = parseWindow(url.searchParams.get('window'));
-        return Response.json(await getIntegrityStats(sql, window));
+        const population = parsePopulation(url.searchParams.get('population'));
+        return Response.json(await getIntegrityStats(sql, window, population));
       }
 
       if (path === '/api/stats/operational' && req.method === 'GET') {
         const window = parseWindow(url.searchParams.get('window'));
-        return Response.json(await getOperationalStats(sql, window));
+        const population = parsePopulation(url.searchParams.get('population'));
+        return Response.json(await getOperationalStats(sql, window, population));
       }
 
       // Build provenance comparison — see src/dashboard/stats.ts for why HEAD

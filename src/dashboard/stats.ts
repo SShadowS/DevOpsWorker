@@ -53,6 +53,40 @@ export function getWindowDays(window: StatsWindow): number {
   return WINDOW_DAYS[window];
 }
 
+// ---------------------------------------------------------------------------
+// Population handling — keeps A/B and probe runs out of production
+// statistics. `getDriftStats` and `buildConfigReport` do NOT take this
+// parameter: drift is a fact about images, and config a fact about the
+// environment, neither of which has a test population.
+// ---------------------------------------------------------------------------
+
+export type Population = 'prod' | 'test';
+
+/**
+ * Whitelist-clamp arbitrary query-string input to a population. Anything
+ * that is not exactly `'test'` becomes `'prod'`. Mirrors `parseWindow`'s
+ * shape exactly: this is the only place user input touches population
+ * selection, and the resulting value is converted to a BOOLEAN
+ * (`isTestFlag`) before it reaches SQL — never interpolated as text.
+ */
+export function parsePopulation(raw: string | null | undefined): Population {
+  return raw === 'test' ? 'test' : 'prod';
+}
+
+export function isTestFlag(population: Population): boolean {
+  return population === 'test';
+}
+
+/** Present on every population-aware payload (cost/quality/integrity/
+ *  operational) — deliberately NOT on `DriftStats`, which has no test
+ *  population (see the section comment above). `otherPopulationCount` is the
+ *  count of rows in the same window carrying the OPPOSITE `is_test` flag, so
+ *  an exclusion is never silent — reported even when it is zero. */
+export interface PopulationMeta {
+  population: Population;
+  otherPopulationCount: number;
+}
+
 export interface WindowMeta {
   window: StatsWindow;
   windowDays: number;
@@ -701,11 +735,29 @@ async function countInWindow(sql: postgres.Sql, days: number): Promise<number> {
   return Number(rows[0]?.n ?? 0);
 }
 
+/**
+ * Same as `countInWindow`, scoped to one population — used by every endpoint
+ * below that accepts a `population` parameter, both for its own
+ * `sampleSize` (`testFlag`) and its `otherPopulationCount` (`!testFlag`).
+ * Kept as a separate function rather than an optional parameter on
+ * `countInWindow` so `getDriftStats`'s own call — which has no population
+ * concept — stays exactly as it was.
+ */
+async function countInWindowForPopulation(sql: postgres.Sql, days: number, testFlag: boolean): Promise<number> {
+  const rows = await sql<{ n: string }[]>`
+    SELECT count(*)::text AS n
+    FROM pr_reviews
+    WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
+  `;
+  return Number(rows[0]?.n ?? 0);
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/stats/cost
 // ---------------------------------------------------------------------------
 
-export interface CostStats extends WindowMeta {
+export interface CostStats extends WindowMeta, PopulationMeta {
   medianCostUsd: number | null;
   p90CostUsd: number | null;
   avgCostUsd: number | null;
@@ -735,9 +787,11 @@ export interface CostStats extends WindowMeta {
   monthlyProjection: { value: number | null; basis: string };
 }
 
-export async function getCostStats(sql: postgres.Sql, window: StatsWindow): Promise<CostStats> {
+export async function getCostStats(sql: postgres.Sql, window: StatsWindow, population: Population): Promise<CostStats> {
   const days = getWindowDays(window);
-  const totalN = await countInWindow(sql, days);
+  const testFlag = isTestFlag(population);
+  const totalN = await countInWindowForPopulation(sql, days, testFlag);
+  const otherPopulationCount = await countInWindowForPopulation(sql, days, !testFlag);
 
   const [percentiles] = await sql<Array<{ n: string; median: number | null; p90: number | null; total: number | null; avg: number | null }>>`
     SELECT count(*)::text AS n,
@@ -748,6 +802,7 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow): Prom
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
       AND cost_usd IS NOT NULL
+      AND is_test = ${testFlag}
   `;
 
   const rows = await sql<Array<{
@@ -759,6 +814,7 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow): Prom
     SELECT cost_usd, sub_agents, findings_list, model_usage
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
   `;
 
   const repoRows = await sql<Array<{ repo_key: string; n: string; median: number | null; total: number | null }>>`
@@ -769,6 +825,7 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow): Prom
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
       AND cost_usd IS NOT NULL
+      AND is_test = ${testFlag}
     GROUP BY repo_key
     ORDER BY sum(cost_usd) DESC NULLS LAST
   `;
@@ -779,6 +836,8 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow): Prom
 
   return {
     ...buildWindowMeta(window, totalN),
+    population,
+    otherPopulationCount,
     medianCostUsd: numOrNull(percentiles?.median),
     p90CostUsd: numOrNull(percentiles?.p90),
     avgCostUsd: numOrNull(percentiles?.avg),
@@ -821,7 +880,7 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow): Prom
 // GET /api/stats/quality
 // ---------------------------------------------------------------------------
 
-export interface QualityStats extends WindowMeta {
+export interface QualityStats extends WindowMeta, PopulationMeta {
   readBandSampleSize: number;
   avgReadBandItems: number | null;
   belowBandCount: number;
@@ -830,14 +889,17 @@ export interface QualityStats extends WindowMeta {
   verdictDistribution: Record<string, number>;
 }
 
-export async function getQualityStats(sql: postgres.Sql, window: StatsWindow): Promise<QualityStats> {
+export async function getQualityStats(sql: postgres.Sql, window: StatsWindow, population: Population): Promise<QualityStats> {
   const days = getWindowDays(window);
-  const totalN = await countInWindow(sql, days);
+  const testFlag = isTestFlag(population);
+  const totalN = await countInWindowForPopulation(sql, days, testFlag);
+  const otherPopulationCount = await countInWindowForPopulation(sql, days, !testFlag);
 
   const rows = await sql<Array<{ findings_list: PRFinding[] | null; recommendation: string | null }>>`
     SELECT findings_list, recommendation
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
   `;
 
   const withFindings = rows.filter((r) => r.findings_list != null);
@@ -855,6 +917,8 @@ export async function getQualityStats(sql: postgres.Sql, window: StatsWindow): P
 
   return {
     ...buildWindowMeta(window, totalN),
+    population,
+    otherPopulationCount,
     readBandSampleSize: withFindings.length,
     avgReadBandItems: readBandCounts.length > 0 ? readBandCounts.reduce((a, b) => a + b, 0) / readBandCounts.length : null,
     belowBandCount,
@@ -868,7 +932,7 @@ export async function getQualityStats(sql: postgres.Sql, window: StatsWindow): P
 // GET /api/stats/integrity
 // ---------------------------------------------------------------------------
 
-export interface IntegrityStats extends WindowMeta {
+export interface IntegrityStats extends WindowMeta, PopulationMeta {
   modelUsage: {
     breakdown: ModelUsageEntry[];
     flaggedKeys: ModelUsageEntry[];
@@ -913,9 +977,11 @@ export interface IntegrityStats extends WindowMeta {
   };
 }
 
-export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow): Promise<IntegrityStats> {
+export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, population: Population): Promise<IntegrityStats> {
   const days = getWindowDays(window);
-  const totalN = await countInWindow(sql, days);
+  const testFlag = isTestFlag(population);
+  const totalN = await countInWindowForPopulation(sql, days, testFlag);
+  const otherPopulationCount = await countInWindowForPopulation(sql, days, !testFlag);
 
   const rows = await sql<Array<{
     tool_calls: Record<string, number> | null;
@@ -929,19 +995,23 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow):
     SELECT tool_calls, sub_agents, model_usage, findings_count, findings_list, error, created_at::text
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
   `;
 
   // Zero-fills a missing 'Agent' key (COALESCE(...,0)) and applies no row
-  // filter beyond the window — same population as `rows` above, and the same
-  // convention `dispatchCountsForPercentile` uses on the JS side. See that
-  // function's doc comment for why zero-fill-all-rows was chosen over
-  // excluding rows with no dispatches.
+  // filter beyond the window and population — same population as `rows`
+  // above (both filter on the identical, non-negated `testFlag` — see the
+  // regression pin in tests/dashboard/stats.test.ts), and the same
+  // zero-fill convention `dispatchCountsForPercentile` uses on the JS side.
+  // See that function's doc comment for why zero-fill-all-rows was chosen
+  // over excluding rows with no dispatches.
   const [dispatchPercentiles] = await sql<Array<{ median: number | null; p90: number | null }>>`
     SELECT
       percentile_cont(0.5) WITHIN GROUP (ORDER BY COALESCE((tool_calls->>'Agent')::numeric, 0)) AS median,
       percentile_cont(0.9) WITHIN GROUP (ORDER BY COALESCE((tool_calls->>'Agent')::numeric, 0)) AS p90
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
   `;
 
   const dispatchCounts = dispatchCountsForPercentile(rows);
@@ -965,6 +1035,8 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow):
 
   return {
     ...buildWindowMeta(window, totalN),
+    population,
+    otherPopulationCount,
     modelUsage: {
       breakdown: modelBreakdown,
       flaggedKeys: modelBreakdown.filter((m) => m.flagged),
@@ -1127,7 +1199,7 @@ export function classifyErrors(messages: string[]): ErrorClassificationSummary {
 // GET /api/stats/operational
 // ---------------------------------------------------------------------------
 
-export interface OperationalStats extends WindowMeta {
+export interface OperationalStats extends WindowMeta, PopulationMeta {
   reviewsPerDay: {
     average: number | null;
     series: Array<{ date: string; count: number }>;
@@ -1144,9 +1216,11 @@ export interface OperationalStats extends WindowMeta {
   errorClassification: ErrorClassificationSummary;
 }
 
-export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow): Promise<OperationalStats> {
+export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow, population: Population): Promise<OperationalStats> {
   const days = getWindowDays(window);
-  const totalN = await countInWindow(sql, days);
+  const testFlag = isTestFlag(population);
+  const totalN = await countInWindowForPopulation(sql, days, testFlag);
+  const otherPopulationCount = await countInWindowForPopulation(sql, days, !testFlag);
 
   const [durationTurns] = await sql<Array<{
     n: string; medianDuration: number | null; p90Duration: number | null; medianTurns: number | null; p90Turns: number | null;
@@ -1158,12 +1232,14 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
       percentile_cont(0.9) WITHIN GROUP (ORDER BY turns) AS "p90Turns"
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
   `;
 
   const dailyRows = await sql<Array<{ day: string; n: string }>>`
     SELECT date_trunc('day', created_at)::date::text AS day, count(*)::text AS n
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
     GROUP BY 1
     ORDER BY 1
   `;
@@ -1172,6 +1248,7 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
     SELECT tool_calls
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
   `;
 
   const repoRows = await sql<Array<{ repo_key: string; n: string; medianDuration: number | null; medianTurns: number | null }>>`
@@ -1180,6 +1257,7 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
       percentile_cont(0.5) WITHIN GROUP (ORDER BY turns) AS "medianTurns"
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
     GROUP BY repo_key
     ORDER BY count(*) DESC
   `;
@@ -1193,12 +1271,15 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
     SELECT error
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
+      AND is_test = ${testFlag}
       AND error IS NOT NULL
     ORDER BY created_at DESC
   `;
 
   return {
     ...buildWindowMeta(window, totalN),
+    population,
+    otherPopulationCount,
     reviewsPerDay: {
       average: days > 0 ? totalN / days : null,
       series: dailyRows.map((r) => ({ date: r.day, count: Number(r.n) })),
