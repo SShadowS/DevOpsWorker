@@ -2,6 +2,8 @@ import { driftStats, integrityStats, configReport, statsWindow } from '../stats-
 import type { FetchState, StatsWindow } from '../stats-store.ts';
 import type { DriftStats, IntegrityStats, HeadUnresolvedReason, ImageShaClass } from '../../stats.ts';
 import type { ConfigReport, LeverStatus } from '../../config-report.ts';
+import { buildContaminationAvailability } from '../model-contamination.ts';
+import type { ContaminationAvailability } from '../model-contamination.ts';
 
 // ---------------------------------------------------------------------------
 // Status ribbon (Task 5) — "the reason this entire feature exists." Four
@@ -18,6 +20,14 @@ import type { ConfigReport, LeverStatus } from '../../config-report.ts';
 // correct — but only on genuine drift, not on chrome or on the healthy
 // state." Every 'attention' state also carries a text explanation: colour is
 // the second signal here, never the only one.
+//
+// Fix round 2 (task-6): "Model integrity" now folds in model CONTAMINATION
+// (a sub-agent running on a model other than its declared frontmatter pin),
+// not just the `[1m]`-flagged-key pattern it originally covered — the plan
+// specifies four indicators, and contamination IS model integrity, not a
+// fifth thing. This makes the card depend on TWO fetches (`integrityStats`
+// AND `configReport`, the latter shared with the "Active levers" card below)
+// — see `assessModelIntegrity`/`buildModelIntegrityCard`.
 // ---------------------------------------------------------------------------
 
 export type RibbonStatus = 'loading' | 'error' | 'empty' | 'ok' | 'attention';
@@ -183,8 +193,14 @@ export interface SimpleAssessment {
 
 /** Flags contamination-pattern model keys (the specific `[1m]` long-context
  *  premium-tier suffix data-shapes.md calls out) — a real cost-attribution
- *  bug, not a stylistic nit, so any flagged key is 'attention'. */
-export function assessModelIntegrity(integrity: IntegrityStats): SimpleAssessment {
+ *  bug, not a stylistic nit, so any flagged key is 'attention'. Named
+ *  precisely for what it checks (fix round 2) — it used to be called
+ *  `assessModelIntegrity`, but "model integrity" now covers a SECOND signal
+ *  (declared-pin contamination, below) this function knows nothing about;
+ *  `stats-integrity.tsx`'s "Model usage" panel section still calls this one
+ *  directly, since that section is deliberately scoped to the `[1m]` pattern
+ *  only (contamination has its own dedicated panel section). */
+export function assessFlaggedModelKeys(integrity: IntegrityStats): SimpleAssessment {
   const flagged = integrity.modelUsage.flaggedKeys;
   if (flagged.length === 0) {
     return { severity: 'ok', text: `n=${integrity.sampleSize} · no flagged model keys` };
@@ -192,6 +208,64 @@ export function assessModelIntegrity(integrity: IntegrityStats): SimpleAssessmen
   return {
     severity: 'attention',
     text: `${flagged.length} flagged model key(s): ${flagged.map((m) => m.model).join(', ')}`,
+  };
+}
+
+/**
+ * The ribbon's combined "Model integrity" verdict (fix round 2) — folds
+ * `assessFlaggedModelKeys`'s `[1m]` signal together with declared-pin
+ * CONTAMINATION into one card, per the plan's four-indicator limit
+ * (contamination is not a fifth indicator, it's a second cause of the same
+ * one). Both signals are ALWAYS stated in the text, never just one, so a
+ * genuine finding on either axis can't be silently masked by the other
+ * being clean — this is the exact failure mode this function's own tests
+ * pin ("combined-signal case").
+ *
+ * The contamination count is phrased as a FLOOR ("at least N/M runs"), never
+ * an exact figure: `sub_agents` undercounts dispatches nondeterministically
+ * (see the Dispatch section of the Integrity panel), so a deviating run
+ * missing from the roster has no model recorded at all and cannot be
+ * counted here. The true count can only be higher than what's shown, never
+ * lower — the same direction stated in `IntegrityStats.subAgentModelAttribution.note`.
+ *
+ * `contamination.status === 'error'` (the declared-pin fetch failed) is
+ * `'attention'` regardless of the flagged-key half, worded as "cannot
+ * verify" — mirrors `assessDrift`'s "unverifiable is not probably-fine"
+ * precedent, and stays consistent with `stats-integrity.tsx`'s
+ * `ContaminationSection`'s own "Cannot verify: " tag (fix round 2, Finding 1)
+ * even though the ribbon's shared `SimpleCard` only has ONE generic
+ * "Needs attention: " prefix across all four cards — the distinguishing
+ * words live in this function's own `text`, not in new ribbon chrome.
+ */
+export function assessModelIntegrity(integrity: IntegrityStats, contamination: ContaminationAvailability): SimpleAssessment {
+  const flagged = integrity.modelUsage.flaggedKeys;
+  const flaggedText = flagged.length === 0
+    ? 'no flagged model keys'
+    : `${flagged.length} flagged model key(s): ${flagged.map((m) => m.model).join(', ')}`;
+
+  if (contamination.status === 'loading') {
+    return {
+      severity: flagged.length > 0 ? 'attention' : 'ok',
+      text: `n=${integrity.sampleSize} · ${flaggedText} · contamination check loading…`,
+    };
+  }
+  if (contamination.status === 'error') {
+    return {
+      severity: 'attention',
+      text: `n=${integrity.sampleSize} · ${flaggedText} · cannot verify contamination — declared configuration failed to load: ${contamination.message}`,
+    };
+  }
+
+  const pinnedRows = contamination.rows.filter((r) => r.status !== 'unpinned');
+  const contaminatedRows = pinnedRows.filter((r) => r.status === 'attention');
+  const contaminationText = contaminatedRows.length === 0
+    ? 'no model contamination'
+    : `at least ${contaminatedRows.reduce((s, r) => s + r.offPinRuns, 0)}/${pinnedRows.reduce((s, r) => s + r.totalRuns, 0)} ` +
+      `runs off declared pin across ${contaminatedRows.length} sub-agent(s) (floor — sub_agents undercounts, see Integrity panel)`;
+
+  return {
+    severity: flagged.length > 0 || contaminatedRows.length > 0 ? 'attention' : 'ok',
+    text: `n=${integrity.sampleSize} · ${flaggedText} · ${contaminationText}`,
   };
 }
 
@@ -279,8 +353,32 @@ function simpleCardFromFetch<T>(state: FetchState<T>, assess: (data: T) => Simpl
   }
 }
 
-export function buildModelIntegrityCard(state: FetchState<IntegrityStats>): SimpleCardView {
-  return simpleCardFromFetch(state, assessModelIntegrity);
+/**
+ * Unlike the other three cards, this one depends on TWO fetches
+ * (`integrityState` for the observed side, `configState` for declared pins —
+ * fix round 2), so it cannot use the generic single-source
+ * `simpleCardFromFetch` helper below. `integrityState` still gates the
+ * card's own loading/error/empty exactly as before; `configState` only
+ * matters once `integrityState` is `'ready'`, handled inside
+ * `assessModelIntegrity` via `buildContaminationAvailability`.
+ */
+export function buildModelIntegrityCard(
+  integrityState: FetchState<IntegrityStats>,
+  configState: FetchState<ConfigReport>,
+): SimpleCardView {
+  switch (integrityState.status) {
+    case 'loading':
+      return { status: 'loading', text: 'Loading…' };
+    case 'error':
+      return { status: 'error', text: `Failed to load: ${integrityState.message}` };
+    case 'empty':
+      return { status: 'empty', text: 'No data recorded in this window.' };
+    case 'ready': {
+      const contamination = buildContaminationAvailability(integrityState.data.subAgentModelAttribution.entries, configState);
+      const a = assessModelIntegrity(integrityState.data, contamination);
+      return { status: a.severity, text: a.text };
+    }
+  }
 }
 
 export function buildLeversCard(state: FetchState<ConfigReport>): SimpleCardView {
@@ -361,12 +459,13 @@ function SimpleCard({ label, view, window }: SimpleCardProps) {
  */
 export function StatsRibbon() {
   const integrity = integrityStats.value;
+  const config = configReport.value;
   const window = statsWindow.value;
   return (
     <section class="status-ribbon" aria-label="Status ribbon">
       <DriftCard />
-      <SimpleCard label="Model integrity" view={buildModelIntegrityCard(integrity)} window={window} />
-      <SimpleCard label="Active levers" view={buildLeversCard(configReport.value)} />
+      <SimpleCard label="Model integrity" view={buildModelIntegrityCard(integrity, config)} window={window} />
+      <SimpleCard label="Active levers" view={buildLeversCard(config)} />
       <SimpleCard label="Error rate" view={buildErrorRateCard(integrity)} window={window} />
     </section>
   );

@@ -336,22 +336,30 @@ export interface SubAgentModelAttributionEntry {
 export function aggregateSubAgentModelAttribution(
   rows: Array<Record<string, { model?: string }> | null>,
 ): SubAgentModelAttributionEntry[] {
-  const totals = new Map<string, number>();
+  // Nested map (agent -> model -> count) rather than a single string-joined
+  // key: agent names and model ids are free-form strings, so concatenating
+  // them behind any separator character risks a collision (or, as originally
+  // shipped in fix round 1, an actual embedded control byte in the source —
+  // corrected here, no behaviour change, same population/tests). A `null`
+  // model is stored under the `null` key itself (Map supports non-string
+  // keys), never coerced into part of a string.
+  const totals = new Map<string, Map<string | null, number>>();
   for (const row of rows) {
     if (!row) continue;
     for (const [agent, usage] of Object.entries(row)) {
       const model = usage?.model ?? null;
-      totals.set(`${agent} ${model ?? ''}`, (totals.get(`${agent} ${model ?? ''}`) ?? 0) + 1);
+      const perModel = totals.get(agent) ?? new Map<string | null, number>();
+      perModel.set(model, (perModel.get(model) ?? 0) + 1);
+      totals.set(agent, perModel);
     }
   }
-  return [...totals.entries()]
-    .map(([key, count]) => {
-      const sep = key.indexOf(' ');
-      const agent = key.slice(0, sep);
-      const modelPart = key.slice(sep + 1);
-      return { agent, model: modelPart === '' ? null : modelPart, count };
-    })
-    .sort((a, b) => a.agent.localeCompare(b.agent) || b.count - a.count);
+  const entries: SubAgentModelAttributionEntry[] = [];
+  for (const [agent, perModel] of totals) {
+    for (const [model, count] of perModel) {
+      entries.push({ agent, model, count });
+    }
+  }
+  return entries.sort((a, b) => a.agent.localeCompare(b.agent) || b.count - a.count);
 }
 
 // ---------------------------------------------------------------------------
@@ -955,10 +963,16 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow):
       mismatchCount,
       mismatchRate: rows.length > 0 ? mismatchCount / rows.length : null,
       note:
+        // Fix round 2 (task-6): this is the ONLY authored description of the
+        // dispatch caveat — the client (stats-integrity.tsx's
+        // buildDispatchSectionView) passes it through verbatim rather than
+        // hand-writing its own copy, so there is exactly one place this
+        // sentence can drift from reality.
         "tool_calls->'Agent' is the authoritative dispatch count. sub_agents roster undercounts nondeterministically " +
-        '— never report roster count alone as "how many agents ran". medianDispatch/p90Dispatch are computed over ' +
-        "EVERY row in the window (dispatchSampleSize == sampleSize by construction): a row with no 'Agent' key is a " +
-        'real zero-dispatch review (e.g. the cheap sanity path), zero-filled rather than excluded.',
+        '— never report roster count alone as "how many agents ran". A high mismatch rate is the ORDINARY case here, ' +
+        'not a sign anything broke — this is a known instrument caveat, not a new problem. medianDispatch/p90Dispatch ' +
+        "are computed over EVERY row in the window (dispatchSampleSize == sampleSize by construction): a row with no " +
+        "'Agent' key is a real zero-dispatch review (e.g. the cheap sanity path), zero-filled rather than excluded.",
     },
     inferredEffort: {
       inferred: true,

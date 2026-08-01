@@ -7,6 +7,7 @@ import {
   buildProvenanceRow,
   buildProvenanceRows,
   assessDrift,
+  assessFlaggedModelKeys,
   assessModelIntegrity,
   assessLevers,
   assessErrorRate,
@@ -17,8 +18,9 @@ import {
   buildErrorRateCard,
 } from '../../src/dashboard/client/components/stats-ribbon.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
-import type { DriftStats, IntegrityStats } from '../../src/dashboard/stats.ts';
+import type { DriftStats, IntegrityStats, SubAgentModelAttributionEntry } from '../../src/dashboard/stats.ts';
 import type { ConfigReport, LeverStatus } from '../../src/dashboard/config-report.ts';
+import type { ContaminationAvailability, AgentModelRow } from '../../src/dashboard/client/model-contamination.ts';
 
 // No test in this file may open a database connection or render a component
 // tree (repo convention — see tests/dashboard/tool-breakdown.test.ts). Every
@@ -71,7 +73,7 @@ function leverFixture(state: LeverStatus['state'], key = 'PR_REVIEW_NO_POST'): L
   return { key, raw: state === 'absent' ? undefined : '1', state, sourceRef: 'x.ts:1', description: 'desc' };
 }
 
-function configFixture(evalLevers: LeverStatus[]): ConfigReport {
+function configFixture(evalLevers: LeverStatus[], subAgentGroups: ConfigReport['subAgents']['groups'] = []): ConfigReport {
   return {
     generatedAt: '2026-08-01T00:00:00.000Z',
     orchestratorModel: {
@@ -82,10 +84,29 @@ function configFixture(evalLevers: LeverStatus[]): ConfigReport {
     },
     perAgent: [],
     ruleLearnerAgent: { name: 'rule-learner', model: 'x', maxTurns: 1, disallowedTools: [], note: '' },
-    subAgents: { groups: [], inline: [], totalFrontmatterFiles: 0 },
+    subAgents: { groups: subAgentGroups, inline: [], totalFrontmatterFiles: subAgentGroups.reduce((s, g) => s + g.count, 0) },
     credential: { prReview: { envVar: 'PR_REVIEW_ANTHROPIC_API_KEY', set: false, length: null, mode: 'oauth-subscription' } },
     evalLevers,
     overlay: { agentOverrideCount: 0, agents: {} },
+  };
+}
+
+/** A pr-reviewer-shaped group: one SubAgentGroupReport carrying the given
+ *  file/declaredModel pairs — mirrors model-contamination.test.ts's helper. */
+function subAgentGroup(files: Array<{ file: string; declaredModel: string | null }>): ConfigReport['subAgents']['groups'][number] {
+  return { parentAgent: 'pr-reviewer', dirRelativeToRepo: 'src/agents/pr-reviewer/.claude/agents', files, count: files.length };
+}
+
+function readyContamination(rows: AgentModelRow[]): ContaminationAvailability {
+  return { status: 'ready', rows };
+}
+
+function agentModelRow(overrides: Partial<AgentModelRow> = {}): AgentModelRow {
+  return {
+    agent: 'al-performance-analyzer', declaredModel: 'claude-sonnet-5',
+    observed: [{ model: 'claude-sonnet-5', count: 86 }, { model: 'claude-opus-5', count: 9 }],
+    totalRuns: 95, offPinRuns: 9, status: 'attention',
+    ...overrides,
   };
 }
 
@@ -239,22 +260,100 @@ describe('assessDrift', () => {
 });
 
 // ---------------------------------------------------------------------------
-// assessModelIntegrity / assessLevers / assessErrorRate
+// assessFlaggedModelKeys / assessModelIntegrity (combined, fix round 2) /
+// assessLevers / assessErrorRate
 // ---------------------------------------------------------------------------
 
-describe('assessModelIntegrity', () => {
+describe('assessFlaggedModelKeys', () => {
   test('no flagged keys -> ok, states n', () => {
-    const result = assessModelIntegrity(integrityFixture());
+    const result = assessFlaggedModelKeys(integrityFixture());
     expect(result.severity).toBe('ok');
     expect(result.text).toContain('n=100');
   });
 
   test('a flagged key -> attention, names the model', () => {
-    const result = assessModelIntegrity(integrityFixture({
+    const result = assessFlaggedModelKeys(integrityFixture({
       modelUsage: { breakdown: [], flaggedKeys: [{ model: 'claude-opus-5[1m]', rows: 1, totalCostUsd: 1, totalOutputTokens: 1, flagged: true }] },
     }));
     expect(result.severity).toBe('attention');
     expect(result.text).toContain('claude-opus-5[1m]');
+  });
+});
+
+describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin contamination, fix round 2)', () => {
+  test('neither signal fires -> ok, both stated explicitly', () => {
+    const result = assessModelIntegrity(integrityFixture(), readyContamination([]));
+    expect(result.severity).toBe('ok');
+    expect(result.text).toContain('no flagged model keys');
+    expect(result.text).toContain('no model contamination');
+  });
+
+  test('flagged key only -> attention; contamination half still says "no model contamination", not omitted', () => {
+    const result = assessModelIntegrity(
+      integrityFixture({ modelUsage: { breakdown: [], flaggedKeys: [{ model: 'claude-opus-5[1m]', rows: 1, totalCostUsd: 1, totalOutputTokens: 1, flagged: true }] } }),
+      readyContamination([]),
+    );
+    expect(result.severity).toBe('attention');
+    expect(result.text).toContain('claude-opus-5[1m]');
+    expect(result.text).toContain('no model contamination');
+  });
+
+  test('contamination only -> attention; flagged-key half still says "no flagged model keys", not omitted', () => {
+    const result = assessModelIntegrity(integrityFixture(), readyContamination([agentModelRow()]));
+    expect(result.severity).toBe('attention');
+    expect(result.text).toContain('no flagged model keys');
+    expect(result.text).toContain('at least 9/95');
+  });
+
+  // The failure mode this exact test exists to catch: a card that finds TWO
+  // concurrent problems must not let text built for one silently drop the
+  // other. Explicitly requested by the fix-round-2 review.
+  test('COMBINED-SIGNAL CASE: both a flagged key AND contamination fire at once -> attention, text names BOTH', () => {
+    const result = assessModelIntegrity(
+      integrityFixture({ modelUsage: { breakdown: [], flaggedKeys: [{ model: 'claude-opus-4-8[1m]', rows: 1, totalCostUsd: 2.09, totalOutputTokens: 500, flagged: true }] } }),
+      readyContamination([agentModelRow()]),
+    );
+    expect(result.severity).toBe('attention');
+    expect(result.text).toContain('claude-opus-4-8[1m]');
+    expect(result.text).toContain('at least 9/95');
+    expect(result.text).not.toContain('no flagged model keys');
+    expect(result.text).not.toContain('no model contamination');
+  });
+
+  test('contamination count is phrased as a FLOOR ("at least"), never an exact figure', () => {
+    const result = assessModelIntegrity(integrityFixture(), readyContamination([agentModelRow()]));
+    expect(result.text.toLowerCase()).toContain('at least');
+    expect(result.text.toLowerCase()).toContain('floor');
+  });
+
+  test('an unpinned-only row does not count as contamination', () => {
+    const result = assessModelIntegrity(
+      integrityFixture(),
+      readyContamination([agentModelRow({ agent: 'general-purpose', declaredModel: null, offPinRuns: 0, status: 'unpinned' })]),
+    );
+    expect(result.severity).toBe('ok');
+    expect(result.text).toContain('no model contamination');
+  });
+
+  test('contamination loading -> severity reflects ONLY the flagged-key half so far, text says the check is in flight', () => {
+    const result = assessModelIntegrity(integrityFixture(), { status: 'loading' });
+    expect(result.severity).toBe('ok'); // no flagged keys in the default fixture
+    expect(result.text).toContain('loading');
+  });
+
+  test('contamination loading + a flagged key already known -> attention (not downgraded while the other signal is in flight)', () => {
+    const result = assessModelIntegrity(
+      integrityFixture({ modelUsage: { breakdown: [], flaggedKeys: [{ model: 'claude-opus-5[1m]', rows: 1, totalCostUsd: 1, totalOutputTokens: 1, flagged: true }] } }),
+      { status: 'loading' },
+    );
+    expect(result.severity).toBe('attention');
+  });
+
+  test('contamination error -> attention, "cannot verify" wording (mirrors ContaminationSection\'s own tag in the panel)', () => {
+    const result = assessModelIntegrity(integrityFixture(), { status: 'error', message: '500' });
+    expect(result.severity).toBe('attention');
+    expect(result.text.toLowerCase()).toContain('cannot verify');
+    expect(result.text).toContain('500');
   });
 });
 
@@ -334,9 +433,37 @@ describe('buildDriftCard', () => {
 });
 
 describe('buildModelIntegrityCard / buildErrorRateCard', () => {
-  test('model integrity ready -> delegates to assessModelIntegrity', () => {
+  const noPinsConfig: FetchState<ConfigReport> = { status: 'ready', data: configFixture([]) };
+
+  test('model integrity ready + no declared pins registered -> delegates to assessModelIntegrity, both signals clean', () => {
     const state: FetchState<IntegrityStats> = { status: 'ready', data: integrityFixture() };
-    expect(buildModelIntegrityCard(state)).toEqual({ status: 'ok', text: 'n=100 · no flagged model keys' });
+    expect(buildModelIntegrityCard(state, noPinsConfig)).toEqual({ status: 'ok', text: 'n=100 · no flagged model keys · no model contamination' });
+  });
+
+  test('model integrity ready + a real contamination match in the declared config -> attention', () => {
+    const state: FetchState<IntegrityStats> = {
+      status: 'ready',
+      data: integrityFixture({ subAgentModelAttribution: { entries: [{ agent: 'al-performance-analyzer', model: 'claude-opus-5', count: 9 }], note: '' } }),
+    };
+    const configState: FetchState<ConfigReport> = {
+      status: 'ready',
+      data: configFixture([], [subAgentGroup([{ file: 'al-performance-analyzer.md', declaredModel: 'claude-sonnet-5' }])]),
+    };
+    const view = buildModelIntegrityCard(state, configState);
+    expect(view.status).toBe('attention');
+    expect(view.text).toContain('at least 9/9');
+  });
+
+  test('configState still loading while integrityStats is ready -> card reflects the flagged-key half only, not stuck loading', () => {
+    const state: FetchState<IntegrityStats> = { status: 'ready', data: integrityFixture() };
+    const view = buildModelIntegrityCard(state, { status: 'loading' });
+    expect(view.status).toBe('ok');
+    expect(view.text).toContain('contamination check loading');
+  });
+
+  test('integrityStats itself not ready -> loading/error/empty pass through unchanged, configState irrelevant', () => {
+    expect(buildModelIntegrityCard({ status: 'loading' }, noPinsConfig)).toEqual({ status: 'loading', text: 'Loading…' });
+    expect(buildModelIntegrityCard({ status: 'error', message: 'boom' }, noPinsConfig)).toEqual({ status: 'error', text: 'Failed to load: boom' });
   });
 
   test('error rate ready -> delegates to assessErrorRate', () => {
@@ -348,7 +475,7 @@ describe('buildModelIntegrityCard / buildErrorRateCard', () => {
 
   test('empty -> reads distinctly from error (no data vs request failed)', () => {
     const state: FetchState<IntegrityStats> = { status: 'empty' };
-    const view = buildModelIntegrityCard(state);
+    const view = buildModelIntegrityCard(state, noPinsConfig);
     expect(view.status).toBe('empty');
     expect(view.text).not.toContain('Failed');
   });

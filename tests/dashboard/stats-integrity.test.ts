@@ -1,9 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import {
   buildModelUsageSectionView,
-  collectDeclaredPins,
-  buildAgentModelRows,
-  formatObservedBreakdown,
   buildContaminationSectionView,
   buildDispatchSectionView,
   buildEffortDriftSectionView,
@@ -108,102 +105,13 @@ describe('buildModelUsageSectionView', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Model contamination — fix round 1. collectDeclaredPins / buildAgentModelRows
-// / buildContaminationSectionView cross-reference IntegrityStats (observed)
-// against ConfigReport (declared), which stats.ts deliberately does NOT do.
+// buildContaminationSectionView — the panel-specific presentation on top of
+// the shared cross-reference logic. `collectDeclaredPins` / `buildAgentModelRows`
+// / `formatObservedBreakdown` / `buildContaminationAvailability` themselves
+// moved to `model-contamination.ts` in fix round 2 (shared with
+// stats-ribbon.tsx's combined "Model integrity" card) — see
+// tests/dashboard/model-contamination.test.ts for their own tests.
 // ---------------------------------------------------------------------------
-
-describe('collectDeclaredPins', () => {
-  test('maps frontmatter file name (minus .md) to its declared model', () => {
-    const config = configFixture([subAgentGroup([{ file: 'al-performance-analyzer.md', declaredModel: 'claude-sonnet-5' }])]);
-    const pins = collectDeclaredPins(config);
-    expect(pins.get('al-performance-analyzer')).toBe('claude-sonnet-5');
-  });
-
-  test('a frontmatter file with no model: line maps to null, not omitted', () => {
-    const config = configFixture([subAgentGroup([{ file: 'no-pin.md', declaredModel: null }])]);
-    expect(collectDeclaredPins(config).has('no-pin')).toBe(true);
-    expect(collectDeclaredPins(config).get('no-pin')).toBeNull();
-  });
-
-  test('an agent absent from every group and every inline entry is simply absent from the map', () => {
-    const config = configFixture([subAgentGroup([{ file: 'al-performance-analyzer.md', declaredModel: 'claude-sonnet-5' }])]);
-    expect(collectDeclaredPins(config).has('general-purpose')).toBe(false);
-  });
-
-  test('inline sub-agents (e.g. ci-waiter) are included alongside frontmatter groups', () => {
-    const config = configFixture([], [{ parentAgent: 'coder', subagentType: 'ci-waiter', mechanism: 'inline', declaredModel: 'claude-haiku-4-5-20251001', declaredMaxTurns: 5, envOverride: null, note: '' }]);
-    expect(collectDeclaredPins(config).get('ci-waiter')).toBe('claude-haiku-4-5-20251001');
-  });
-
-  test('multiple groups are all folded into one map', () => {
-    const config = configFixture([
-      subAgentGroup([{ file: 'a.md', declaredModel: 'claude-sonnet-5' }]),
-      { parentAgent: 'code-reviewer', dirRelativeToRepo: 'x', files: [{ file: 'b.md', declaredModel: 'claude-opus-5' }], count: 1 },
-    ]);
-    const pins = collectDeclaredPins(config);
-    expect(pins.get('a')).toBe('claude-sonnet-5');
-    expect(pins.get('b')).toBe('claude-opus-5');
-  });
-});
-
-describe('buildAgentModelRows', () => {
-  const pins = new Map<string, string | null>([
-    ['al-performance-analyzer', 'claude-sonnet-5'],
-    ['no-pin-file', null],
-  ]);
-
-  test('all observed runs match the declared pin -> ok, zero off-pin runs', () => {
-    const entries: SubAgentModelAttributionEntry[] = [{ agent: 'al-performance-analyzer', model: 'claude-sonnet-5', count: 96 }];
-    const rows = buildAgentModelRows(entries, pins);
-    expect(rows).toEqual([{
-      agent: 'al-performance-analyzer', declaredModel: 'claude-sonnet-5',
-      observed: [{ model: 'claude-sonnet-5', count: 96 }], totalRuns: 96, offPinRuns: 0, status: 'ok',
-    }]);
-  });
-
-  test("live-shaped case: pinned to sonnet, 9 of 95 runs on opus -> attention, off-pin count is exactly the deviating runs", () => {
-    const entries: SubAgentModelAttributionEntry[] = [
-      { agent: 'al-performance-analyzer', model: 'claude-sonnet-5', count: 86 },
-      { agent: 'al-performance-analyzer', model: 'claude-opus-5', count: 9 },
-    ];
-    const rows = buildAgentModelRows(entries, pins);
-    expect(rows[0]!.status).toBe('attention');
-    expect(rows[0]!.totalRuns).toBe(95);
-    expect(rows[0]!.offPinRuns).toBe(9);
-  });
-
-  test('no declared pin found for the agent -> unpinned, never counted as contamination', () => {
-    const entries: SubAgentModelAttributionEntry[] = [{ agent: 'general-purpose', model: 'claude-opus-5', count: 7 }];
-    const rows = buildAgentModelRows(entries, pins); // 'general-purpose' is not in `pins` at all
-    expect(rows).toEqual([{
-      agent: 'general-purpose', declaredModel: null,
-      observed: [{ model: 'claude-opus-5', count: 7 }], totalRuns: 7, offPinRuns: 0, status: 'unpinned',
-    }]);
-  });
-
-  test('a declared pin explicitly recorded as null (frontmatter has no model: line) is ALSO unpinned', () => {
-    const entries: SubAgentModelAttributionEntry[] = [{ agent: 'no-pin-file', model: 'claude-sonnet-5', count: 3 }];
-    const rows = buildAgentModelRows(entries, pins);
-    expect(rows[0]!.status).toBe('unpinned');
-  });
-
-  test('rows are sorted by agent name', () => {
-    const entries: SubAgentModelAttributionEntry[] = [
-      { agent: 'zebra-analyzer', model: 'x', count: 1 },
-      { agent: 'al-performance-analyzer', model: 'claude-sonnet-5', count: 1 },
-    ];
-    const rows = buildAgentModelRows(entries, pins);
-    expect(rows.map((r) => r.agent)).toEqual(['al-performance-analyzer', 'zebra-analyzer']);
-  });
-});
-
-describe('formatObservedBreakdown', () => {
-  test('joins model:count pairs, a missing model reads as (unknown) not blank', () => {
-    expect(formatObservedBreakdown([{ model: 'claude-sonnet-5', count: 86 }, { model: null, count: 2 }]))
-      .toBe('claude-sonnet-5: 86 · (unknown): 2');
-  });
-});
 
 describe('buildContaminationSectionView', () => {
   const pinnedEntries: SubAgentModelAttributionEntry[] = [
@@ -287,13 +195,18 @@ describe('buildDispatchSectionView', () => {
     expect(view.mismatchText).toBe('0/0 (n/a)');
   });
 
-  test('caveat text names the instrument fault, not a vague "known issue"', () => {
+  test('caveat is passed through from dispatch.note verbatim (fix round 2), not re-described client-side', () => {
+    // Fix round 1 shipped a hand-written client-side caveat string that
+    // duplicated the server's own `dispatch.note` field, which went unread —
+    // two hand-written descriptions of one fact, able to drift apart. Fix
+    // round 2 deleted the client copy; this pins that `caveat` is now a pure
+    // pass-through, mirroring buildEffortDriftSectionView's `note` test.
+    const note = 'a very specific server-authored dispatch caveat sentence naming sub_agents';
     const view = buildDispatchSectionView({
       sampleSize: 1, dispatchSampleSize: 1, medianDispatch: 1, p90Dispatch: 1,
-      avgRosterCount: 1, mismatchCount: 0, mismatchRate: 0, note: '',
+      avgRosterCount: 1, mismatchCount: 0, mismatchRate: 0, note,
     });
-    expect(view.caveat).toContain('sub_agents');
-    expect(view.caveat.toLowerCase()).toContain('ordinary case');
+    expect(view.caveat).toBe(note);
   });
 });
 

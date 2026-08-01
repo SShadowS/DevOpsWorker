@@ -3,7 +3,9 @@ import type { FetchState } from '../stats-store.ts';
 import type { IntegrityStats, ModelUsageEntry, EffortMix, SubAgentModelAttributionEntry } from '../../stats.ts';
 import type { ConfigReport } from '../../config-report.ts';
 import { formatPct, formatCost } from '../format.ts';
-import { assessModelIntegrity, assessErrorRate } from './stats-ribbon.tsx';
+import { assessFlaggedModelKeys, assessErrorRate } from './stats-ribbon.tsx';
+import { buildContaminationAvailability, formatObservedBreakdown } from '../model-contamination.ts';
+import type { AgentModelRow } from '../model-contamination.ts';
 
 // ---------------------------------------------------------------------------
 // Integrity panel (Task 6, fix round 1) — "is the machinery reporting the
@@ -61,8 +63,8 @@ export type SectionStatus = 'ok' | 'attention' | 'neutral';
 
 // ---------------------------------------------------------------------------
 // Pure view-model builders — unit-tested with fixture data, no rendering,
-// no network. Model integrity and error rate delegate to stats-ribbon.tsx's
-// `assessModelIntegrity`/`assessErrorRate` rather than re-deriving the same
+// no network. Model usage and error rate delegate to stats-ribbon.tsx's
+// `assessFlaggedModelKeys`/`assessErrorRate` rather than re-deriving the same
 // severity call twice from the same fields — this panel adds the breakdown
 // table / error_max_turns note around that shared verdict, it does not
 // second-guess it.
@@ -75,100 +77,27 @@ export interface ModelUsageSectionView {
 }
 
 /** The full model_usage breakdown plus the flagged-key verdict. Reuses
- *  `assessModelIntegrity` (stats-ribbon.tsx) for the summary text/severity so
- *  the ribbon's compact card and this panel's detailed table never disagree
- *  about whether today's data is flagged. */
+ *  `assessFlaggedModelKeys` (stats-ribbon.tsx) for the summary text/severity
+ *  so the ribbon's "Model integrity" card and this panel's detailed table
+ *  never disagree about whether today's data carries a flagged `[1m]` key.
+ *  Deliberately narrower than the ribbon's combined card (fix round 2): this
+ *  section is titled "Model usage" and stays scoped to the `[1m]` signal —
+ *  contamination has its OWN dedicated section below, so folding it in here
+ *  too would duplicate the same numbers under two headings. */
 export function buildModelUsageSectionView(data: IntegrityStats): ModelUsageSectionView {
-  const a = assessModelIntegrity(data);
+  const a = assessFlaggedModelKeys(data);
   return { status: a.severity, summary: a.text, rows: data.modelUsage.breakdown };
 }
 
 // ---------------------------------------------------------------------------
 // Model CONTAMINATION — declared frontmatter pin vs observed model. The join
-// stats.ts deliberately does not do (see module doc comment): built here from
+// stats.ts deliberately does not do (see module doc comment): built from
 // `IntegrityStats.subAgentModelAttribution` (observed, windowed) and
-// `ConfigReport.subAgents` (declared, unwindowed).
+// `ConfigReport.subAgents` (declared, unwindowed) via `../model-contamination.ts`
+// — the row-building and declared-pin-collection logic itself lives there now
+// (fix round 2), shared with stats-ribbon.tsx's combined "Model integrity"
+// card, rather than defined once per file.
 // ---------------------------------------------------------------------------
-
-/**
- * Flattens every DECLARED sub-agent model pin this repo knows about — both
- * `.claude/agents/*.md` frontmatter (`subAgents.groups`: pr-reviewer's 7,
- * plan-reviewer's 4, code-reviewer's 8) and the one inline `SdkAgentDefinition`
- * (`ci-waiter`) — into a single agent-name -> declared-model lookup.
- *
- * A frontmatter file with no `model:` line, AND an agent name that appears in
- * NO group or inline entry at all (e.g. the built-in `general-purpose`
- * subagent_type, which has no frontmatter file of its own — see the live
- * production reading in the fix-round-1 message) both end up mapped to
- * `null` here, on purpose: neither is "contamination", both are "nothing was
- * declared to compare this observation against".
- */
-export function collectDeclaredPins(config: ConfigReport): Map<string, string | null> {
-  const pins = new Map<string, string | null>();
-  for (const group of config.subAgents.groups) {
-    for (const file of group.files) {
-      pins.set(file.file.replace(/\.md$/, ''), file.declaredModel);
-    }
-  }
-  for (const inline of config.subAgents.inline) {
-    pins.set(inline.subagentType, inline.declaredModel);
-  }
-  return pins;
-}
-
-export type ContaminationRowStatus = 'ok' | 'attention' | 'unpinned';
-
-export interface AgentModelRow {
-  agent: string;
-  /** A pin is DECLARED, never guaranteed — frontmatter pins are known to be
-   *  silently ignored, which is the whole reason this row exists. `null`
-   *  means no declared pin was found for this agent at all (see
-   *  `collectDeclaredPins`), not that the pin failed. */
-  declaredModel: string | null;
-  observed: Array<{ model: string | null; count: number }>;
-  totalRuns: number;
-  /** Runs observed on a model other than `declaredModel`. Always 0 for an
-   *  `'unpinned'` row — there is nothing to be off of. */
-  offPinRuns: number;
-  status: ContaminationRowStatus;
-}
-
-/**
- * Cross-references observed per-agent model attribution against declared
- * pins. An agent with NO declared pin is reported as `'unpinned'`, never
- * folded into a contamination count — per the fix-round-1 instruction, an
- * unpinned agent (e.g. `general-purpose`) running on any model is expected
- * behaviour, not drift. An agent WITH a declared pin that shows even one run
- * on a different model is `'attention'` — unlike the dispatch mismatch, this
- * is not a documented, expected instrument fault.
- */
-export function buildAgentModelRows(
-  entries: SubAgentModelAttributionEntry[],
-  declaredPins: Map<string, string | null>,
-): AgentModelRow[] {
-  const byAgent = new Map<string, Array<{ model: string | null; count: number }>>();
-  for (const e of entries) {
-    const list = byAgent.get(e.agent) ?? [];
-    list.push({ model: e.model, count: e.count });
-    byAgent.set(e.agent, list);
-  }
-  const rows: AgentModelRow[] = [];
-  for (const [agent, observed] of byAgent) {
-    const totalRuns = observed.reduce((s, o) => s + o.count, 0);
-    const declaredModel = declaredPins.get(agent) ?? null;
-    if (declaredModel == null) {
-      rows.push({ agent, declaredModel: null, observed, totalRuns, offPinRuns: 0, status: 'unpinned' });
-      continue;
-    }
-    const offPinRuns = observed.filter((o) => o.model !== declaredModel).reduce((s, o) => s + o.count, 0);
-    rows.push({ agent, declaredModel, observed, totalRuns, offPinRuns, status: offPinRuns > 0 ? 'attention' : 'ok' });
-  }
-  return rows.sort((a, b) => a.agent.localeCompare(b.agent));
-}
-
-export function formatObservedBreakdown(observed: Array<{ model: string | null; count: number }>): string {
-  return observed.map((o) => `${o.model ?? '(unknown)'}: ${o.count}`).join(' · ');
-}
 
 /** The four states this section can be in — one more than the generic
  *  `SectionStatus` because, unlike every other section, this one depends on
@@ -188,39 +117,30 @@ export interface ContaminationSectionView {
 
 /**
  * A `configReport` load failure renders as `'error'` (styled the same as
- * `'attention'` — see `ContaminationSection`), not silently as `'ok'`:
- * mirrors `assessDrift`'s established precedent in stats-ribbon.tsx
- * ("unverifiable silence is exactly what let the 2026-08-01 incident run for
- * four hours") — if declared pins cannot be fetched, contamination cannot be
- * ruled out, and that must not read as "no contamination found".
+ * `'attention'` — see `ContaminationSection`'s own "Cannot verify: " tag,
+ * fix round 2), not silently as `'ok'`: mirrors `assessDrift`'s established
+ * precedent in stats-ribbon.tsx ("unverifiable silence is exactly what let
+ * the 2026-08-01 incident run for four hours") — if declared pins cannot be
+ * fetched, contamination cannot be ruled out, and that must not read as "no
+ * contamination found".
  */
 export function buildContaminationSectionView(
   entries: SubAgentModelAttributionEntry[],
   undercountNote: string,
   configState: FetchState<ConfigReport>,
 ): ContaminationSectionView {
-  switch (configState.status) {
+  const availability = buildContaminationAvailability(entries, configState);
+  switch (availability.status) {
     case 'loading':
       return { status: 'loading', message: 'Loading declared model pins…', summary: null, rows: null, undercountNote: null };
     case 'error':
       return {
         status: 'error',
-        message: `Cannot verify — declared configuration failed to load: ${configState.message}`,
-        summary: null, rows: null, undercountNote: null,
-      };
-    case 'empty':
-      // /api/config is unwindowed and never reports 'empty' (loadConfigReport
-      // only ever sets loading/error/ready) — kept for exhaustiveness against
-      // the shared FetchState<T> union, same rationale as buildDriftCard's
-      // 'empty' branch in stats-ribbon.tsx.
-      return {
-        status: 'error',
-        message: 'Cannot verify — declared configuration unexpectedly reported empty.',
+        message: `Cannot verify — declared configuration failed to load: ${availability.message}`,
         summary: null, rows: null, undercountNote: null,
       };
     case 'ready': {
-      const declaredPins = collectDeclaredPins(configState.data);
-      const rows = buildAgentModelRows(entries, declaredPins);
+      const rows = availability.rows;
       const pinnedRows = rows.filter((r) => r.status !== 'unpinned');
       const contaminated = pinnedRows.filter((r) => r.status === 'attention');
       const totalOffPinRuns = contaminated.reduce((s, r) => s + r.offPinRuns, 0);
@@ -247,7 +167,13 @@ export interface DispatchSectionView {
 
 /** Always `'neutral'` by construction — see the module doc comment. The
  *  mismatch rate is reported in full (never hidden or rounded away) but
- *  never drives colour. */
+ *  never drives colour. `caveat` passes `dispatch.note` through verbatim
+ *  (fix round 2) rather than re-describing the same caveat client-side —
+ *  the server field existed but was silently unused, risking two
+ *  hand-written descriptions of one fact drifting apart, exactly the
+ *  single-source-of-truth problem the `assessFlaggedModelKeys`/
+ *  `assessErrorRate` reuse exists to prevent elsewhere in this file. Mirrors
+ *  `buildEffortDriftSectionView`'s `note: inferredEffort.note` pass-through. */
 export function buildDispatchSectionView(dispatch: IntegrityStats['dispatch']): DispatchSectionView {
   return {
     status: 'neutral',
@@ -255,11 +181,7 @@ export function buildDispatchSectionView(dispatch: IntegrityStats['dispatch']): 
     p90Text: dispatch.p90Dispatch == null ? 'n/a' : `${dispatch.p90Dispatch}`,
     avgRosterText: dispatch.avgRosterCount == null ? 'n/a' : dispatch.avgRosterCount.toFixed(1),
     mismatchText: `${dispatch.mismatchCount}/${dispatch.dispatchSampleSize} (${formatPct(dispatch.mismatchRate)})`,
-    caveat:
-      "Known instrument caveat, not a new problem: sub_agents undercounts tool_calls->'Agent' " +
-      'nondeterministically (see dispatchCountsForPercentile in stats.ts). A high mismatch rate is ' +
-      'the ordinary case here, not a sign anything broke — use the dispatch median/p90 above, never ' +
-      'roster size, as "how many agents ran".',
+    caveat: dispatch.note,
   };
 }
 
@@ -482,7 +404,7 @@ function ContaminationTable({ rows }: { rows: AgentModelRow[] }) {
             <td>
               {r.declaredModel == null
                 ? <span class="integrity-section__empty">unpinned</span>
-                : <span class="integrity-table__model">declared: {r.declaredModel}</span>}
+                : <>declared: <span class="integrity-table__model">{r.declaredModel}</span></>}
             </td>
             <td>{formatObservedBreakdown(r.observed)}</td>
             <td>
@@ -503,7 +425,15 @@ function ContaminationSection({ view }: { view: ContaminationSectionView }) {
     return (
       <IntegritySection title="Model contamination (declared pin vs observed)" status={view.status === 'error' ? 'attention' : 'neutral'}>
         <p class="integrity-section__summary">
-          {view.status === 'error' && <strong class="integrity-section__tag integrity-section__tag--attention">Needs attention: </strong>}
+          {/* Fix round 2, Finding 1: this branch is NOT a confirmed deviation —
+              it means the declared-pin side could not be fetched at all, so
+              contamination cannot be ruled out. Every other state in this file
+              gets its own distinct tag ("Known instrument caveat:", "Inferred,
+              not measured:"); reusing "Needs attention: " here would read at a
+              skim as a found problem. Keeps the accent (unverifiable is not
+              probably-fine — see buildContaminationSectionView's doc comment)
+              but names the reason with its own words. */}
+          {view.status === 'error' && <strong class="integrity-section__tag integrity-section__tag--attention">Cannot verify: </strong>}
           {view.message}
         </p>
       </IntegritySection>
