@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 // One-off history correction. No flag existed before 2026-08-01, so the boundary is
 // inferred: a run that was never posted (comment_id = 0) or replayed a completed PR whose
-// source branch ADO had already deleted (source_branch = ''). Approved 2026-08-01 at 98 rows.
-// Deliberately NOT a migration — this is a judgement about one database's past.
+// source branch ADO had already deleted (source_branch = ''). Approved 2026-08-01 — see
+// the design doc in the private overlay for the row count and the reasoning behind the
+// boundary. Deliberately NOT a migration — this is a judgement about one database's past.
 import postgres from 'postgres';
 
 export const BACKFILL_PREDICATE = "comment_id = 0 OR source_branch = ''";
