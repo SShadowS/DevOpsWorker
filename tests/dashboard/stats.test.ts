@@ -1,0 +1,473 @@
+import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import {
+  parseWindow,
+  getWindowDays,
+  buildWindowMeta,
+  MIN_RELIABLE_SAMPLE,
+  readBandCount,
+  severityDistribution,
+  verdictDistribution,
+  computeCostPerReadBandItem,
+  findingsCountMismatch,
+  sumApportionedSubAgentCost,
+  aggregateModelUsage,
+  dispatchCount,
+  rosterCount,
+  aggregateToolMix,
+  classifyEffort,
+  orchestratorOutputTokens,
+  summarizeEffortMix,
+  computeEffortDrift,
+  classifyImageSha,
+} from '../../src/dashboard/stats.ts';
+import type { PRFinding } from '../../src/agents/pr-reviewer/schema.ts';
+
+// No test in this file may open a database connection — DATABASE_URL points at
+// the live production database. Only pure shaping functions and source-text
+// SQL-shape assertions are tested here.
+
+// ---------------------------------------------------------------------------
+// Window handling
+// ---------------------------------------------------------------------------
+
+describe('parseWindow', () => {
+  test('accepts 7d', () => expect(parseWindow('7d')).toBe('7d'));
+  test('accepts 90d', () => expect(parseWindow('90d')).toBe('90d'));
+  test('accepts 30d explicitly', () => expect(parseWindow('30d')).toBe('30d'));
+  test('null clamps to 30d (default)', () => expect(parseWindow(null)).toBe('30d'));
+  test('undefined clamps to 30d (default)', () => expect(parseWindow(undefined)).toBe('30d'));
+  test('empty string clamps to 30d', () => expect(parseWindow('')).toBe('30d'));
+  test('garbage clamps to 30d, never passed through', () => expect(parseWindow('1;DROP TABLE pr_reviews')).toBe('30d'));
+  test('a near-miss like "7days" clamps to 30d', () => expect(parseWindow('7days')).toBe('30d'));
+});
+
+describe('getWindowDays', () => {
+  test('maps each window to its day count', () => {
+    expect(getWindowDays('7d')).toBe(7);
+    expect(getWindowDays('30d')).toBe(30);
+    expect(getWindowDays('90d')).toBe(90);
+  });
+});
+
+describe('buildWindowMeta', () => {
+  const now = new Date('2026-08-01T00:00:00.000Z');
+
+  test('computes since as now - windowDays', () => {
+    const meta = buildWindowMeta('7d', 50, now);
+    expect(meta.since).toBe('2026-07-25T00:00:00.000Z');
+    expect(meta.windowDays).toBe(7);
+    expect(meta.window).toBe('7d');
+  });
+
+  test('flags lowSample below MIN_RELIABLE_SAMPLE', () => {
+    expect(buildWindowMeta('7d', MIN_RELIABLE_SAMPLE - 1, now).lowSample).toBe(true);
+  });
+
+  test('does not flag lowSample at or above MIN_RELIABLE_SAMPLE', () => {
+    expect(buildWindowMeta('7d', MIN_RELIABLE_SAMPLE, now).lowSample).toBe(false);
+  });
+
+  test('carries the exact sampleSize through', () => {
+    expect(buildWindowMeta('30d', 337, now).sampleSize).toBe(337);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Findings / severity
+// ---------------------------------------------------------------------------
+
+function finding(severity: PRFinding['severity']): PRFinding {
+  return { severity, title: 't', body: 'b' };
+}
+
+describe('readBandCount', () => {
+  test('counts critical and major, excludes minor and nitpick', () => {
+    const list = [finding('critical'), finding('major'), finding('minor'), finding('nitpick'), finding('major')];
+    expect(readBandCount(list)).toBe(3);
+  });
+
+  test('null findings_list reads as 0 — not attempted, distinct from an empty array at the caller level', () => {
+    expect(readBandCount(null)).toBe(0);
+  });
+
+  test('empty array is 0', () => {
+    expect(readBandCount([])).toBe(0);
+  });
+});
+
+describe('severityDistribution', () => {
+  test('tallies every severity across all rows, including rows with none', () => {
+    const rows: Array<PRFinding[] | null> = [
+      [finding('critical'), finding('minor')],
+      null,
+      [finding('major'), finding('major'), finding('nitpick')],
+    ];
+    expect(severityDistribution(rows)).toEqual({ critical: 1, major: 2, minor: 1, nitpick: 1 });
+  });
+
+  test('all rows null yields all-zero distribution, not an empty object', () => {
+    expect(severityDistribution([null, null])).toEqual({ critical: 0, major: 0, minor: 0, nitpick: 0 });
+  });
+});
+
+describe('verdictDistribution', () => {
+  test('groups by recommendation', () => {
+    expect(verdictDistribution(['approve', 'approve', 'request changes'])).toEqual({
+      approve: 2,
+      'request changes': 1,
+    });
+  });
+
+  test('null recommendation groups under the literal (none) key', () => {
+    expect(verdictDistribution(['approve', null, null])).toEqual({ approve: 1, '(none)': 2 });
+  });
+});
+
+describe('computeCostPerReadBandItem — mirrors the review-cost-review skill query', () => {
+  test('divides AVERAGE cost by AVERAGE read-band count, not a per-row ratio', () => {
+    // Row A: cost 1, 0 read-band items. Row B: cost 3, 2 read-band items.
+    // avg cost = 2, avg read-band = 1 -> value = 2, NOT avg(1/0, 3/2) which would blow up on row A.
+    const result = computeCostPerReadBandItem([
+      { costUsd: 1, findingsList: [] },
+      { costUsd: 3, findingsList: [finding('critical'), finding('major')] },
+    ]);
+    expect(result.avgCostUsd).toBe(2);
+    expect(result.avgReadBandItems).toBe(1);
+    expect(result.value).toBe(2);
+    expect(result.sampleSize).toBe(2);
+  });
+
+  test('excludes rows missing cost_usd or findings_list from the eligible set', () => {
+    const result = computeCostPerReadBandItem([
+      { costUsd: null, findingsList: [finding('critical')] },
+      { costUsd: 5, findingsList: null },
+      { costUsd: 2, findingsList: [finding('critical')] },
+    ]);
+    expect(result.sampleSize).toBe(1);
+    expect(result.avgCostUsd).toBe(2);
+  });
+
+  test('no eligible rows returns nulls, not NaN or a divide-by-zero', () => {
+    const result = computeCostPerReadBandItem([{ costUsd: null, findingsList: null }]);
+    expect(result).toEqual({ avgCostUsd: null, avgReadBandItems: null, value: null, sampleSize: 0 });
+  });
+
+  test('zero read-band items across every eligible row returns a null value, not Infinity', () => {
+    const result = computeCostPerReadBandItem([
+      { costUsd: 1, findingsList: [] },
+      { costUsd: 2, findingsList: [finding('minor')] },
+    ]);
+    expect(result.value).toBeNull();
+    expect(result.avgReadBandItems).toBe(0);
+  });
+});
+
+describe('findingsCountMismatch', () => {
+  test('true when findings_count disagrees with the array length', () => {
+    expect(findingsCountMismatch(3, [finding('critical')])).toBe(true);
+  });
+
+  test('false when they agree', () => {
+    expect(findingsCountMismatch(1, [finding('critical')])).toBe(false);
+  });
+
+  test('false (not comparable) when findings_count is null', () => {
+    expect(findingsCountMismatch(null, [finding('critical')])).toBe(false);
+  });
+
+  test('false (not comparable) when findings_list is null', () => {
+    expect(findingsCountMismatch(2, null)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cost / sub-agent apportionment
+// ---------------------------------------------------------------------------
+
+describe('sumApportionedSubAgentCost', () => {
+  test('sums apportionedCostUsd across every named sub-agent', () => {
+    const subAgents = {
+      'al-performance-analyzer': { apportionedCostUsd: 0.3 },
+      'security-reviewer': { apportionedCostUsd: 0.5 },
+    };
+    expect(sumApportionedSubAgentCost(subAgents)).toBeCloseTo(0.8);
+  });
+
+  test('null sub_agents sums to 0 (no dispatches recorded)', () => {
+    expect(sumApportionedSubAgentCost(null)).toBe(0);
+  });
+
+  test('an entry missing apportionedCostUsd contributes 0, not NaN', () => {
+    expect(sumApportionedSubAgentCost({ x: {} })).toBe(0);
+  });
+});
+
+describe('aggregateModelUsage', () => {
+  test('aggregates cost and output tokens per model across rows', () => {
+    const rows: Array<Record<string, { costUsd: number; output: number }>> = [
+      { 'claude-opus-5': { costUsd: 1, output: 100 }, 'claude-sonnet-5': { costUsd: 0.5, output: 50 } },
+      { 'claude-opus-5': { costUsd: 2, output: 200 } },
+    ];
+    const result = aggregateModelUsage(rows);
+    const opus = result.find((m) => m.model === 'claude-opus-5')!;
+    expect(opus.totalCostUsd).toBe(3);
+    expect(opus.totalOutputTokens).toBe(300);
+    expect(opus.rows).toBe(2);
+    const sonnet = result.find((m) => m.model === 'claude-sonnet-5')!;
+    expect(sonnet.rows).toBe(1);
+  });
+
+  test('sorts by total cost descending', () => {
+    const rows = [{ cheap: { costUsd: 0.1 }, expensive: { costUsd: 9 } }];
+    const result = aggregateModelUsage(rows);
+    expect(result.map((m) => m.model)).toEqual(['expensive', 'cheap']);
+  });
+
+  test('flags [1m] premium long-context variants', () => {
+    const rows = [{ 'claude-opus-5[1m]': { costUsd: 1 }, 'claude-opus-5': { costUsd: 1 } }];
+    const result = aggregateModelUsage(rows);
+    expect(result.find((m) => m.model === 'claude-opus-5[1m]')!.flagged).toBe(true);
+    expect(result.find((m) => m.model === 'claude-opus-5')!.flagged).toBe(false);
+  });
+
+  test('null rows are skipped, not thrown on', () => {
+    expect(aggregateModelUsage([null, null])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dispatch / roster mismatch
+// ---------------------------------------------------------------------------
+
+describe('dispatchCount', () => {
+  test("reads tool_calls->'Agent'", () => {
+    expect(dispatchCount({ Agent: 7, Bash: 3 })).toBe(7);
+  });
+
+  test('missing Agent key reads as 0', () => {
+    expect(dispatchCount({ Bash: 3 })).toBe(0);
+  });
+
+  test('null tool_calls reads as 0', () => {
+    expect(dispatchCount(null)).toBe(0);
+  });
+});
+
+describe('rosterCount', () => {
+  test('counts named sub-agent keys', () => {
+    expect(rosterCount({ a: {}, b: {} })).toBe(2);
+  });
+
+  test('null sub_agents reads as 0', () => {
+    expect(rosterCount(null)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool mix
+// ---------------------------------------------------------------------------
+
+describe('aggregateToolMix', () => {
+  test('averages per review over the TOTAL row count, not just rows carrying the key', () => {
+    // LSP appears in only 1 of 4 reviews with a nonzero count.
+    const rows: Array<Record<string, number>> = [{ LSP: 4 }, { Bash: 2 }, { Bash: 1 }, { Bash: 1 }];
+    const result = aggregateToolMix(rows);
+    const lsp = result.find((t) => t.tool === 'LSP')!;
+    expect(lsp.totalCalls).toBe(4);
+    expect(lsp.reviewsUsing).toBe(1);
+    expect(lsp.avgPerReview).toBe(1); // 4 / 4 rows, not 4 / 1
+  });
+
+  test('sorts by total calls descending', () => {
+    const rows = [{ Bash: 10, Read: 1 }];
+    expect(aggregateToolMix(rows).map((t) => t.tool)).toEqual(['Bash', 'Read']);
+  });
+
+  test('null tool_calls rows count toward the denominator but contribute nothing', () => {
+    const rows = [{ Bash: 4 }, null, null];
+    const result = aggregateToolMix(rows);
+    expect(result.find((t) => t.tool === 'Bash')!.avgPerReview).toBeCloseTo(4 / 3);
+  });
+
+  test('empty input returns an empty mix', () => {
+    expect(aggregateToolMix([])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inferred effort
+// ---------------------------------------------------------------------------
+
+describe('classifyEffort', () => {
+  test('classifies within the high band', () => {
+    expect(classifyEffort(50_000)).toBe('high');
+    expect(classifyEffort(43_000)).toBe('high');
+    expect(classifyEffort(56_000)).toBe('high');
+  });
+
+  test('classifies within the low band', () => {
+    expect(classifyEffort(24_000)).toBe('low');
+    expect(classifyEffort(21_000)).toBe('low');
+    expect(classifyEffort(27_000)).toBe('low');
+  });
+
+  test('classifies outside both bands as other, never forced to the nearer one', () => {
+    expect(classifyEffort(35_000)).toBe('other');
+    expect(classifyEffort(1_000)).toBe('other');
+    expect(classifyEffort(100_000)).toBe('other');
+  });
+
+  test('null is unknown, distinct from other', () => {
+    expect(classifyEffort(null)).toBe('unknown');
+  });
+});
+
+describe('orchestratorOutputTokens', () => {
+  test('subtracts measured sub-agent output from the model_usage total', () => {
+    const modelUsage = { 'claude-opus-5': { output: 44_489 }, 'claude-sonnet-5': { output: 56_742 } };
+    const subAgents = { a: { tokens: { output: 11 } } };
+    // total output 44489 + 56742 = 101231; minus sub-agent 11 = 101220
+    expect(orchestratorOutputTokens(modelUsage, subAgents)).toBe(101_220);
+  });
+
+  test('null model_usage returns null (nothing recorded)', () => {
+    expect(orchestratorOutputTokens(null, null)).toBeNull();
+  });
+
+  test('null sub_agents subtracts nothing', () => {
+    expect(orchestratorOutputTokens({ a: { output: 100 } }, null)).toBe(100);
+  });
+
+  test('clamps at 0 rather than going negative', () => {
+    // Pathological: sub-agent tokens exceed the model_usage total (undercount cutting the other way).
+    expect(orchestratorOutputTokens({ a: { output: 10 } }, { b: { tokens: { output: 50 } } })).toBe(0);
+  });
+});
+
+describe('summarizeEffortMix', () => {
+  test('tallies each band', () => {
+    expect(summarizeEffortMix(['high', 'high', 'low', 'other', 'unknown'])).toEqual({
+      high: 2,
+      low: 1,
+      other: 1,
+      unknown: 1,
+    });
+  });
+
+  test('empty input is an all-zero mix', () => {
+    expect(summarizeEffortMix([])).toEqual({ high: 0, low: 0, other: 0, unknown: 0 });
+  });
+});
+
+describe('computeEffortDrift', () => {
+  test('splits at the time-sorted midpoint and mixes each half independently', () => {
+    const entries = [
+      { createdAt: '2026-07-01T00:00:00Z', outputTokens: 50_000 }, // high
+      { createdAt: '2026-07-02T00:00:00Z', outputTokens: 50_000 }, // high
+      { createdAt: '2026-07-03T00:00:00Z', outputTokens: 24_000 }, // low
+      { createdAt: '2026-07-04T00:00:00Z', outputTokens: 24_000 }, // low
+    ];
+    const drift = computeEffortDrift(entries);
+    expect(drift.overall).toEqual({ high: 2, low: 2, other: 0, unknown: 0 });
+    expect(drift.earlierHalf).toEqual({ high: 2, low: 0, other: 0, unknown: 0 });
+    expect(drift.laterHalf).toEqual({ high: 0, low: 2, other: 0, unknown: 0 });
+  });
+
+  test('sorts out-of-order input by createdAt before splitting', () => {
+    const entries = [
+      { createdAt: '2026-07-04T00:00:00Z', outputTokens: 24_000 },
+      { createdAt: '2026-07-01T00:00:00Z', outputTokens: 50_000 },
+    ];
+    const drift = computeEffortDrift(entries);
+    expect(drift.earlierHalf).toEqual({ high: 1, low: 0, other: 0, unknown: 0 });
+    expect(drift.laterHalf).toEqual({ high: 0, low: 1, other: 0, unknown: 0 });
+  });
+
+  test('empty input returns all-zero mixes throughout', () => {
+    const drift = computeEffortDrift([]);
+    expect(drift.overall).toEqual({ high: 0, low: 0, other: 0, unknown: 0 });
+    expect(drift.earlierHalf).toEqual({ high: 0, low: 0, other: 0, unknown: 0 });
+    expect(drift.laterHalf).toEqual({ high: 0, low: 0, other: 0, unknown: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Build provenance (image_sha)
+// ---------------------------------------------------------------------------
+
+describe('classifyImageSha', () => {
+  test('a real sha classifies as sha', () => expect(classifyImageSha('8129ee0')).toBe('sha'));
+  test('the literal string "unknown" classifies distinctly', () => expect(classifyImageSha('unknown')).toBe('unknown'));
+  test('an empty string classifies distinctly', () => expect(classifyImageSha('')).toBe('empty'));
+  test('null classifies as not-recorded — every row today', () => expect(classifyImageSha(null)).toBe('not-recorded'));
+});
+
+// ---------------------------------------------------------------------------
+// SQL shape — source-text assertions (no DB connection; mirrors
+// tests/db/pg-pr-review-store-mapper.test.ts's approach for the same reason:
+// DATABASE_URL is the live production database, so nothing here may execute
+// a query, but a hand-maintained SQL string can still drift silently).
+// ---------------------------------------------------------------------------
+
+describe('stats.ts SQL shape', () => {
+  const src = readFileSync(fileURLToPath(new URL('../../src/dashboard/stats.ts', import.meta.url)), 'utf-8');
+
+  test('never calls sql.unsafe — every query is a parameterised tagged template', () => {
+    expect(src).not.toContain('.unsafe(');
+  });
+
+  test('every window cutoff is parameterised through ${days}::int, never through the raw window string', () => {
+    const cutoffs = src.match(/now\(\) - \([^)]*\)/g) ?? [];
+    expect(cutoffs.length).toBeGreaterThan(0);
+    for (const cutoff of cutoffs) {
+      expect(cutoff).toContain('${days}::int');
+    }
+  });
+
+  test('the raw ?window= string is never interpolated into a SQL template — only the numeric ${days} is', () => {
+    // Every `sql`...`` tagged template in the file (SQL text itself never contains a
+    // backtick, so a non-greedy match between backticks — including an optional leading
+    // generic clause — reliably isolates each template body). `window` (the StatsWindow
+    // string) is only ever passed to getWindowDays() to become the numeric `days` used
+    // above; this pins that no call site skips that conversion.
+    const sqlTemplates = src.match(/\bsql(?:<[^`]*>)?`[^`]*`/g) ?? [];
+    expect(sqlTemplates.length).toBeGreaterThan(0);
+    for (const template of sqlTemplates) {
+      expect(template).not.toContain('${window}');
+    }
+  });
+
+  test('uses percentile_cont for every median/p90 statistic (cost, duration, turns, dispatch)', () => {
+    const occurrences = (src.match(/percentile_cont/g) ?? []).length;
+    // cost (median+p90) + cost-per-repo (median) + duration (median+p90) +
+    // turns (median+p90) + duration/turns per-repo (2) + dispatch (median+p90) = 10
+    expect(occurrences).toBeGreaterThanOrEqual(10);
+  });
+
+  test('getCostStats groups per-repo cost by repo_key', () => {
+    const fn = src.match(/export async function getCostStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toContain('GROUP BY repo_key');
+  });
+
+  test('getIntegrityStats reads dispatch count from tool_calls, never from sub_agents alone', () => {
+    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toContain(`tool_calls->>'Agent'`);
+  });
+
+  test('getDriftStats excludes non-sha sentinel values when finding the most recent real sha', () => {
+    const fn = src.match(/export async function getDriftStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toContain("image_sha <> ''");
+    expect(fn![0]).toContain("image_sha <> 'unknown'");
+  });
+
+  test('getDriftStats never shells out to git or reads a filesystem HEAD', () => {
+    const fn = src.match(/export async function getDriftStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).not.toMatch(/git |rev-parse|readFileSync|Bun\.spawn/);
+  });
+});
