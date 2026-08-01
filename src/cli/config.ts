@@ -77,7 +77,17 @@ export function loadConfig(sessionPath: string): PipelineConfig {
     },
 
     models: {
-      default: 'claude-opus-5',
+      // Honours DEFAULT_MODEL, matching `buildConfigFromRepo` below. This was a bare
+      // literal, which made DEFAULT_MODEL inert on every path that goes through
+      // `loadConfig` — notably `review-pr.ts`, the PR reviewer. The variable is in the
+      // container env allowlist and arrives correctly, so it looked wired: setting it
+      // changed nothing and reported nothing. Measured on a spawned container —
+      // `process.env.DEFAULT_MODEL` was "claude-opus-4-8" while `models.default`
+      // resolved to "claude-opus-5".
+      //
+      // `||` not `??`: the container env forwards unset vars as '', and an empty string
+      // is not nullish — `??` would hand an empty model id to the SDK.
+      default: process.env['DEFAULT_MODEL'] || 'claude-opus-5',
       perAgent: {
         // planner inherits the Opus 5 default — strong planning, cheap (Sonnet) coding.
         'coder': 'claude-sonnet-5',

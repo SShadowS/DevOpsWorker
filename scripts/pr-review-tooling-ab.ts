@@ -130,6 +130,30 @@ export const ARMS: Arm[] = [
 ];
 
 /**
+ * Model-axis probes, deliberately kept OUT of `ARMS`.
+ *
+ * `selectArms` returns the whole table when no `--arms` filter is given, so an entry
+ * added to `ARMS` silently becomes an extra cell in every full matrix run — a 9th
+ * arm nobody asked for, at ~$12 per PR. These are opt-in only: reachable by name via
+ * `--arms`, never by default.
+ *
+ * The ORCHESTRATOR model is not set here — it comes from `DEFAULT_MODEL`
+ * (`src/cli/config.ts` defaults it to `claude-opus-5`), forwarded through the
+ * container env. `arm.model` sets the SUB-AGENT pin, and `expectedModelFor` reads
+ * that same field, so compliance expects exactly what the arm asked for instead of
+ * voiding the run.
+ *
+ * `inverted` asks where the intelligence actually has to sit: a cheap orchestrator
+ * coordinating expensive sub-agents. Pair it with `DEFAULT_MODEL=claude-sonnet-5`.
+ */
+export const PROBE_ARMS: Arm[] = [
+  { name: 'inverted', agentSet: null, routing: false, scoped: false, bcSecurity: false, model: 'claude-opus-4-8' },
+];
+
+/** Every arm reachable by name. Default selection stays `ARMS` — see `selectArms`. */
+export const ALL_ARMS: Arm[] = [...ARMS, ...PROBE_ARMS];
+
+/**
  * Select arms by name for `--arms` (C6: arms are named `Arm.name`, not the
  * old 2x2's `Arm.label`). An empty/omitted filter selects every arm. Matching
  * is exact and case-sensitive against `arm.name` — `--arms lean` must resolve
@@ -137,8 +161,12 @@ export const ARMS: Arm[] = [
  */
 export function selectArms(filterCsv: string, arms: Arm[] = ARMS): Arm[] {
   const only = filterCsv.split(',').map((a) => a.trim()).filter(Boolean);
+  // No filter => the 8-cell matrix ONLY. Probe arms are opt-in by name, so adding
+  // one can never quietly enlarge a full matrix run.
   if (only.length === 0) return arms;
-  return arms.filter((a) => only.includes(a.name));
+  // Named selection searches the probes too, so `--arms inverted` resolves.
+  const pool = arms === ARMS ? ALL_ARMS : arms;
+  return pool.filter((a) => only.includes(a.name));
 }
 
 // ---------------------------------------------------------------------------
