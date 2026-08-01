@@ -130,10 +130,9 @@ export function StatsView() {
 
   return (
     <div class="stats-view">
-      <div class="stats-view__toolbar">
-        <WindowSelector />
-      </div>
-
+      {/* Ribbon is "directly under the tabs, above everything else" per Task
+          5's brief — it's the reason this page exists; the window selector
+          (chrome, not a panel) comes after it, not before. */}
       <StatsSlot
         id="stats-slot-ribbon"
         title="Status ribbon"
@@ -150,6 +149,10 @@ export function StatsView() {
             `${d.evalLevers.filter((l) => l.state === 'active').length}/${d.evalLevers.length} eval levers active`),
         ]}
       />
+
+      <div class="stats-view__toolbar">
+        <WindowSelector />
+      </div>
 
       <StatsSlot
         id="stats-slot-integrity"

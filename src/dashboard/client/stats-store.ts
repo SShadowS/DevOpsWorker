@@ -21,9 +21,32 @@ export type FetchState<T> =
   | { status: 'ready'; data: T };
 
 /** Classify a windowed stats response by its own reported sample size. Pure —
- *  no network, no signals — so it's unit-testable with plain fixture data. */
+ *  no network, no signals — so it's unit-testable with plain fixture data.
+ *
+ *  Applies to cost/quality/integrity/operational, whose content genuinely
+ *  IS derived from the window's rows — a real zero means nothing to show.
+ *  It deliberately does NOT apply to drift; see `classifyDriftResponse`. */
 export function classifyWindowedResponse<T extends { sampleSize: number }>(data: T): FetchState<T> {
   return data.sampleSize === 0 ? { status: 'empty' } : { status: 'ready', data };
+}
+
+/**
+ * Drift is never "empty" the way the other windowed endpoints are.
+ * `sampleSize` on `/api/drift` counts PR-review rows in the window, but
+ * `head` comes from a hardcoded not-observable-in-container marker,
+ * `composeService` reads an env var, and `spawnedImage.mostRecentSha` is an
+ * UNWINDOWED whole-table search (`stats.ts` `getDriftStats`) — none of that
+ * depends on the window holding any rows. Even `spawnedImage.distribution`
+ * being empty at n=0 is itself informative, not blank.
+ *
+ * Running drift through `classifyWindowedResponse` would collapse a
+ * zero-review window to a generic "No data recorded in this window" and
+ * hide the build-provenance comparison exactly when review data is thin —
+ * backwards, since drift is the reason the status ribbon exists and is most
+ * worth reading when nothing else is populated. So: always ready on a
+ * successful fetch, never empty. Pure — unit-tested with fixture data. */
+export function classifyDriftResponse(data: DriftStats): FetchState<DriftStats> {
+  return { status: 'ready', data };
 }
 
 /** The one shared window every stats panel reads — set here, consumed everywhere. */
@@ -74,7 +97,7 @@ export async function loadStatsForWindow(window: StatsWindow): Promise<void> {
   qualityStats.value = quality.ok ? classifyWindowedResponse(quality.data) : { status: 'error', message: quality.message };
   integrityStats.value = integrity.ok ? classifyWindowedResponse(integrity.data) : { status: 'error', message: integrity.message };
   operationalStats.value = operational.ok ? classifyWindowedResponse(operational.data) : { status: 'error', message: operational.message };
-  driftStats.value = drift.ok ? classifyWindowedResponse(drift.data) : { status: 'error', message: drift.message };
+  driftStats.value = drift.ok ? classifyDriftResponse(drift.data) : { status: 'error', message: drift.message };
 }
 
 let configRequestToken = 0;
