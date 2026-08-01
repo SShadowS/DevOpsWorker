@@ -1,24 +1,32 @@
 import { useEffect } from 'preact/hooks';
 import {
-  statsWindow, operationalStats,
+  statsWindow,
   setStatsWindow, loadAllStats, STATS_WINDOWS,
 } from '../stats-store.ts';
-import type { FetchState, StatsWindow } from '../stats-store.ts';
+import type { FetchState } from '../stats-store.ts';
 import { StatsRibbon } from './stats-ribbon.tsx';
 import { StatsIntegrityPanel } from './stats-integrity.tsx';
 import { ConfigPanel } from './stats-config.tsx';
 import { CostQualityPanel } from './stats-costquality.tsx';
+import { OperationalPanel } from './stats-operational.tsx';
 
 // ---------------------------------------------------------------------------
 // Shell for the Stats & Config tab (Task 4). Owns: the third tab's panel
 // container, the shared window selector, and data fetching for all six
-// endpoints with loading/empty/error states. The remaining placeholder slot
-// below (Operational/Task 9) still gets its body from a later task;
-// Integrity (Task 6), Config (Task 7), and Cost & Quality (Task 8) have each
-// been replaced by their own component (`stats-integrity.tsx`,
-// `stats-config.tsx`, `stats-costquality.tsx`), matching the ribbon's
-// precedent of extracting a finished slot out of the generic `<StatsSlot>`
-// placeholder.
+// endpoints with loading/empty/error states. All five panels — Ribbon (Task
+// 5), Integrity (Task 6), Config (Task 7), Cost & Quality (Task 8), and
+// Operational (Task 9) — have each been replaced by their own component
+// (`stats-ribbon.tsx`, `stats-integrity.tsx`, `stats-config.tsx`,
+// `stats-costquality.tsx`, `stats-operational.tsx`); the generic
+// `<StatsSlot>` placeholder this file used to render for every not-yet-built
+// panel is gone (its last user was the Operational slot). `describeFetchState`/
+// `worstStatus`/`SlotSourceInfo` below are kept: they're exported, unit-tested
+// as general-purpose `FetchState` classification helpers independent of any
+// one panel (see stats-view.test.ts), not `StatsSlot`-specific — but nothing
+// in this tab calls them anymore now that every panel builds its own view
+// model. Flagged in task-9-report.md as a candidate for Task 10 to prune
+// rather than pruned here, since removing tested, still-correct code is a
+// bigger call than this task's stated scope.
 // ---------------------------------------------------------------------------
 
 type SlotStatus = 'loading' | 'error' | 'empty' | 'ready';
@@ -78,52 +86,11 @@ function WindowSelector() {
   );
 }
 
-interface StatsSlotProps {
-  id: string;
-  title: string;
-  taskLabel: string;
-  /** Omit for unwindowed data (e.g. config) — the omission itself is the
-   *  correct signal, not a missing label. */
-  window?: StatsWindow;
-  sources: SlotSourceInfo[];
-}
-
-/** One placeholder section. Border colour + status text both come from the
- *  same `worstStatus()` call so colour is never the only signal. Once a
- *  panel task lands, its component replaces the `<ul>` + placeholder note
- *  below — the loading/empty/error branching above stays as-is. */
-function StatsSlot({ id, title, taskLabel, window, sources }: StatsSlotProps) {
-  const overall = worstStatus(sources);
-  return (
-    <section id={id} class={`stats-slot stats-slot--${overall}`} aria-label={title}>
-      <div class="stats-slot__header">
-        <h3 class="stats-slot__title">{title}</h3>
-        {window && <span class="stats-slot__window" title="Time window this section reads">{window}</span>}
-        <span class="stats-slot__task-tag">{taskLabel}</span>
-      </div>
-      <ul class="stats-slot__sources">
-        {sources.map((s) => (
-          <li key={s.label} class={`stats-slot__source stats-slot__source--${s.status}`}>
-            <span class="stats-slot__source-label">{s.label}</span>
-            <span class="stats-slot__source-message">{s.message}</span>
-          </li>
-        ))}
-      </ul>
-      {overall === 'ready' && (
-        <p class="stats-slot__placeholder-note">Data loaded — panel UI not yet built ({taskLabel}).</p>
-      )}
-    </section>
-  );
-}
-
 export function StatsView() {
   // Refetch every time the tab is opened rather than caching across mounts:
   // this is an operate-mode dashboard, and a stale number with no visible
   // "stale" marker is worse than a brief loading flash.
   useEffect(() => { loadAllStats(); }, []);
-
-  const currentWindow = statsWindow.value;
-  const operational = operationalStats.value;
 
   return (
     <div class="stats-view">
@@ -131,10 +98,10 @@ export function StatsView() {
           5's brief — it's the reason this page exists; the window selector
           (chrome, not a panel) comes after it, not before. Own component
           (stats-ribbon.tsx): each of its 4 indicators degrades through its
-          OWN fetch's loading/error/empty/ready cycle rather than the
-          combined-worst-of-N-sources pattern StatsSlot below uses, since the
-          drift comparison is worth reading even when /api/stats/integrity
-          comes back empty for this window. */}
+          OWN fetch's loading/error/empty/ready cycle rather than a
+          combined-worst-of-N-sources pattern, since the drift comparison is
+          worth reading even when /api/stats/integrity comes back empty for
+          this window. */}
       <StatsRibbon />
 
       <div class="stats-view__toolbar">
@@ -147,16 +114,7 @@ export function StatsView() {
 
       <CostQualityPanel />
 
-      <StatsSlot
-        id="stats-slot-operational"
-        title="Operational"
-        taskLabel="Task 9"
-        window={currentWindow}
-        sources={[
-          describeFetchState('Operational stats', operational, (d) =>
-            `n=${d.sampleSize} · ${d.reviewsPerDay.average?.toFixed(1) ?? 'n/a'} reviews/day`),
-        ]}
-      />
+      <OperationalPanel />
     </div>
   );
 }

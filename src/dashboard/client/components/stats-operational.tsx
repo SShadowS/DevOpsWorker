@@ -1,0 +1,493 @@
+import { operationalStats, statsWindow } from '../stats-store.ts';
+import type { FetchState } from '../stats-store.ts';
+import type { OperationalStats, ToolMixEntry } from '../../stats.ts';
+import { formatDurationDetailed } from '../format.ts';
+
+// ---------------------------------------------------------------------------
+// Operational panel (Task 9) — Section E, "how is the machine actually
+// running." Replaces the `stats-slot-operational` placeholder (Task 4),
+// keeping the same outer `stats-slot stats-slot--{status}` wrapper and header
+// markup so the loading/error/empty border-colour CSS carries over unchanged,
+// matching Tasks 6/7/8's precedent. `/api/stats/operational` is a SINGLE
+// fetch (unlike Task 8's cost+quality slot, which reads two) so this panel's
+// status is gated directly by `operationalStats`, the same shape as
+// `buildIntegrityPanelView`/`buildConfigPanelView` rather than Task 8's
+// `combinePanelStatus`.
+//
+// Five sections, all `status="neutral"` except Tool mix:
+//   - Reviews per day  — a real hand-rolled bar chart (chart geometry pulled
+//     into pure, tested functions: buildDailyReviewBars/buildReviewsChartView).
+//   - Duration & turns — p50/p90, each with its own sample size.
+//   - Tool mix         — the one scored section. A tool with ZERO calls this
+//     window is 'attention', not 'ok': design-constraints.md is explicit that
+//     `lsp: 0` is "a finding, not an empty row," and the underlying
+//     `aggregateToolMix` (stats.ts) already sorts by totalCalls DESCENDING —
+//     without an explicit callout, a zero-call tool sinks to the tail of a
+//     long table and reads as absent rather than as a recorded, real zero.
+//     The check is generic (any zero-call tool, not a hardcoded "lsp" name)
+//     so it keeps working if a different tool goes quiet later.
+//   - Repo breakdown   — a plain, unscored table (`perRepo` counts ALL rows,
+//     unlike /api/stats/cost's cost_usd-filtered population — see
+//     task-2-report.md's "Not touched" note — so no coverage caveat applies
+//     here the way it does on the Cost card).
+//   - Rate-limit events — GENUINELY MISSING from the API (see the module-level
+//     "Genuinely missing" note below the component). Rendered as an explicit
+//     "not available" statement, never a fabricated 0 — constraint #3 ("never
+//     render a non-value as a value").
+//
+// Genuinely missing, not silently worked around: the brief asks for
+// "rate-limit events." `OperationalStats` has no such field, and
+// `IntegrityStats.errorRate` (the one error signal that DOES exist) counts
+// ANY pipeline error (`error != null`), never broken out by
+// `PipelineError` subtype. `RateLimitError` (src/sdk/errors.ts) writes a
+// message of the shape `Rate limit hit during "<stage>": <resetInfo>` into
+// the same free-text `error` column every other pipeline error uses, so the
+// raw text COULD be pattern-matched — but no endpoint does that today, and
+// `stats.ts` is explicitly out of scope for this task ("If something is
+// genuinely missing, say so ... rather than adding it"). The Rate-limit
+// events section says exactly this instead of showing a 0 that would read as
+// "verified zero rate-limit events," which would be false.
+// ---------------------------------------------------------------------------
+
+export type OperationalSectionStatus = 'ok' | 'attention' | 'neutral';
+
+// ---------------------------------------------------------------------------
+// Reviews per day — chart geometry (pure, unit-tested, no rendering).
+//
+// The server's `reviewsPerDay.series` only contains days with at least one
+// review (`GROUP BY date_trunc('day', created_at)` in `getOperationalStats`,
+// stats.ts) — a day with zero reviews is simply ABSENT from the array, not
+// present with `count: 0`. Rendering that array as-is (e.g. one bar per
+// series entry, in order) would silently compress a 30-day window down to
+// however many days happened to have activity, misrepresenting adjacent bars
+// as consecutive days when they might be a week apart.
+//
+// `buildDailyReviewBars` re-expands the series to one entry per CALENDAR day
+// from the window's `since` date to today, zero-filling any day absent from
+// the series — the same zero-fill convention `aggregateToolMix` and
+// `dispatchCountsForPercentile` already use server-side for exactly the same
+// reason (a missing key is a real zero, not missing data). Confirmed against
+// live production data before building this: a 30-day query returned data
+// for 21 of 30 calendar days, with every gap falling on what reads as a
+// non-workday — a real, informative pattern this chart would otherwise hide.
+// ---------------------------------------------------------------------------
+
+export interface DailyReviewBar {
+  /** yyyy-mm-dd, matching the server's own `date` string format exactly. */
+  date: string;
+  count: number;
+  /** 0..100, scaled against the window's own peak day — a display concern
+   *  only. The exact count is always in the bar's `title`/aria text, never
+   *  only implied by height. */
+  heightPct: number;
+}
+
+const DAY_MS = 86_400_000;
+
+/** Both `since` (an ISO instant) and a `Date` are reduced to their UTC
+ *  calendar date before comparison — the server's `date` strings have no
+ *  time component, so comparing on anything narrower than a whole day risks
+ *  a spurious off-by-one from timezone or sub-day skew between the server's
+ *  request-time `now()` and this function's own `now` parameter. */
+function toUtcYMD(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** A date-ONLY string (`YYYY-MM-DD`, no time component) is specified to
+ *  parse as UTC midnight (ECMA-262's Date Time String Format) — slicing to
+ *  just the date part before parsing turns any ISO instant (with or without
+ *  a time-of-day) into that same, unambiguous UTC-midnight anchor. */
+function utcMidnight(dateInput: string): number {
+  return new Date(dateInput.slice(0, 10)).getTime();
+}
+
+/**
+ * Re-expands a sparse day/count series into one entry per calendar day
+ * covering the window, zero-filling gaps. `now` is injectable (defaults to
+ * the real clock) purely so tests are deterministic — see the module doc
+ * comment for why zero-fill is correct here, not a cosmetic choice.
+ *
+ * The FIRST bar can reflect a partial day: `since` is a rolling timestamp
+ * (now − windowDays), not a midnight boundary, so the calendar day it falls
+ * in may have fewer than 24 hours of eligible reviews. This is disclosed in
+ * prose next to the chart, not hidden — a real characteristic of any rolling
+ * window, not a defect in this function.
+ */
+export function buildDailyReviewBars(
+  series: OperationalStats['reviewsPerDay']['series'],
+  since: string,
+  now: Date = new Date(),
+): DailyReviewBar[] {
+  const counts = new Map(series.map((s) => [s.date, s.count]));
+  const start = utcMidnight(since);
+  const end = utcMidnight(toUtcYMD(now));
+  const days: Array<{ date: string; count: number }> = [];
+  for (let t = start; t <= end; t += DAY_MS) {
+    const date = toUtcYMD(new Date(t));
+    days.push({ date, count: counts.get(date) ?? 0 });
+  }
+  const maxCount = Math.max(1, ...days.map((d) => d.count));
+  return days.map((d) => ({ ...d, heightPct: (d.count / maxCount) * 100 }));
+}
+
+export interface ReviewsChartView {
+  bars: DailyReviewBar[];
+  totalDays: number;
+  zeroDays: number;
+  averageText: string;
+  firstDate: string | null;
+  lastDate: string | null;
+}
+
+export function buildReviewsChartView(
+  reviewsPerDay: OperationalStats['reviewsPerDay'],
+  windowDays: number,
+  since: string,
+  sampleSize: number,
+  now: Date = new Date(),
+): ReviewsChartView {
+  const bars = buildDailyReviewBars(reviewsPerDay.series, since, now);
+  const zeroDays = bars.filter((b) => b.count === 0).length;
+  const averageText = reviewsPerDay.average == null
+    ? 'n/a'
+    : `${reviewsPerDay.average.toFixed(1)} reviews/day average over the ${windowDays}-day window (n=${sampleSize})`;
+  return {
+    bars,
+    totalDays: bars.length,
+    zeroDays,
+    averageText,
+    firstDate: bars[0]?.date ?? null,
+    lastDate: bars.length > 0 ? bars[bars.length - 1]!.date : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Duration & turns — both are percentile pairs with their own sample size,
+// which can differ from the window's total row count (constraint: "every
+// statistic shows its window and its sample size ... do not assume one n
+// covers the card"). No separate low-sample threshold is computed for these
+// two specifically: unlike `sub_agents`/`findings_list` (recently-added
+// instrumentation columns with a real historical gap, per Tasks 2/6/8),
+// `duration_ms`/`turns` are populated on every completed review, so their
+// `sampleSize` is expected to equal the window's total `sampleSize` in
+// practice — disclosed as a plain number, not a computed coverage percentage
+// like the Cost/Quality cards use for their genuinely gappy columns.
+// ---------------------------------------------------------------------------
+
+function formatMsOrNA(ms: number | null): string {
+  return ms == null ? 'n/a' : formatDurationDetailed(ms);
+}
+
+export interface PercentilePairView {
+  medianText: string;
+  p90Text: string;
+  sampleSize: number;
+}
+
+export function buildDurationSectionView(duration: OperationalStats['duration']): PercentilePairView {
+  return { medianText: formatMsOrNA(duration.medianMs), p90Text: formatMsOrNA(duration.p90Ms), sampleSize: duration.sampleSize };
+}
+
+/** No unit conversion needed (turns is a plain count) — deliberately NOT
+ *  rounded, matching `DispatchSection`'s `medianText`/`p90Text` precedent in
+ *  stats-integrity.tsx (`percentile_cont` can return a fractional value even
+ *  over an integer column; that fraction is real, not a display artefact to
+ *  hide). */
+export function buildTurnsSectionView(turns: OperationalStats['turns']): PercentilePairView {
+  return {
+    medianText: turns.median == null ? 'n/a' : `${turns.median}`,
+    p90Text: turns.p90 == null ? 'n/a' : `${turns.p90}`,
+    sampleSize: turns.sampleSize,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool mix — the one scored section on this panel. See the module doc
+// comment for why a zero-call tool is 'attention', not merely un-highlighted.
+// ---------------------------------------------------------------------------
+
+export interface ToolMixRowView extends ToolMixEntry {
+  isZero: boolean;
+}
+
+export interface ToolMixSectionView {
+  status: 'ok' | 'attention';
+  summary: string;
+  rows: ToolMixRowView[];
+}
+
+export function buildToolMixSectionView(toolMix: ToolMixEntry[]): ToolMixSectionView {
+  const rows = toolMix.map((t) => ({ ...t, isZero: t.totalCalls === 0 }));
+  if (rows.length === 0) {
+    return { status: 'ok', summary: 'No tool_calls recorded in this window.', rows };
+  }
+  const zero = rows.filter((r) => r.isZero);
+  if (zero.length === 0) {
+    return { status: 'ok', summary: `${rows.length} tool(s) used in this window, none at zero calls.`, rows };
+  }
+  return {
+    status: 'attention',
+    summary:
+      `${zero.length} of ${rows.length} tool(s) had ZERO calls in this window: ${zero.map((z) => z.tool).join(', ')} ` +
+      '— an expected tool that never fired is a finding, not an empty row.',
+    rows,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Panel-level view — one FetchState in, one thing to render out. Mirrors
+// `buildQualityPanelView`/`buildConfigPanelView`'s shape exactly (single
+// gating fetch, four-branch exhaustive switch).
+// ---------------------------------------------------------------------------
+
+export type OperationalPanelStatus = 'loading' | 'error' | 'empty' | 'ready';
+
+export interface OperationalPanelView {
+  status: OperationalPanelStatus;
+  message: string | null;
+  data: OperationalStats | null;
+}
+
+export function buildOperationalPanelView(state: FetchState<OperationalStats>): OperationalPanelView {
+  switch (state.status) {
+    case 'loading':
+      return { status: 'loading', message: 'Loading…', data: null };
+    case 'error':
+      return { status: 'error', message: `Failed to load: ${state.message}`, data: null };
+    case 'empty':
+      return { status: 'empty', message: 'No data recorded in this window.', data: null };
+    case 'ready':
+      return { status: 'ready', message: null, data: state.data };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+function OperationalSection({ title, status, children }: {
+  title: string;
+  status: OperationalSectionStatus;
+  // Matches the existing `children: any` convention (stats-integrity.tsx,
+  // stats-config.tsx) rather than introducing a stricter preact type not
+  // used elsewhere.
+  children: any;
+}) {
+  return (
+    <div class={`operational-section operational-section--${status}`}>
+      <h4 class="operational-section__title">{title}</h4>
+      <div class="operational-section__body">{children}</div>
+    </div>
+  );
+}
+
+function ReviewsPerDayChart({ view }: { view: ReviewsChartView }) {
+  if (view.bars.length === 0) {
+    return <p class="operational-section__empty">No daily review data in this window.</p>;
+  }
+  return (
+    <>
+      <div
+        class="operational-chart"
+        role="img"
+        aria-label={`Reviews per day: ${view.averageText}. ${view.zeroDays} of ${view.totalDays} calendar days had zero reviews recorded.`}
+      >
+        <div class="operational-chart__bars">
+          {view.bars.map((b) => (
+            <div
+              key={b.date}
+              class={`operational-chart__bar ${b.count === 0 ? 'operational-chart__bar--zero' : ''}`}
+              style={{ height: `${b.heightPct}%` }}
+              title={`${b.date}: ${b.count} review${b.count === 1 ? '' : 's'}`}
+            />
+          ))}
+        </div>
+        <div class="operational-chart__axis" aria-hidden="true">
+          <span>{view.firstDate}</span>
+          <span>{view.lastDate}</span>
+        </div>
+      </div>
+      <p class="operational-section__summary">{view.averageText}</p>
+      <p class="operational-section__note">
+        {view.zeroDays} of {view.totalDays} calendar day(s) shown had zero reviews recorded — rendered as a
+        zero-height (muted) bar, not omitted. The first bar may reflect a partial day: the window's start is a
+        rolling timestamp, not midnight.
+      </p>
+    </>
+  );
+}
+
+function ReviewsPerDaySection({ data }: { data: OperationalStats }) {
+  const view = buildReviewsChartView(data.reviewsPerDay, data.windowDays, data.since, data.sampleSize);
+  return (
+    <OperationalSection title="Reviews per day" status="neutral">
+      <ReviewsPerDayChart view={view} />
+    </OperationalSection>
+  );
+}
+
+function DurationTurnsSection({ data }: { data: OperationalStats }) {
+  const duration = buildDurationSectionView(data.duration);
+  const turns = buildTurnsSectionView(data.turns);
+  return (
+    <OperationalSection title="Duration &amp; turns per review" status="neutral">
+      <dl class="operational-dl">
+        <dt>Duration — median</dt>
+        <dd>{duration.medianText}</dd>
+        <dt>Duration — p90</dt>
+        <dd>{duration.p90Text}</dd>
+        <dt>Turns — median</dt>
+        <dd>{turns.medianText}</dd>
+        <dt>Turns — p90</dt>
+        <dd>{turns.p90Text}</dd>
+      </dl>
+      <p class="operational-section__note">
+        Duration computed over {duration.sampleSize} row(s) with duration recorded; turns over {turns.sampleSize} row(s)
+        with turns recorded — each may differ from this window's {data.sampleSize} total row(s).
+      </p>
+    </OperationalSection>
+  );
+}
+
+function ToolMixTable({ rows }: { rows: ToolMixRowView[] }) {
+  if (rows.length === 0) {
+    return <p class="operational-section__empty">No tool_calls recorded in this window.</p>;
+  }
+  return (
+    <table class="operational-table">
+      <thead>
+        <tr><th>Tool</th><th>Total calls</th><th>Avg / review</th><th>Reviews using</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.tool} class={r.isZero ? 'operational-table__row--flagged' : ''}>
+            <td class="operational-table__mono">
+              {r.tool}
+              {r.isZero && <span class="operational-table__flag" title="Zero calls recorded this window"> ⚠ zero calls</span>}
+            </td>
+            <td>{r.totalCalls}</td>
+            {/* Two decimals, not one: many tools sit well under 1 call/review
+                (e.g. a tool used once every several reviews), and a single
+                decimal would round a genuinely rare-but-present tool down to
+                "0.0" — visually indistinguishable from the zero-call row this
+                section exists to call out. */}
+            <td>{r.avgPerReview.toFixed(2)}</td>
+            <td>{r.reviewsUsing}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ToolMixSection({ data }: { data: OperationalStats }) {
+  const view = buildToolMixSectionView(data.toolMix);
+  return (
+    <OperationalSection title="Tool mix" status={view.status}>
+      <p class="operational-section__summary">
+        {view.status === 'attention' && <strong class="operational-tag operational-tag--attention">Needs attention: </strong>}
+        {view.summary}
+      </p>
+      <ToolMixTable rows={view.rows} />
+      <p class="operational-section__note">
+        Average per review is divided by all {data.sampleSize} review(s) in this window, not just the reviews that
+        called a given tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a
+        shrunk denominator (same convention `aggregateToolMix`, stats.ts, documents server-side).
+      </p>
+    </OperationalSection>
+  );
+}
+
+function RepoBreakdownTable({ rows }: { rows: OperationalStats['perRepo'] }) {
+  if (rows.length === 0) {
+    return <p class="operational-section__empty">No repo data recorded in this window.</p>;
+  }
+  return (
+    <table class="operational-table">
+      <thead>
+        <tr><th>Repo</th><th>Reviews</th><th>Median duration</th><th>Median turns</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.repoKey}>
+            <td class="operational-table__mono">{r.repoKey}</td>
+            <td>{r.count}</td>
+            <td>{formatMsOrNA(r.medianDurationMs)}</td>
+            <td>{r.medianTurns ?? 'n/a'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function RepoBreakdownSection({ data }: { data: OperationalStats }) {
+  return (
+    <OperationalSection title="Repo breakdown" status="neutral">
+      <RepoBreakdownTable rows={data.perRepo} />
+      <p class="operational-section__note">
+        {data.perRepo.length} repo(s) across {data.sampleSize} review(s) in this window — every row counts here
+        (unlike the Cost card's per-repo table, scoped to rows with cost recorded).
+      </p>
+    </OperationalSection>
+  );
+}
+
+/** See the module doc comment's "Genuinely missing" note — this is not a
+ *  placeholder awaiting a later task, it is the honest end state: the API
+ *  has no rate-limit-specific field, so this section says so in words rather
+ *  than rendering a fabricated 0 (constraint #3, "never render a non-value
+ *  as a value"). */
+function RateLimitSection() {
+  return (
+    <OperationalSection title="Rate-limit events" status="neutral">
+      <p class="operational-section__empty">
+        Not available — <code class="operational-mono">/api/stats/operational</code> reports no rate-limit-specific
+        event count. The <code class="operational-mono">error</code> column records that a pipeline error occurred
+        (as free text), not which <code class="operational-mono">PipelineError</code> subtype caused it — a{' '}
+        <code class="operational-mono">RateLimitError</code>'s message is embedded in that same text, but no endpoint
+        parses it out. See the{' '}
+        <a class="operational-section__link" href="#stats-slot-integrity">Integrity panel's "Error rate" section</a>{' '}
+        for the undifferentiated error count this window.
+      </p>
+    </OperationalSection>
+  );
+}
+
+/**
+ * The Operational panel — replaces the `stats-slot-operational` placeholder
+ * `<StatsSlot>` (Task 4) with the real body, keeping the same outer
+ * `stats-slot stats-slot--{status}` wrapper and header markup so the
+ * loading/error border-colour CSS carries over unchanged, matching Tasks
+ * 6/7/8's precedent.
+ */
+export function OperationalPanel() {
+  const view = buildOperationalPanelView(operationalStats.value);
+  const window = statsWindow.value;
+  return (
+    <section id="stats-slot-operational" class={`stats-slot stats-slot--${view.status}`} aria-label="Operational">
+      <div class="stats-slot__header">
+        <h3 class="stats-slot__title">Operational</h3>
+        <span class="stats-slot__window" title="Time window this section reads">{window}</span>
+      </div>
+      {view.status !== 'ready' ? (
+        <p class={`stats-slot__status-text ${view.status === 'error' ? 'stats-slot__status-text--error' : ''}`}>
+          {view.message}
+        </p>
+      ) : (
+        <div class="operational-panel">
+          {view.data!.lowSample && (
+            <p class="operational-panel__low-sample">
+              Small sample: n={view.data!.sampleSize} in this window — every statistic below is a small-sample reading.
+            </p>
+          )}
+          <ReviewsPerDaySection data={view.data!} />
+          <DurationTurnsSection data={view.data!} />
+          <ToolMixSection data={view.data!} />
+          <RepoBreakdownSection data={view.data!} />
+          <RateLimitSection />
+        </div>
+      )}
+    </section>
+  );
+}
