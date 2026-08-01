@@ -119,6 +119,12 @@ export interface DashboardPRReview {
   webUrl: string | null;
   /** Set for queued/in-progress reviews that haven't completed yet */
   pendingStatus?: 'queued' | 'reviewing';
+  /** True when this run must be excluded from production statistics (an A/B
+   *  arm or an ad-hoc probe) — see `PRReviewRow.isTest`. Non-optional here:
+   *  every completed row's store mapper already defaults it to `false`
+   *  (`?? false`), and a pending/in-progress row (no DB row yet) is never a
+   *  test run by construction, so `readPRReviews` sets it explicitly there too. */
+  isTest: boolean;
 }
 
 export interface DashboardPRReviewDetail extends DashboardPRReview {

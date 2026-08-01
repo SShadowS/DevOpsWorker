@@ -10,7 +10,7 @@ import type { Stage, PipelineState, PipelineContext } from '../../src/types/pipe
 //
 // Before this the only exits were approval and budget exhaustion, so a loop that
 // could not converge spent its whole budget proving it. WI 63396: 8 rounds,
-// $146.38, 0 merges — and a rerun capped at 2 attempts still exhausted.
+// into three figures of spend, 0 merges — and a rerun capped at 2 attempts still exhausted.
 // ---------------------------------------------------------------------------
 
 describe('hasPlateaued', () => {

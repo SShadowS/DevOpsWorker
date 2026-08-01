@@ -149,7 +149,7 @@ export async function spawnContainer(args: string[]): Promise<number> {
  * holds `postgres:5432` — so only host-launched tooling needs the rewrite.
  *
  * Learned the expensive way: eight PR-review arms ran to completion against an
- * unreachable database. ~$60, zero rows, and nothing in the logs to say so.
+ * unreachable database — wasted a full run's spend, zero rows, and nothing in the logs to say so.
  */
 export function containerDatabaseUrl(hostUrl: string, service = 'postgres'): string {
   if (!hostUrl) return hostUrl;

@@ -65,7 +65,7 @@ export function recurringFindings(rounds: string[][]): string[] {
  *
  * Step 4 is the third outcome. Without it the only exits are approval and budget
  * exhaustion, so a loop that cannot converge spends its entire budget proving it
- * — the coding loop on WI 63396 ran 8 rounds for $146 and produced no merge.
+ * — the coding loop on WI 63396 ran 8 rounds into three figures of spend and produced no merge.
  *
  * Both producer and reviewer must be Stages themselves (usually created
  * via agentStage()). The loop manages iteration, escalation, and the breaker.
@@ -86,7 +86,7 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
       // A human-granted retry (/fix sets rerunMode; resuming an exhausted loop
       // sets skipResetState) refills the attempt budget. An automatic resume
       // (e.g. after a container crash) does NOT — otherwise the circuit breaker
-      // resets every resume and the loop retries forever (wi 72264: $100 burned
+      // resets every resume and the loop retries forever (wi 72264: real money burned
       // on 7+ coder runs across crash-resumes).
       const grantsFreshBudget = Boolean(state.rerunMode) || state.skipResetState === true;
 

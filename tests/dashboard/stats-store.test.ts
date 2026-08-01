@@ -1,5 +1,8 @@
-import { describe, test, expect } from 'bun:test';
-import { classifyWindowedResponse, classifyDriftResponse } from '../../src/dashboard/client/stats-store.ts';
+import { describe, test, expect, afterEach } from 'bun:test';
+import {
+  classifyWindowedResponse, classifyDriftResponse,
+  loadStatsForWindow, loadConfigReport, statsPopulation,
+} from '../../src/dashboard/client/stats-store.ts';
 import type { DriftStats } from '../../src/dashboard/stats.ts';
 
 describe('classifyWindowedResponse', () => {
@@ -62,5 +65,65 @@ describe('classifyDriftResponse', () => {
     for (const n of [0, 1, 10, 1000]) {
       expect(classifyDriftResponse(driftFixture(n)).status).not.toBe('empty');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadStatsForWindow — the actual query strings it builds. The tests above
+// only exercise the pure classify functions, so nothing pinned the fetch URLs
+// themselves: dropping `&population=${population}` from the four stats
+// fetches, or having the ribbon's dedicated integrity re-fetch follow the
+// toggle instead of staying prod-pinned, would both leave every existing
+// guard (parsePopulation, the per-query `is_test` predicate tests,
+// pickPopulationMeta) green while the Prod/Test toggle silently did nothing.
+// Repo-standard globalThis.fetch replacement, restored in afterEach — no
+// mock.module(), no DB.
+// ---------------------------------------------------------------------------
+
+describe('loadStatsForWindow — population query string', () => {
+  const realFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    statsPopulation.value = 'prod';
+  });
+
+  /** Records every fetched URL and returns a minimal valid body — sampleSize: 0
+   *  satisfies classifyWindowedResponse for the four stats endpoints; drift and
+   *  config never inspect the body's shape before storing it. */
+  function captureFetchUrls(): string[] {
+    const urls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return Promise.resolve(new Response(JSON.stringify({ sampleSize: 0 })));
+    }) as unknown as typeof fetch;
+    return urls;
+  }
+
+  test('population=test: the 4 stats endpoints carry population=test, the ribbon integrity fetch stays pinned to population=prod, and drift/config carry no population param at all', async () => {
+    statsPopulation.value = 'test';
+    const urls = captureFetchUrls();
+
+    await Promise.all([loadStatsForWindow('30d'), loadConfigReport()]);
+
+    expect(urls).toContain('/api/stats/cost?window=30d&population=test');
+    expect(urls).toContain('/api/stats/quality?window=30d&population=test');
+    expect(urls).toContain('/api/stats/integrity?window=30d&population=test');
+    expect(urls).toContain('/api/stats/operational?window=30d&population=test');
+
+    // The ribbon's dedicated re-fetch — must stay prod-pinned even though the
+    // toggle is on 'test'. If the ribbon ever followed the toggle instead,
+    // this exact URL would never be requested and this assertion fails.
+    expect(urls).toContain('/api/stats/integrity?window=30d&population=prod');
+
+    // Population-independent by design (Task 3 left these two untouched) —
+    // neither may carry the parameter under any toggle state.
+    const driftUrl = urls.find((u) => u.startsWith('/api/drift'));
+    expect(driftUrl).toBe('/api/drift?window=30d');
+    expect(driftUrl).not.toContain('population');
+
+    const configUrl = urls.find((u) => u.startsWith('/api/config'));
+    expect(configUrl).toBe('/api/config');
+    expect(configUrl).not.toContain('population');
   });
 });

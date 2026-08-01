@@ -90,7 +90,7 @@ interface LeverDef {
 const NON_BLANK = (v: string) => v.trim() !== '';
 const IS_ONE = (v: string) => v === '1';
 
-/** The 7 `PR_REVIEW_*` eval-only levers (6 measurement hooks + NO_POST).
+/** The 8 `PR_REVIEW_*` eval-only levers (6 measurement hooks + NO_POST + TEST_RUN).
  *  `PR_REVIEW_ANTHROPIC_API_KEY` is deliberately excluded — it is a credential,
  *  not a lever, despite sharing the prefix (see `resolvePrReviewCredential`). */
 const EVAL_LEVERS: LeverDef[] = [
@@ -99,6 +99,12 @@ const EVAL_LEVERS: LeverDef[] = [
     predicate: IS_ONE,
     sourceRef: 'src/cli/review-pr.ts:890,951',
     description: 'Skips publishing the review to the PR (measurement replay mode).',
+  },
+  {
+    key: 'PR_REVIEW_TEST_RUN',
+    predicate: IS_ONE,
+    sourceRef: 'src/cli/review-pr.ts:735-739',
+    description: 'Flags the run as a test run (isTestRun()) without also skipping the post.',
   },
   {
     key: 'PR_REVIEW_SUBAGENT_MODEL',

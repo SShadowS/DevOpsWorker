@@ -52,7 +52,15 @@ this repo with the overlay cloned into `private/`. Before you commit, check whic
 file you touched lives in — `git -C private status` is a different repo from `git status`.
 
 **Never put in this repo:** customer/tenant names, internal tool invocations, internal repo
-URLs, environment IDs, or design docs. See "Where Docs Go" below.
+URLs, environment IDs, design docs, or aggregate cost/spend figures (dollar amounts say
+something real about the owner's operating costs to anyone reading a public repo — keep the
+identifier, the counts, and the causal claim in a comment, but replace the currency with a
+qualitative magnitude — write "ran 8 rounds into three figures of spend" rather than naming
+the amount). See "Where Docs Go" below.
+
+Opaque identifiers — PR numbers, work-item numbers, database row ids — are fine to keep:
+this repo carries no org name, tenant name, or real ADO URL for an outside reader to resolve
+them against, so `PR 49388` or `row 1687` means nothing outside this codebase.
 
 A deployment keeps its own instructions in `CLAUDE.local.md` at the workspace root
 (gitignored — it names internal repos, tools, and environments). If that file exists, read it.

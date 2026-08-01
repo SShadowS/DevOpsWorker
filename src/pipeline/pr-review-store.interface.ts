@@ -73,6 +73,8 @@ export interface PRReviewRow {
    *  string `"unknown"`, not null). Answers "which build produced this row",
    *  independent of what HEAD is checked out today. */
   imageSha: string | null;
+  /** True when this run must be excluded from production statistics. */
+  isTest: boolean;
 }
 
 export interface IPRReviewStore {

@@ -145,6 +145,44 @@ describe('rowToPRReview', () => {
     });
     expect(row.imageSha).toBeNull();
   });
+
+  test('maps is_test true to isTest', () => {
+    const row = rowToPRReview({
+      id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',
+      title: null, recommendation: 'approve', findings: null, findings_count: null,
+      comment_id: null, cost_usd: null, duration_ms: null, turns: null,
+      tool_calls: null, session_id: null, error: null, review_body: null,
+      created_at: '2026-01-01T00:00:00Z', action_id: null, review_run_id: 'pr42-abc',
+      is_test: true,
+    });
+    expect(row.isTest).toBe(true);
+  });
+
+  test('maps is_test false to isTest', () => {
+    const row = rowToPRReview({
+      id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',
+      title: null, recommendation: 'approve', findings: null, findings_count: null,
+      comment_id: null, cost_usd: null, duration_ms: null, turns: null,
+      tool_calls: null, session_id: null, error: null, review_body: null,
+      created_at: '2026-01-01T00:00:00Z', action_id: null, review_run_id: 'pr42-abc',
+      is_test: false,
+    });
+    expect(row.isTest).toBe(false);
+  });
+
+  // Unlike image_sha, a nullable is_test would invent a third state ("unmarked")
+  // the UI would have to explain — a legacy row with no column value at all must
+  // read as production (false), never as undefined.
+  test('a legacy row with no is_test reads as production, not undefined', () => {
+    const row = rowToPRReview({
+      id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',
+      title: null, recommendation: 'approve', findings: null, findings_count: null,
+      comment_id: null, cost_usd: null, duration_ms: null, turns: null,
+      tool_calls: null, session_id: null, error: null, review_body: null,
+      created_at: '2026-01-01T00:00:00Z', action_id: null, review_run_id: 'pr42-abc',
+    });
+    expect(row.isTest).toBe(false);
+  });
 });
 
 describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
@@ -176,6 +214,12 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
     expect(insert![1]).toContain('image_sha');
   });
 
+  test('the INSERT names is_test', () => {
+    const insert = /INSERT INTO pr_reviews \(([^)]*)\)/.exec(src);
+    expect(insert).not.toBeNull();
+    expect(insert![1]).toContain('is_test');
+  });
+
   test('column count matches placeholder count in the INSERT', () => {
     const columnMatch = src.match(/INSERT INTO pr_reviews \(([^)]*)\)/);
     expect(columnMatch).not.toBeNull();
@@ -190,6 +234,7 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
     expect(columns).toContain('review_path');
     expect(columns).toContain('applied_levers');
     expect(columns).toContain('image_sha');
+    expect(columns).toContain('is_test');
     expect(placeholderCount).toBe(columns.length);
   });
 
@@ -211,6 +256,16 @@ describe('PgPRReviewStore.save — INSERT column/placeholder parity', () => {
     expect(selects.length).toBeGreaterThanOrEqual(4);
     for (const select of selects) {
       expect(select).toContain('image_sha');
+    }
+  });
+
+  // Same trap again for is_test: exactly 4 SELECT lists in this file, all four
+  // must carry it or a fetch through the missed method reads isTest as undefined.
+  test('every SELECT names is_test', () => {
+    const selects = src.match(/SELECT id,[\s\S]*?FROM pr_reviews/g) ?? [];
+    expect(selects.length).toBe(4);
+    for (const select of selects) {
+      expect(select).toContain('is_test');
     }
   });
 });

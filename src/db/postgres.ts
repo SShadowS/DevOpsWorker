@@ -135,6 +135,11 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS applied_levers JSONB;
 -- in src/pipeline/pr-review-store.interface.ts). Answers "which build
 -- produced this row" without needing a docker socket.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS image_sha TEXT;
+-- Marks a run that must not count toward production statistics: an A/B arm or an
+-- ad-hoc probe. NOT NULL DEFAULT false on purpose — unlike image_sha, "unmarked"
+-- here genuinely means production, so a nullable column would invent a third
+-- state the UI would have to explain.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT false;
 `;
 
 /**

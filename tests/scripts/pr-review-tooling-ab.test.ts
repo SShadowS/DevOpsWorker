@@ -297,7 +297,7 @@ describe('matchesArmRow', () => {
   // there was no case for `commentId: 0`. `== null` matches `null`/`undefined`
   // but not `0`, and a NO-POST review (every arm in this matrix) records
   // `comment_id: 0`, not `null`. That rejected exactly the rows the matrix
-  // produces: a real $15.54 run (PR 49388, row 1687) saved correctly and was
+  // produces: a genuine paid run (PR 49388, row 1687) saved correctly and was
   // then discarded by this predicate. The three cases below are the three
   // real shapes confirmed against the live table (see the comment on
   // `matchesArmRow` in the source): positive (posted), 0 (NO-POST), null
@@ -309,7 +309,7 @@ describe('matchesArmRow', () => {
 
   test(
     'C10 shape 2/3 — commentId: 0 (the real shape every NO-POST arm row carries) is ACCEPTED, not excluded ' +
-    '(reproduces the exact bug that voided a genuine $15.54 recorded run)',
+    '(reproduces the exact bug that voided a genuine paid recorded run)',
     () => {
       expect(matchesArmRow({ prId: 100, commentId: 0, createdAt: '2026-07-29T10:00:05.000Z' }, 100, since)).toBe(true);
     },

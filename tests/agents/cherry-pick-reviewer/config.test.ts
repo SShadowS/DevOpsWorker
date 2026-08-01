@@ -39,7 +39,7 @@ const SOURCE = readFileSync(
 
 describe('cherry-pick-reviewer config', () => {
   test('cannot fan out — neither Agent nor Task is allowed', () => {
-    // THE structural cost guarantee. The full reviewer costs ~$10 because seven
+    // THE structural cost guarantee. The full reviewer costs real money because seven
     // sub-agents each cache their own context. Adding either tool here silently
     // restores that with nothing failing. Both names have existed across SDK versions.
     const c = createBackportReviewConfig(config, params);
@@ -95,7 +95,7 @@ describe('cherry-pick-reviewer config', () => {
 
   test('pins the model explicitly rather than inheriting', () => {
     // The model is the measured cost lever here: seven sub-agents silently running
-    // opus instead of sonnet took one review from $10.06 to $18.77 on the same image.
+    // opus instead of sonnet nearly doubled one review's cost on the same image.
     expect(createBackportReviewConfig(config, params).model).toBe('claude-sonnet-5');
   });
 

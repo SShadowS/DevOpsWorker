@@ -865,6 +865,12 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .pr-review-row { display: flex; flex-direction: column; gap: 4px; padding: var(--space-sm) var(--space-md); background: var(--color-bg-secondary); border-radius: 6px; border-left: 3px solid var(--color-border); transition: background 0.15s; }
 .pr-review-row:hover { background: var(--color-bg-hover); }
+/* A test run is a fact, not a problem: it gets its own stripe colour but is NOT dimmed
+   the way --error and --pending are, and never uses --color-accent, which is reserved
+   across this tab for "needs attention". Declared BEFORE --error/--pending so that a
+   failed or in-flight test run still shows the stripe for the state that needs acting
+   on — the `test` badge continues to identify it either way. */
+.pr-review-row--test { border-left-color: var(--color-info); }
 .pr-review-row--error { border-left-color: var(--color-error); opacity: 0.7; }
 .pr-review-row--pending { border-left-color: var(--color-text-muted); opacity: 0.6; }
 .pr-review-row--pending .pr-review-row__pr { color: var(--color-text-secondary); }
@@ -883,6 +889,12 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review__badge--error { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error); }
 .pr-review__badge--legacy { background: color-mix(in srgb, var(--color-stage-pending) 25%, transparent); color: var(--color-text-muted); }
 .pr-review__badge--pending { background: color-mix(in srgb, var(--color-text-muted) 18%, transparent); color: var(--color-text-muted); animation: pulse 1.5s infinite; }
+/* Task 5: a test run (A/B arm, ad-hoc probe) is a fact, not a problem — borrows
+   the same neutral tier as `.status-ribbon__scope-badge` (bg-tertiary/border/
+   text-secondary, no semantic colour, no --color-accent) rather than any of
+   this badge family's approve/changes/discussion/error colours, which are all
+   reserved for a verdict about the review itself. */
+.pr-review__badge--test { background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
 
 .pr-review__findings { display: inline-flex; gap: 6px; }
 .pr-review__no-findings { font-size: 0.75rem; color: var(--color-text-muted); }
@@ -1528,6 +1540,8 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .stats-view__toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-sm);
   flex-wrap: wrap;
 }
 
@@ -1554,6 +1568,50 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font-weight: 600;
+}
+
+/* Population control (Task 4) — deliberately identical shape to
+   `.window-selector` above (same background/border/padding, same
+   hover/active treatment): it is the same KIND of control (a chrome
+   segmented toggle, not a finding), so it reads as one system with the
+   selector it sits beside rather than a visually distinct new widget.
+   Active state is signalled by background + font-weight, never colour alone
+   — --color-accent is not spent here, matching the window selector's own
+   precedent of reserving accent for genuine "needs attention" states. */
+.population-selector {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.population-selector__btn {
+  padding: 6px 14px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.population-selector__btn:hover { color: var(--color-text-primary); }
+.population-selector__btn--active {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+/* The shared exclusion disclosure banner (Task 4) — one sentence for all
+   four population-aware panels below it (see stats-view.tsx's module doc
+   comment for why one, not four). Plain caption styling: this is a fact,
+   not a warning, so it does not borrow any of the five caveat-tag colours
+   used inside the panels themselves. */
+.stats-view__population-disclosure {
+  text-align: right;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
 }
 
 /* Placeholder slot — one per Task 5-9. Each later task replaces the
@@ -1612,6 +1670,34 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
    `--attention` card also carries literal warning text ("Needs attention:",
    "config may be inert") — colour is never the only signal.
    ============================================================ */
+
+/* Task 4: the ribbon's own "always production" label. A neutral scope badge,
+   not a caveat tag — it uses the same chip shape as `.badge`/`.stats-slot__window`
+   (rounded pill, uppercase, small) but its own muted grey, spending neither
+   `--color-accent` nor any of the semantic `.badge--*` colours: this is
+   chrome stating what the ribbon covers, not a finding about it. */
+.status-ribbon__scope-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.status-ribbon__scope-badge {
+  flex: none;
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
 
 .status-ribbon {
   display: flex;

@@ -173,7 +173,7 @@ cannot: aliases, cross-file references, and inherited members.
  * `allowedTools`, but nothing in their prompts steers them there. Measured on
  * PR 52081: 207 Bash calls of which 168 were `sed`/`cat`/`head`/`tail` file
  * reads, 23 `Read` calls, and ZERO LSP calls — 10.0M cache-read tokens on a
- * two-file diff, $16.53.
+ * two-file diff, real money for two files.
  *
  * Guarded so this is a TRUE NO-OP unless `PR_REVIEW_SUBAGENT_TOOL_RULE=1`.
  * Idempotent — appends only to files that don't already carry the block.
@@ -725,6 +725,18 @@ export function collectAppliedLevers(counts: {
   if ((process.env['PR_REVIEW_SUBAGENT_MODEL'] ?? '').trim() !== '') levers.subagentModel = counts.subagentModel;
   if (process.env['PR_REVIEW_SUBAGENT_TOOL_RULE'] === '1') levers.subagentToolRule = counts.subagentToolRule;
   return Object.keys(levers).length > 0 ? levers : null;
+}
+
+/**
+ * A run that was deliberately not posted, or explicitly flagged, is not production.
+ * Single source of truth — both `.save({` sites below consume this, so a third
+ * condition added here reaches both instead of drifting between two inlined copies.
+ */
+export function isTestRun(): boolean {
+  return (
+    process.env['PR_REVIEW_NO_POST'] === '1' ||
+    process.env['PR_REVIEW_TEST_RUN'] === '1'
+  );
 }
 
 /**
@@ -1372,6 +1384,7 @@ export async function reviewPR(args: string[]): Promise<void> {
           reviewPath: reviewPath,
           appliedLevers,
           imageSha: process.env['BUILD_SHA'] ?? null,
+          isTest: isTestRun(),
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -1417,6 +1430,7 @@ export async function reviewPR(args: string[]): Promise<void> {
         reviewPath: reviewPath,
         appliedLevers,
         imageSha: process.env['BUILD_SHA'] ?? null,
+        isTest: isTestRun(),
       });
     }
 

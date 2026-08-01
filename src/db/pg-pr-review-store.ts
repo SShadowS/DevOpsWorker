@@ -6,7 +6,7 @@ export class PgPRReviewStore implements IPRReviewStore {
 
   async save(row: Omit<PRReviewRow, 'id'>): Promise<number> {
     const [result] = await this.sql`
-      INSERT INTO pr_reviews (pr_id, repo_key, source_branch, target_branch, title, recommendation, findings, findings_count, comment_id, cost_usd, duration_ms, turns, tool_calls, session_id, error, review_body, action_id, review_run_id, sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha)
+      INSERT INTO pr_reviews (pr_id, repo_key, source_branch, target_branch, title, recommendation, findings, findings_count, comment_id, cost_usd, duration_ms, turns, tool_calls, session_id, error, review_body, action_id, review_run_id, sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha, is_test)
       VALUES (
         ${row.prId}, ${row.repoKey}, ${row.sourceBranch}, ${row.targetBranch},
         ${row.title}, ${row.recommendation},
@@ -21,7 +21,8 @@ export class PgPRReviewStore implements IPRReviewStore {
         ${row.inlineThreads ? this.sql.json(row.inlineThreads as unknown as postgres.JSONValue) : null},
         ${row.reviewPath ?? null},
         ${row.appliedLevers ? this.sql.json(row.appliedLevers as unknown as postgres.JSONValue) : null},
-        ${row.imageSha ?? null}
+        ${row.imageSha ?? null},
+        ${row.isTest}
       )
       RETURNING id
     `;
@@ -34,7 +35,7 @@ export class PgPRReviewStore implements IPRReviewStore {
              recommendation, findings, findings_count, comment_id,
              cost_usd, duration_ms, turns, tool_calls, session_id,
              error, review_body, created_at::text, action_id, review_run_id,
-             sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha
+             sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha, is_test
       FROM pr_reviews
       ORDER BY created_at DESC
       LIMIT ${limit}
@@ -48,7 +49,7 @@ export class PgPRReviewStore implements IPRReviewStore {
              recommendation, findings, findings_count, comment_id,
              cost_usd, duration_ms, turns, tool_calls, session_id,
              error, review_body, created_at::text, action_id, review_run_id,
-             sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha
+             sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha, is_test
       FROM pr_reviews
       WHERE action_id = ${actionId}
       ORDER BY created_at DESC
@@ -63,7 +64,7 @@ export class PgPRReviewStore implements IPRReviewStore {
              recommendation, findings, findings_count, comment_id,
              cost_usd, duration_ms, turns, tool_calls, session_id,
              error, review_body, created_at::text, action_id, review_run_id,
-             sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha
+             sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha, is_test
       FROM pr_reviews
       WHERE id = ${id}
       LIMIT 1
@@ -77,7 +78,7 @@ export class PgPRReviewStore implements IPRReviewStore {
              recommendation, findings, findings_count, comment_id,
              cost_usd, duration_ms, turns, tool_calls, session_id,
              error, review_body, created_at::text, action_id, review_run_id,
-             sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha
+             sub_agents, model_usage, findings_list, inline_threads, review_path, applied_levers, image_sha, is_test
       FROM pr_reviews
       WHERE pr_id = ${prId}
         -- Excludes a sanity-path review of THIS pr_id from counting as its own
@@ -123,5 +124,6 @@ export function rowToPRReview(r: any): PRReviewRow {
     reviewPath: r.review_path ?? null,
     appliedLevers: r.applied_levers ?? null,
     imageSha: r.image_sha ?? null,
+    isTest: r.is_test ?? false,
   };
 }

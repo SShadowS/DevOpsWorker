@@ -21,6 +21,7 @@ import {
   buildPriorFindingsBlock,
   parseReviewPrArgs,
   collectAppliedLevers,
+  isTestRun,
 } from '../../src/cli/review-pr.ts';
 import { findingKey, markerFor } from '../../src/sdk/ado/finding-key.ts';
 import type { ReviewThread } from '../../src/sdk/ado/pull-requests.ts';
@@ -1927,6 +1928,51 @@ describe('reviewPR threads appliedLevers through both save() calls', () => {
     expect(saveCalls.length).toBe(2);
     for (const call of saveCalls) {
       expect(call).toMatch(/\bappliedLevers\b/);
+    }
+  });
+});
+
+describe('isTestRun', () => {
+  withEnv('PR_REVIEW_NO_POST');
+  withEnv('PR_REVIEW_TEST_RUN');
+
+  test('neither flag set is not a test run', () => {
+    expect(isTestRun()).toBe(false);
+  });
+
+  test('PR_REVIEW_NO_POST=1 alone is a test run', () => {
+    process.env['PR_REVIEW_NO_POST'] = '1';
+    expect(isTestRun()).toBe(true);
+  });
+
+  test('PR_REVIEW_TEST_RUN=1 alone is a test run', () => {
+    process.env['PR_REVIEW_TEST_RUN'] = '1';
+    expect(isTestRun()).toBe(true);
+  });
+
+  test('both set is still a test run', () => {
+    process.env['PR_REVIEW_NO_POST'] = '1';
+    process.env['PR_REVIEW_TEST_RUN'] = '1';
+    expect(isTestRun()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guards the fix for a real drift bug: isTest was originally inlined as its own
+// `process.env[...] === '1' || process.env[...] === '1'` expression at each
+// save() site independently. A single source of truth means a third condition
+// added to isTestRun() reaches both call sites automatically — pinned here the
+// same way appliedLevers' threading is pinned above, since no live-DB test is
+// possible (DATABASE_URL is production).
+// ---------------------------------------------------------------------------
+describe('reviewPR threads isTest through both save() calls via isTestRun()', () => {
+  const src = readFileSync(fileURLToPath(new URL('../../src/cli/review-pr.ts', import.meta.url)), 'utf-8');
+
+  test('both prReviewStore.save() calls derive isTest from isTestRun(), not an inlined duplicate', () => {
+    const saveCalls = src.match(/await prReviewStore\.save\(\{[\s\S]*?\}\);/g) ?? [];
+    expect(saveCalls.length).toBe(2);
+    for (const call of saveCalls) {
+      expect(call).toMatch(/isTest:\s*isTestRun\(\)/);
     }
   });
 });

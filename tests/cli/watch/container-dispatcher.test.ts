@@ -387,4 +387,15 @@ describe('container env allowlist', () => {
     const env = getPrReviewContainerEnv();
     expect(env['PR_REVIEW_SECURITY_BC_ONLY']).toBe('1');
   });
+
+  // Regression guard: PR_REVIEW_TEST_RUN was read by isTestRun() in
+  // review-pr.ts but never added to this allowlist, so every watcher-dispatched
+  // container silently dropped it and every such run recorded as production
+  // with no error — the exact failure class this describe block exists to
+  // catch. Fails red if the forwarding line is removed again.
+  test('forwards PR_REVIEW_TEST_RUN into the container env', () => {
+    process.env['PR_REVIEW_TEST_RUN'] = '1';
+    const env = getPrReviewContainerEnv();
+    expect(env['PR_REVIEW_TEST_RUN']).toBe('1');
+  });
 });
