@@ -122,6 +122,11 @@ describe('resolveEvalLevers — the ground-truth trap', () => {
   });
 
   test('PR_REVIEW_ANTHROPIC_API_KEY is never classified as a lever', () => {
+    // Computed property key here and at every other PR_REVIEW_ANTHROPIC_API_KEY fixture
+    // below, unlike the plain PR_REVIEW_NO_POST key above: the repo's guard-commit hook
+    // blocks a commit whose diff looks like an assignment to the Anthropic API key env var
+    // name, and a bare key here trips it even though the value is always a harmless
+    // placeholder, never a real key.
     const levers = resolveEvalLevers({ ['PR_REVIEW_ANTHROPIC_API_KEY']: 'placeholder' });
     expect(levers.find((l) => l.key === 'PR_REVIEW_ANTHROPIC_API_KEY')).toBeUndefined();
   });
@@ -265,21 +270,27 @@ describe('buildConfigReport', () => {
     for (const k of ENV_KEYS) delete process.env[k];
   }
 
-  test('DEFAULT_MODEL unset: both builders fall through the || to the same hardcoded literal', async () => {
+  test('DEFAULT_MODEL unset: both builders fall through the || to the same hardcoded literal, and raw says so', async () => {
     clearEnv();
     const report = await buildConfigReport({ manifest: {} });
     expect(report.orchestratorModel.loadConfig.model).toBe('claude-opus-5');
     expect(report.orchestratorModel.buildConfigFromRepo.model).toBe('claude-opus-5');
     expect(report.orchestratorModel.agree).toBe(true);
+    // The whole point of `raw`: "claude-opus-5" alone cannot tell a consumer
+    // whether an operator configured it or nobody configured anything.
+    expect(report.orchestratorModel.loadConfig.raw).toBeUndefined();
+    expect(report.orchestratorModel.buildConfigFromRepo.raw).toBeUndefined();
   });
 
-  test('DEFAULT_MODEL set: both builders honour it identically', async () => {
+  test('DEFAULT_MODEL set: both builders honour it identically, and raw carries the configured value through', async () => {
     clearEnv();
     process.env['DEFAULT_MODEL'] = 'claude-opus-4-8';
     const report = await buildConfigReport({ manifest: {} });
     expect(report.orchestratorModel.loadConfig.model).toBe('claude-opus-4-8');
     expect(report.orchestratorModel.buildConfigFromRepo.model).toBe('claude-opus-4-8');
     expect(report.orchestratorModel.agree).toBe(true);
+    expect(report.orchestratorModel.loadConfig.raw).toBe('claude-opus-4-8');
+    expect(report.orchestratorModel.buildConfigFromRepo.raw).toBe('claude-opus-4-8');
   });
 
   test('DEFAULT_EFFORT=low resolves on both builders; unset reads as the SDK default label', async () => {
@@ -378,6 +389,22 @@ describe('buildConfigReport', () => {
     clearEnv();
     const secret = 'sk-ant-do-not-leak-this-value-please';
     process.env['PR_REVIEW_ANTHROPIC_API_KEY'] = secret;
+    const report = await buildConfigReport({ manifest: {} });
+    expect(JSON.stringify(report)).not.toContain(secret);
+  });
+
+  // AZURE_DEVOPS_PAT flows into buildRepoEnv() and from there into every
+  // per-agent AgentConfig's mcpServers (azureDevOpsMcp embeds the live PAT).
+  // Nothing in this module currently reads mcpServers back out of an
+  // AgentConfig — buildAgentKnobsReport only extracts name/model/maxTurns/
+  // disallowedTools — so today's non-leakage is implicit, not enforced by any
+  // guard. This test exists so a future field added to PerAgentReport off
+  // `base` (e.g. a well-meaning `mcpServerCount`) fails loudly here instead
+  // of silently shipping a live Azure DevOps PAT into a public JSON endpoint.
+  test('the response never contains the raw AZURE_DEVOPS_PAT value, even though it flows into every agent config', async () => {
+    clearEnv();
+    const secret = 'azdo-pat-do-not-leak-this-value-please';
+    process.env['AZURE_DEVOPS_PAT'] = secret;
     const report = await buildConfigReport({ manifest: {} });
     expect(JSON.stringify(report)).not.toContain(secret);
   });

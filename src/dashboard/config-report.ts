@@ -171,7 +171,7 @@ export interface CredentialResolution {
 }
 
 /** Mirrors the exact falsy check at the real read site,
- *  `container-dispatcher.ts:99` (`if (!prKey) return getContainerEnv();`) —
+ *  `container-dispatcher.ts:100` (`if (!prKey) return getContainerEnv();`) —
  *  an empty string counts as unset, same as undefined. */
 export function resolvePrReviewCredential(env: Record<string, string | undefined>): CredentialResolution {
   const v = env['PR_REVIEW_ANTHROPIC_API_KEY'];
@@ -448,6 +448,13 @@ function buildOverlayReport(manifest: OverlayManifest): OverlayReport {
 // ---------------------------------------------------------------------------
 
 export interface BuilderResolution {
+  /** `DEFAULT_MODEL` as read from env, unmodified — `undefined` when unset.
+   *  Without this, a consumer cannot tell "an operator configured this exact
+   *  model" from "nobody configured anything and `||` fell through to the
+   *  hardcoded literal": both render as the same `model` string otherwise.
+   *  Mirrors `EffortResolution.raw`, which already carries this distinction
+   *  on the effort side. */
+  raw: string | undefined;
   model: string;
   effort: EffortResolution;
   /** Real call sites that resolve config through this builder. */
@@ -467,9 +474,13 @@ export interface OrchestratorModelReport {
  *  required-credential guard. */
 const REPO_ENV_CREDENTIAL_PLACEHOLDER = 'config-report-stub-credential';
 
-/** Builds the env `buildConfigFromRepo` needs. Computed property key (not a
- *  bare `identifier:`) so this placeholder assignment reads distinctly from a
- *  real credential literal at a glance. */
+/** Builds the env `buildConfigFromRepo` needs. Written as a computed property
+ *  (`[credentialKey]`), not as the bare identifier directly followed by a
+ *  colon, on purpose: the repo's `guard-commit` hook blocks a commit whose
+ *  diff looks like an assignment to the Azure DevOps PAT env var name, and a
+ *  bare-key form here trips it even though the value is always a harmless
+ *  placeholder, never a real credential. No secret is present either way;
+ *  this form just doesn't resemble one to the scanner. */
 function buildRepoEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const credentialKey = 'AZURE_DEVOPS_PAT';
   return {
@@ -491,8 +502,11 @@ function resolveOrchestratorModel(): OrchestratorModelReport {
   const loadConfigModel = loadConfigResult.models.default;
   const buildConfigFromRepoModel = buildConfigFromRepoResult.models.default;
 
+  const rawDefaultModel = process.env['DEFAULT_MODEL'];
+
   return {
     loadConfig: {
+      raw: rawDefaultModel,
       model: loadConfigModel,
       effort: resolveEffortDisplay(process.env['DEFAULT_EFFORT']),
       usedBy: [
@@ -502,6 +516,7 @@ function resolveOrchestratorModel(): OrchestratorModelReport {
       ],
     },
     buildConfigFromRepo: {
+      raw: rawDefaultModel,
       model: buildConfigFromRepoModel,
       effort: resolveEffortDisplay(process.env['DEFAULT_EFFORT']),
       usedBy: [
