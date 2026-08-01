@@ -1,4 +1,4 @@
-import { driftStats, integrityStats, configReport, statsWindow } from '../stats-store.ts';
+import { driftStats, ribbonIntegrityStats, configReport, statsWindow } from '../stats-store.ts';
 import type { FetchState, StatsWindow } from '../stats-store.ts';
 import type { DriftStats, IntegrityStats, HeadUnresolvedReason, ImageShaClass } from '../../stats.ts';
 import type { ConfigReport, LeverStatus } from '../../config-report.ts';
@@ -20,6 +20,16 @@ import type { SettledContaminationAvailability } from '../model-contamination.ts
 // correct — but only on genuine drift, not on chrome or on the healthy
 // state." Every 'attention' state also carries a text explanation: colour is
 // the second signal here, never the only one.
+//
+// Task 4 (Prod|Test control): this ribbon reads `ribbonIntegrityStats`, NOT
+// the shared `integrityStats` the Integrity panel reads — `integrityStats`
+// follows the Prod/Test toggle now (stats-store.ts), and the ribbon sits
+// directly above panels that DO follow it. A ribbon that silently flipped to
+// Test data underneath a "production only" label would be exactly the
+// ambiguous-reading failure this tab exists to catch. `ribbonIntegrityStats`
+// is always production, regardless of the toggle — see its doc comment in
+// stats-store.ts. `configReport`/`driftStats` need no equivalent: both are
+// already population-independent.
 //
 // Fix round 2 (task-6): "Model integrity" now folds in model CONTAMINATION
 // (a sub-agent running on a model other than its declared frontmatter pin),
@@ -496,17 +506,31 @@ function SimpleCard({ label, view, window }: SimpleCardProps) {
  * Deployment drift and active levers are deliberately unwindowed (the shas
  * are not time-series data, and `/api/config` has no window param at all);
  * model integrity and error rate are, and show it.
+ *
+ * Task 4: the scope note above the cards is the ribbon's own "this is always
+ * production" label — it has to work at a glance, not on inspection, since
+ * the Prod/Test control below this ribbon governs every panel BELOW it, but
+ * not this one. It is chrome, not a caveat, so it is deliberately NOT one of
+ * this tab's five caveat tags ("Needs attention:", "Cannot verify:", etc.) —
+ * minting a sixth would blur the one vocabulary this tab relies on to keep
+ * its epistemic states distinguishable.
  */
 export function StatsRibbon() {
-  const integrity = integrityStats.value;
+  const integrity = ribbonIntegrityStats.value;
   const config = configReport.value;
   const window = statsWindow.value;
   return (
-    <section class="status-ribbon" aria-label="Status ribbon">
-      <DriftCard />
-      <SimpleCard label="Model integrity" view={buildModelIntegrityCard(integrity, config)} window={window} />
-      <SimpleCard label="Active levers" view={buildLeversCard(config)} />
-      <SimpleCard label="Error rate" view={buildErrorRateCard(integrity)} window={window} />
-    </section>
+    <>
+      <p class="status-ribbon__scope-note">
+        <span class="status-ribbon__scope-badge">production only</span>
+        This ribbon always reports production — it does not change when the Prod/Test control below is set to Test.
+      </p>
+      <section class="status-ribbon" aria-label="Status ribbon">
+        <DriftCard />
+        <SimpleCard label="Model integrity" view={buildModelIntegrityCard(integrity, config)} window={window} />
+        <SimpleCard label="Active levers" view={buildLeversCard(config)} />
+        <SimpleCard label="Error rate" view={buildErrorRateCard(integrity)} window={window} />
+      </section>
+    </>
   );
 }

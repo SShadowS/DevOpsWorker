@@ -1528,6 +1528,8 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .stats-view__toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-sm);
   flex-wrap: wrap;
 }
 
@@ -1554,6 +1556,50 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font-weight: 600;
+}
+
+/* Population control (Task 4) — deliberately identical shape to
+   `.window-selector` above (same background/border/padding, same
+   hover/active treatment): it is the same KIND of control (a chrome
+   segmented toggle, not a finding), so it reads as one system with the
+   selector it sits beside rather than a visually distinct new widget.
+   Active state is signalled by background + font-weight, never colour alone
+   — --color-accent is not spent here, matching the window selector's own
+   precedent of reserving accent for genuine "needs attention" states. */
+.population-selector {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.population-selector__btn {
+  padding: 6px 14px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.population-selector__btn:hover { color: var(--color-text-primary); }
+.population-selector__btn--active {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+/* The shared exclusion disclosure banner (Task 4) — one sentence for all
+   four population-aware panels below it (see stats-view.tsx's module doc
+   comment for why one, not four). Plain caption styling: this is a fact,
+   not a warning, so it does not borrow any of the five caveat-tag colours
+   used inside the panels themselves. */
+.stats-view__population-disclosure {
+  text-align: right;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
 }
 
 /* Placeholder slot — one per Task 5-9. Each later task replaces the
@@ -1612,6 +1658,34 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
    `--attention` card also carries literal warning text ("Needs attention:",
    "config may be inert") — colour is never the only signal.
    ============================================================ */
+
+/* Task 4: the ribbon's own "always production" label. A neutral scope badge,
+   not a caveat tag — it uses the same chip shape as `.badge`/`.stats-slot__window`
+   (rounded pill, uppercase, small) but its own muted grey, spending neither
+   `--color-accent` nor any of the semantic `.badge--*` colours: this is
+   chrome stating what the ribbon covers, not a finding about it. */
+.status-ribbon__scope-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.status-ribbon__scope-badge {
+  flex: none;
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
 
 .status-ribbon {
   display: flex;

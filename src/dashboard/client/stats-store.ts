@@ -1,10 +1,11 @@
 import { signal } from '@preact/signals';
-import type { StatsWindow, CostStats, QualityStats, IntegrityStats, OperationalStats, DriftStats } from '../stats.ts';
+import type { StatsWindow, CostStats, QualityStats, IntegrityStats, OperationalStats, DriftStats, Population } from '../stats.ts';
 import type { ConfigReport } from '../config-report.ts';
 
-export type { StatsWindow };
+export type { StatsWindow, Population };
 
 export const STATS_WINDOWS: readonly StatsWindow[] = ['7d', '30d', '90d'];
+export const STATS_POPULATIONS: readonly Population[] = ['prod', 'test'];
 
 /**
  * Fetch lifecycle for one stats/config panel. `'empty'` is deliberately
@@ -54,6 +55,13 @@ export function classifyDriftResponse(data: DriftStats): FetchState<DriftStats> 
 /** The one shared window every stats panel reads — set here, consumed everywhere. */
 export const statsWindow = signal<StatsWindow>('30d');
 
+/** The one shared population every population-aware panel reads. Defaults to
+ *  `'prod'` so a fresh page load — and every existing screenshot/expectation
+ *  of this tab — shows production unless a reader deliberately opts into
+ *  Test. See `ribbonIntegrityStats` below for the one signal that must NOT
+ *  follow this toggle. */
+export const statsPopulation = signal<Population>('prod');
+
 export const costStats = signal<FetchState<CostStats>>({ status: 'loading' });
 export const qualityStats = signal<FetchState<QualityStats>>({ status: 'loading' });
 export const integrityStats = signal<FetchState<IntegrityStats>>({ status: 'loading' });
@@ -61,6 +69,20 @@ export const operationalStats = signal<FetchState<OperationalStats>>({ status: '
 export const driftStats = signal<FetchState<DriftStats>>({ status: 'loading' });
 /** Not windowed — `/api/config` reports resolved configuration, not a time-series stat. */
 export const configReport = signal<FetchState<ConfigReport>>({ status: 'loading' });
+
+/**
+ * The status ribbon (stats-ribbon.tsx) must always describe PRODUCTION,
+ * never whatever population `statsPopulation` currently selects — the
+ * ribbon sits directly above panels that DO follow the toggle, and a ribbon
+ * that silently flipped to Test underneath a "production only" label would
+ * be exactly the ambiguous-reading failure this tab exists to catch (a
+ * screenshot of the screen must not be ambiguous about which population is
+ * which). `integrityStats` is the one signal the ribbon shares with a
+ * toggled panel (Integrity uses it too), so it alone needs a dedicated,
+ * always-prod copy here — `configReport` and `driftStats`, the ribbon's
+ * other two sources, are already population-independent (Task 3 left
+ * `/api/config` and `/api/drift` untouched) and need no equivalent. */
+export const ribbonIntegrityStats = signal<FetchState<IntegrityStats>>({ status: 'loading' });
 
 async function fetchJson<T>(url: string): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
   try {
@@ -85,21 +107,39 @@ export async function loadStatsForWindow(window: StatsWindow): Promise<void> {
   integrityStats.value = { status: 'loading' };
   operationalStats.value = { status: 'loading' };
   driftStats.value = { status: 'loading' };
+  ribbonIntegrityStats.value = { status: 'loading' };
 
-  const [cost, quality, integrity, operational, drift] = await Promise.all([
-    fetchJson<CostStats>(`/api/stats/cost?window=${window}`),
-    fetchJson<QualityStats>(`/api/stats/quality?window=${window}`),
-    fetchJson<IntegrityStats>(`/api/stats/integrity?window=${window}`),
-    fetchJson<OperationalStats>(`/api/stats/operational?window=${window}`),
+  // /api/drift is production-only and unchanged — no population param.
+  const population = statsPopulation.value;
+  const qs = `?window=${window}&population=${population}`;
+  // Only fire a second, prod-pinned integrity request while actually
+  // viewing Test — when the toggle is already 'prod' (the default),
+  // `integrity` below already IS the prod reading the ribbon needs, so
+  // reusing it avoids an identical duplicate query on every load.
+  const needsProdPinnedIntegrity = population !== 'prod';
+
+  const [cost, quality, integrity, operational, drift, ribbonIntegrity] = await Promise.all([
+    fetchJson<CostStats>(`/api/stats/cost${qs}`),
+    fetchJson<QualityStats>(`/api/stats/quality${qs}`),
+    fetchJson<IntegrityStats>(`/api/stats/integrity${qs}`),
+    fetchJson<OperationalStats>(`/api/stats/operational${qs}`),
     fetchJson<DriftStats>(`/api/drift?window=${window}`),
+    needsProdPinnedIntegrity
+      ? fetchJson<IntegrityStats>(`/api/stats/integrity?window=${window}&population=prod`)
+      : Promise.resolve(null),
   ]);
-  if (token !== statsRequestToken) return; // superseded by a later window switch
+  if (token !== statsRequestToken) return; // superseded by a later window/population switch
 
   costStats.value = cost.ok ? classifyWindowedResponse(cost.data) : { status: 'error', message: cost.message };
   qualityStats.value = quality.ok ? classifyWindowedResponse(quality.data) : { status: 'error', message: quality.message };
-  integrityStats.value = integrity.ok ? classifyWindowedResponse(integrity.data) : { status: 'error', message: integrity.message };
+  const integrityResult: FetchState<IntegrityStats> =
+    integrity.ok ? classifyWindowedResponse(integrity.data) : { status: 'error', message: integrity.message };
+  integrityStats.value = integrityResult;
   operationalStats.value = operational.ok ? classifyWindowedResponse(operational.data) : { status: 'error', message: operational.message };
   driftStats.value = drift.ok ? classifyDriftResponse(drift.data) : { status: 'error', message: drift.message };
+  ribbonIntegrityStats.value = ribbonIntegrity == null
+    ? integrityResult
+    : ribbonIntegrity.ok ? classifyWindowedResponse(ribbonIntegrity.data) : { status: 'error', message: ribbonIntegrity.message };
 }
 
 let configRequestToken = 0;
@@ -118,6 +158,18 @@ export function setStatsWindow(next: StatsWindow): void {
   if (statsWindow.value === next) return;
   statsWindow.value = next;
   void loadStatsForWindow(next);
+}
+
+/** Switch the shared population and refetch the four population-aware
+ *  endpoints — mirrors `setStatsWindow` exactly, including its no-op guard.
+ *  Deliberately routed through the SAME `loadStatsForWindow` path the window
+ *  signal already uses rather than a second fetch effect: switching
+ *  population re-runs the identical fetch-and-classify sequence, which reads
+ *  `statsPopulation.value` for the query string on its own. */
+export function setStatsPopulation(next: Population): void {
+  if (statsPopulation.value === next) return;
+  statsPopulation.value = next;
+  void loadStatsForWindow(statsWindow.value);
 }
 
 /** Load everything the Stats & Config tab needs. Called once when the tab
