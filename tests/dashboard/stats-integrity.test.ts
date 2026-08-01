@@ -82,8 +82,10 @@ function configReady(config: ConfigReport): FetchState<ConfigReport> {
 }
 
 // ---------------------------------------------------------------------------
-// buildModelUsageSectionView — delegates to stats-ribbon's assessModelIntegrity
-// so the ribbon's compact card and this panel's table never disagree.
+// buildModelUsageSectionView — delegates to stats-ribbon's assessFlaggedModelKeys
+// so the ribbon's "Model integrity" card and this panel's table never disagree
+// about the [1m]-flagged-key signal. (assessModelIntegrity is a different,
+// two-argument function since fix round 2 — see stats-ribbon.tsx.)
 // ---------------------------------------------------------------------------
 
 describe('buildModelUsageSectionView', () => {

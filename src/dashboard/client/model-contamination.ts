@@ -111,6 +111,18 @@ export type ContaminationAvailability =
   | { status: 'error'; message: string }
   | { status: 'ready'; rows: AgentModelRow[] };
 
+/**
+ * `ContaminationAvailability` minus `'loading'` — the shape a caller has
+ * once it has decided NOT to render anything until the declared-pin fetch
+ * settles one way or the other (fix round 3: `stats-ribbon.tsx`'s combined
+ * "Model integrity" card holds at the ribbon's own `'loading'` status for
+ * the whole card rather than computing a provisional verdict from a partial
+ * signal — see that file's `assessModelIntegrity`). Narrowing the type this
+ * way makes "assessed while still loading" a compile error, not a
+ * discipline the caller has to remember.
+ */
+export type SettledContaminationAvailability = Exclude<ContaminationAvailability, { status: 'loading' }>;
+
 export function buildContaminationAvailability(
   entries: SubAgentModelAttributionEntry[],
   configState: FetchState<ConfigReport>,

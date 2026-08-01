@@ -20,7 +20,7 @@ import {
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { DriftStats, IntegrityStats, SubAgentModelAttributionEntry } from '../../src/dashboard/stats.ts';
 import type { ConfigReport, LeverStatus } from '../../src/dashboard/config-report.ts';
-import type { ContaminationAvailability, AgentModelRow } from '../../src/dashboard/client/model-contamination.ts';
+import type { SettledContaminationAvailability, AgentModelRow } from '../../src/dashboard/client/model-contamination.ts';
 
 // No test in this file may open a database connection or render a component
 // tree (repo convention — see tests/dashboard/tool-breakdown.test.ts). Every
@@ -97,7 +97,7 @@ function subAgentGroup(files: Array<{ file: string; declaredModel: string | null
   return { parentAgent: 'pr-reviewer', dirRelativeToRepo: 'src/agents/pr-reviewer/.claude/agents', files, count: files.length };
 }
 
-function readyContamination(rows: AgentModelRow[]): ContaminationAvailability {
+function readyContamination(rows: AgentModelRow[]): SettledContaminationAvailability {
   return { status: 'ready', rows };
 }
 
@@ -280,7 +280,7 @@ describe('assessFlaggedModelKeys', () => {
   });
 });
 
-describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin contamination, fix round 2)', () => {
+describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin contamination, fix rounds 2-3)', () => {
   test('neither signal fires -> ok, both stated explicitly', () => {
     const result = assessModelIntegrity(integrityFixture(), readyContamination([]));
     expect(result.severity).toBe('ok');
@@ -335,19 +335,14 @@ describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin conta
     expect(result.text).toContain('no model contamination');
   });
 
-  test('contamination loading -> severity reflects ONLY the flagged-key half so far, text says the check is in flight', () => {
-    const result = assessModelIntegrity(integrityFixture(), { status: 'loading' });
-    expect(result.severity).toBe('ok'); // no flagged keys in the default fixture
-    expect(result.text).toContain('loading');
-  });
-
-  test('contamination loading + a flagged key already known -> attention (not downgraded while the other signal is in flight)', () => {
-    const result = assessModelIntegrity(
-      integrityFixture({ modelUsage: { breakdown: [], flaggedKeys: [{ model: 'claude-opus-5[1m]', rows: 1, totalCostUsd: 1, totalOutputTokens: 1, flagged: true }] } }),
-      { status: 'loading' },
-    );
-    expect(result.severity).toBe('attention');
-  });
+  // NOTE: there is deliberately no "contamination loading" test in THIS
+  // describe block any more (fix round 3). `assessModelIntegrity` now takes
+  // `SettledContaminationAvailability`, which excludes `'loading'` at the
+  // type level — calling it while unsettled is a compile error, not a
+  // runtime branch to test. The loading behaviour moved up a layer: see
+  // `buildModelIntegrityCard`'s "holds at loading" tests below, which pin
+  // the actual regression (the card must not report ok/attention while
+  // configState is unresolved).
 
   test('contamination error -> attention, "cannot verify" wording (mirrors ContaminationSection\'s own tag in the panel)', () => {
     const result = assessModelIntegrity(integrityFixture(), { status: 'error', message: '500' });
@@ -454,11 +449,38 @@ describe('buildModelIntegrityCard / buildErrorRateCard', () => {
     expect(view.text).toContain('at least 9/9');
   });
 
-  test('configState still loading while integrityStats is ready -> card reflects the flagged-key half only, not stuck loading', () => {
+  // Fix round 3: reverses round 2's judgement call. Every other ribbon card
+  // (drift, levers, error rate) stays 'loading' until ITS OWN source
+  // resolves; this card is the one exception if it renders a provisional
+  // verdict from half the signal. Holding at 'loading' matches the rest of
+  // the ribbon and avoids a green-to-amber flip once contamination resolves.
+  test('configState still loading while integrityStats is ready -> the WHOLE card holds at loading, matching every other ribbon card', () => {
     const state: FetchState<IntegrityStats> = { status: 'ready', data: integrityFixture() };
     const view = buildModelIntegrityCard(state, { status: 'loading' });
-    expect(view.status).toBe('ok');
-    expect(view.text).toContain('contamination check loading');
+    expect(view).toEqual({ status: 'loading', text: 'Loading…' });
+  });
+
+  // The specific regression fix round 3 exists to prevent: a flagged key is
+  // ALREADY known (a real, ready signal), yet the card must still show
+  // 'loading', never a premature 'ok' (clean would be a lie) and never a
+  // premature 'attention' either (the combined verdict isn't computed until
+  // both sources have settled).
+  test('configState loading + a flagged key already known -> STILL loading, never reports a clean or premature state', () => {
+    const state: FetchState<IntegrityStats> = {
+      status: 'ready',
+      data: integrityFixture({ modelUsage: { breakdown: [], flaggedKeys: [{ model: 'claude-opus-5[1m]', rows: 1, totalCostUsd: 1, totalOutputTokens: 1, flagged: true }] } }),
+    };
+    const view = buildModelIntegrityCard(state, { status: 'loading' });
+    expect(view.status).toBe('loading');
+    expect(view.status).not.toBe('ok');
+    expect(view.status).not.toBe('attention');
+  });
+
+  test('configState errored (not loading) while integrityStats is ready -> still forces attention, "cannot verify" — Finding 1 (round 2) stays intact', () => {
+    const state: FetchState<IntegrityStats> = { status: 'ready', data: integrityFixture() };
+    const view = buildModelIntegrityCard(state, { status: 'error', message: '500' });
+    expect(view.status).toBe('attention');
+    expect(view.text.toLowerCase()).toContain('cannot verify');
   });
 
   test('integrityStats itself not ready -> loading/error/empty pass through unchanged, configState irrelevant', () => {

@@ -3,7 +3,7 @@ import type { FetchState, StatsWindow } from '../stats-store.ts';
 import type { DriftStats, IntegrityStats, HeadUnresolvedReason, ImageShaClass } from '../../stats.ts';
 import type { ConfigReport, LeverStatus } from '../../config-report.ts';
 import { buildContaminationAvailability } from '../model-contamination.ts';
-import type { ContaminationAvailability } from '../model-contamination.ts';
+import type { SettledContaminationAvailability } from '../model-contamination.ts';
 
 // ---------------------------------------------------------------------------
 // Status ribbon (Task 5) — "the reason this entire feature exists." Four
@@ -236,19 +236,25 @@ export function assessFlaggedModelKeys(integrity: IntegrityStats): SimpleAssessm
  * even though the ribbon's shared `SimpleCard` only has ONE generic
  * "Needs attention: " prefix across all four cards — the distinguishing
  * words live in this function's own `text`, not in new ribbon chrome.
+ *
+ * Takes `SettledContaminationAvailability`, not the full `ContaminationAvailability`
+ * (fix round 3) — this function is never called while `configState` is still
+ * loading. `buildModelIntegrityCard` holds the WHOLE card at the ribbon's own
+ * `'loading'` status until both fetches settle, same as every other card on
+ * the ribbon; computing a provisional `'ok'`/`'attention'` from the
+ * flagged-key half alone (the round-2 behaviour) risked a green-to-amber
+ * flip on the one card whose entire reason for existing is model-cost drift
+ * — the exact "unverifiable is not probably-fine" lesson `assessDrift`
+ * already encodes, just for a race instead of a permanent failure. The type
+ * change makes "assessed while unsettled" impossible to reintroduce by
+ * accident: there is no `'loading'` branch left to write here.
  */
-export function assessModelIntegrity(integrity: IntegrityStats, contamination: ContaminationAvailability): SimpleAssessment {
+export function assessModelIntegrity(integrity: IntegrityStats, contamination: SettledContaminationAvailability): SimpleAssessment {
   const flagged = integrity.modelUsage.flaggedKeys;
   const flaggedText = flagged.length === 0
     ? 'no flagged model keys'
     : `${flagged.length} flagged model key(s): ${flagged.map((m) => m.model).join(', ')}`;
 
-  if (contamination.status === 'loading') {
-    return {
-      severity: flagged.length > 0 ? 'attention' : 'ok',
-      text: `n=${integrity.sampleSize} · ${flaggedText} · contamination check loading…`,
-    };
-  }
   if (contamination.status === 'error') {
     return {
       severity: 'attention',
@@ -358,9 +364,19 @@ function simpleCardFromFetch<T>(state: FetchState<T>, assess: (data: T) => Simpl
  * (`integrityState` for the observed side, `configState` for declared pins —
  * fix round 2), so it cannot use the generic single-source
  * `simpleCardFromFetch` helper below. `integrityState` still gates the
- * card's own loading/error/empty exactly as before; `configState` only
- * matters once `integrityState` is `'ready'`, handled inside
- * `assessModelIntegrity` via `buildContaminationAvailability`.
+ * card's own loading/error/empty exactly as before.
+ *
+ * `configState.status === 'loading'` holds the WHOLE card at `'loading'`
+ * (fix round 3) rather than computing a provisional verdict from the
+ * flagged-key half alone — matching every other ribbon card, which stays
+ * loading until ITS OWN source resolves. The round-2 version rendered a
+ * premature `'ok'`/`'attention'` here; if flagged keys were clean and
+ * contamination later resolved positive, that reads as a green-to-amber
+ * flip on the card whose entire job is catching model-cost drift. `'error'`
+ * is a DIFFERENT, deliberately NOT-loading state: a config fetch that has
+ * definitively failed still forces `'attention'` via `assessModelIntegrity`
+ * ("cannot verify" — Finding 1 from fix round 2 stays intact, only the
+ * in-flight case changed here).
  */
 export function buildModelIntegrityCard(
   integrityState: FetchState<IntegrityStats>,
@@ -375,6 +391,9 @@ export function buildModelIntegrityCard(
       return { status: 'empty', text: 'No data recorded in this window.' };
     case 'ready': {
       const contamination = buildContaminationAvailability(integrityState.data.subAgentModelAttribution.entries, configState);
+      if (contamination.status === 'loading') {
+        return { status: 'loading', text: 'Loading…' };
+      }
       const a = assessModelIntegrity(integrityState.data, contamination);
       return { status: a.severity, text: a.text };
     }
