@@ -1763,3 +1763,118 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   .status-ribbon__provenance-row { align-items: flex-start; }
   .status-ribbon__bar { display: none; }
 }
+
+/* ============================================================
+   Integrity panel (Task 6) — replaces the stats-slot-integrity
+   placeholder. Keeps the .stats-slot / .stats-slot--{status} wrapper and
+   header from the Task 4 shell (loading/error/empty border colour is
+   unchanged); everything below .stats-slot__header is new.
+
+   Three section states, not two — see stats-integrity.tsx's module doc
+   comment for why: 'neutral' (dispatch mismatch, effort drift) is
+   deliberately NOT on the ok/attention scale, because a known-instrument
+   caveat measured at 69% would otherwise paint this panel permanently
+   amber. --color-accent is spent only on --attention, exactly like
+   .status-ribbon__item--attention, and always paired with literal text.
+   ============================================================ */
+
+.stats-slot__status-text {
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  margin: 0;
+}
+.stats-slot__status-text--error { color: var(--color-error); }
+
+.integrity-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.integrity-panel__low-sample {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.integrity-section {
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-stage-pending);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+}
+.integrity-section--ok        { border-left-color: var(--color-stage-completed); }
+.integrity-section--attention {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-tertiary));
+}
+.integrity-section--neutral   { border-left-color: var(--color-stage-pending); }
+
+.integrity-section__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: 4px;
+}
+
+.integrity-section__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.integrity-section__badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
+.integrity-section__summary,
+.integrity-section__note {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+.integrity-section__note { color: var(--color-text-muted); }
+.integrity-section__empty { margin: 4px 0 0 0; font-size: 0.82rem; color: var(--color-text-muted); font-style: italic; }
+
+.integrity-section__tag { font-weight: 600; }
+.integrity-section__tag--attention { color: var(--color-accent); }
+.integrity-section__tag--caveat    { color: var(--color-text-secondary); }
+
+.integrity-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+.integrity-table th {
+  text-align: left;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.integrity-table td {
+  padding: 3px 8px 3px 0;
+  color: var(--color-text-secondary);
+}
+.integrity-table__model { font-family: var(--font-mono); color: var(--color-text-primary); }
+.integrity-table__flag { color: var(--color-accent); font-weight: 600; }
+.integrity-table__row--flagged { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+
+@media (max-width: 767px) {
+  .integrity-table { display: block; overflow-x: auto; }
+}

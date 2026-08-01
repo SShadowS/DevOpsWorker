@@ -1,24 +1,22 @@
 import { useEffect } from 'preact/hooks';
 import {
-  statsWindow, costStats, qualityStats, integrityStats, operationalStats, configReport,
+  statsWindow, costStats, qualityStats, operationalStats, configReport,
   setStatsWindow, loadAllStats, STATS_WINDOWS,
 } from '../stats-store.ts';
 import type { FetchState, StatsWindow } from '../stats-store.ts';
 import { formatCost } from '../format.ts';
 import { StatsRibbon } from './stats-ribbon.tsx';
+import { StatsIntegrityPanel } from './stats-integrity.tsx';
 
 // ---------------------------------------------------------------------------
 // Shell for the Stats & Config tab (Task 4). Owns: the third tab's panel
 // container, the shared window selector, and data fetching for all six
-// endpoints with loading/empty/error states. The five sections below are
-// placeholder slots — Tasks 5-9 replace each slot's body with real panel UI.
-// Nothing here renders a chart, a ribbon, or a config list; that is
-// deliberate, not an oversight.
+// endpoints with loading/empty/error states. The remaining placeholder slots
+// below (Config/Task 7, Cost & Quality/Task 8, Operational/Task 9) still get
+// their body from a later task; Integrity (Task 6) has been replaced by its
+// own component (`stats-integrity.tsx`), matching the ribbon's precedent of
+// extracting a finished slot out of the generic `<StatsSlot>` placeholder.
 // ---------------------------------------------------------------------------
-
-function formatPct(rate: number | null): string {
-  return rate == null ? 'n/a' : `${(rate * 100).toFixed(1)}%`;
-}
 
 type SlotStatus = 'loading' | 'error' | 'empty' | 'ready';
 
@@ -124,7 +122,6 @@ export function StatsView() {
   const currentWindow = statsWindow.value;
   const cost = costStats.value;
   const quality = qualityStats.value;
-  const integrity = integrityStats.value;
   const operational = operationalStats.value;
   const config = configReport.value;
 
@@ -144,16 +141,7 @@ export function StatsView() {
         <WindowSelector />
       </div>
 
-      <StatsSlot
-        id="stats-slot-integrity"
-        title="Integrity"
-        taskLabel="Task 6"
-        window={currentWindow}
-        sources={[
-          describeFetchState('Integrity stats', integrity, (d) =>
-            `n=${d.sampleSize} · dispatch mismatch rate ${formatPct(d.dispatch.mismatchRate)} · findings mismatch rate ${formatPct(d.findingsIntegrity.mismatchRate)}`),
-        ]}
-      />
+      <StatsIntegrityPanel />
 
       <StatsSlot
         id="stats-slot-config"
