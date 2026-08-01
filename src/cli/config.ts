@@ -31,6 +31,25 @@ export function resolveAdoField(
 /**
  * Build PipelineConfig from a session path and environment variables.
  */
+/**
+ * Parse `DEFAULT_EFFORT` into the SDK's reasoning-effort level.
+ *
+ * Shared by BOTH config builders on purpose. Their divergence is exactly how
+ * `DEFAULT_MODEL` came to be honoured by one and ignored by the other, leaving a
+ * documented control silently inert — see `models.default` below.
+ *
+ * Returns `undefined` for unset, blank, or unrecognised values, which leaves the SDK
+ * default (`'high'`) in place. An unrecognised value is a no-op rather than an error:
+ * a typo must not hand the SDK an invalid level mid-review.
+ */
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export function parseEffort(raw: string | undefined): PipelineConfig['models']['effort'] {
+  const v = (raw ?? '').trim().toLowerCase();
+  return (EFFORT_LEVELS as readonly string[]).includes(v)
+    ? (v as PipelineConfig['models']['effort'])
+    : undefined;
+}
+
 export function loadConfig(sessionPath: string): PipelineConfig {
   const pat = process.env['AZURE_DEVOPS_PAT'] ?? '';
   // `getCachedManifest()` is sync and may be `null` if `loadManifest()` hasn't
@@ -88,6 +107,7 @@ export function loadConfig(sessionPath: string): PipelineConfig {
       // `||` not `??`: the container env forwards unset vars as '', and an empty string
       // is not nullish — `??` would hand an empty model id to the SDK.
       default: process.env['DEFAULT_MODEL'] || 'claude-opus-5',
+      effort: parseEffort(process.env['DEFAULT_EFFORT']),
       perAgent: {
         // planner inherits the Opus 5 default — strong planning, cheap (Sonnet) coding.
         'coder': 'claude-sonnet-5',
@@ -186,6 +206,7 @@ export function buildConfigFromRepo(
       // `||` not `??`: the container env forwards unset vars as '', and an empty
       // string is not nullish — `??` would hand an empty model id to the SDK.
       default: env['DEFAULT_MODEL'] || 'claude-opus-5',
+      effort: parseEffort(env['DEFAULT_EFFORT']),
       perAgent: {
         // planner inherits the Opus 5 default — strong planning, cheap (Sonnet) coding.
         'coder': 'claude-sonnet-5',

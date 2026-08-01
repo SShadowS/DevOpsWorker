@@ -88,6 +88,7 @@ export function getContainerEnv(): Record<string, string> {
     // that is not forwarded here silently falls back to its default, with no error
     // and nothing in the logs. Add new config env vars here when you add them.
     DEFAULT_MODEL: process.env['DEFAULT_MODEL'] ?? '',
+    DEFAULT_EFFORT: process.env['DEFAULT_EFFORT'] ?? '',
     REVISION_MAX_ATTEMPTS: process.env['REVISION_MAX_ATTEMPTS'] ?? '',
   };
 }

@@ -148,6 +148,19 @@ export const ARMS: Arm[] = [
  */
 export const PROBE_ARMS: Arm[] = [
   { name: 'inverted', agentSet: null, routing: false, scoped: false, bcSecurity: false, model: 'claude-opus-4-8' },
+
+  // Test 2 arms. Both keep the production sub-agent pin (sonnet-5) and vary only what
+  // the ORCHESTRATOR does, because Test 1 showed the orchestrator model is where the
+  // cost — and the verdict — moved.
+  //
+  // `all-sonnet`: cheapest plausible config. Pair with DEFAULT_MODEL=claude-sonnet-5.
+  //
+  // `opus5-low`: same model, less deliberation. Thinking tokens bill at OUTPUT rates,
+  // so this is the only candidate that might cut cost WITHOUT the verdict downgrade
+  // both cheap-model probes showed (opus-5: "request changes" 4/4; cheap models:
+  // "needs discussion" 2/2). Pair with DEFAULT_EFFORT=low and no DEFAULT_MODEL.
+  { name: 'all-sonnet', agentSet: null, routing: false, scoped: false, bcSecurity: false },
+  { name: 'opus5-low', agentSet: null, routing: false, scoped: false, bcSecurity: false },
 ];
 
 /** Every arm reachable by name. Default selection stays `ARMS` — see `selectArms`. */

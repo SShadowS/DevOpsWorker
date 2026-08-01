@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { loadConfig, buildConfigFromRepo } from '../../src/cli/config.ts';
+import { readFileSync } from 'node:fs';
+import { loadConfig, buildConfigFromRepo, parseEffort } from '../../src/cli/config.ts';
 import type { RepoConfig } from '../../src/config/repo-config.ts';
 
 /**
@@ -68,5 +69,77 @@ describe('DEFAULT_MODEL reaches models.default', () => {
     const m = loadConfig('.').models;
     expect(m.perAgent?.['coder']).toBe('claude-sonnet-5');
     expect(m.default).toBe('claude-opus-4-8');
+  });
+});
+
+/**
+ * DEFAULT_EFFORT — reasoning effort, plumbed the same way as DEFAULT_MODEL.
+ *
+ * Thinking tokens bill at OUTPUT rates, so effort is a cost lever that KEEPS the
+ * model. That matters because switching to a cheaper model was measured to downgrade
+ * the review verdict (opus-5: "request changes" 4/4; cheaper models: "needs
+ * discussion" 2/2 on the same PR).
+ *
+ * The parity test is the important one: DEFAULT_MODEL was honoured by one config
+ * builder and ignored by the other, leaving a documented control silently inert.
+ * Effort must not repeat that.
+ */
+describe('DEFAULT_EFFORT reaches models.effort', () => {
+  const SAVED_E = process.env['DEFAULT_EFFORT'];
+  beforeEach(() => { delete process.env['DEFAULT_EFFORT']; });
+  afterEach(() => {
+    if (SAVED_E === undefined) delete process.env['DEFAULT_EFFORT'];
+    else process.env['DEFAULT_EFFORT'] = SAVED_E;
+  });
+
+  test('parseEffort accepts every level the SDK defines', () => {
+    for (const lvl of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      expect(parseEffort(lvl)).toBe(lvl as any);
+    }
+  });
+
+  test('parseEffort is case- and whitespace-tolerant', () => {
+    expect(parseEffort('  LOW ')).toBe('low');
+  });
+
+  test('unset, blank or unrecognised yields undefined — leaving the SDK default', () => {
+    // A typo must be a no-op, never an invalid level handed to the SDK mid-review.
+    expect(parseEffort(undefined)).toBeUndefined();
+    expect(parseEffort('')).toBeUndefined();
+    expect(parseEffort('   ')).toBeUndefined();
+    expect(parseEffort('lowish')).toBeUndefined();
+    expect(parseEffort('none')).toBeUndefined();
+  });
+
+  test('loadConfig honours it — the path review-pr.ts uses', () => {
+    process.env['DEFAULT_EFFORT'] = 'low';
+    expect(loadConfig('.').models.effort).toBe('low');
+  });
+
+  test('loadConfig leaves it undefined when unset, so the SDK default stands', () => {
+    expect(loadConfig('.').models.effort).toBeUndefined();
+  });
+
+  test('both config builders agree — the divergence that made DEFAULT_MODEL inert', () => {
+    process.env['DEFAULT_EFFORT'] = 'low';
+    const viaLoad = loadConfig('.').models.effort;
+    const viaRepo = buildConfigFromRepo(REPO, { ...process.env, AZURE_DEVOPS_PAT: 'x' } as Record<string, string>)
+      .models.effort;
+    expect(viaLoad).toBe('low');
+    expect(viaLoad).toBe(viaRepo);
+  });
+
+  test('runAgent forwards effort to the SDK only when set', () => {
+    // Source-pinned: the option must be conditionally spread, so an unset effort
+    // leaves the SDK default rather than passing an explicit undefined.
+    const src = readFileSync(new URL('../../src/sdk/run-agent.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/\.\.\.\(context\.config\.models\.effort \? \{ effort: context\.config\.models\.effort \} : \{\}\)/);
+  });
+
+  test('DEFAULT_EFFORT is forwarded to spawned containers', () => {
+    // A var read inside the container but absent from the allowlist does nothing,
+    // silently — the failure mode this project keeps hitting.
+    const src = readFileSync(new URL('../../src/cli/watch/container-dispatcher.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/DEFAULT_EFFORT: process\.env\['DEFAULT_EFFORT'\]/);
   });
 });

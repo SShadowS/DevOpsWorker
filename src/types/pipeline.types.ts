@@ -51,6 +51,18 @@ export interface PipelineConfig {
     default: string;
     /** Per-agent model overrides. Key = agent name. */
     perAgent?: Record<string, string>;
+    /**
+     * Reasoning effort passed to the SDK. `undefined` leaves the SDK default
+     * (`'high'`), which is what every run before this knob existed used.
+     *
+     * Thinking tokens bill at OUTPUT rates, so this is a cost lever that keeps the
+     * model — a different trade from switching to a cheaper model, which was measured
+     * to downgrade the review verdict.
+     *
+     * The SDK SILENTLY DOWNGRADES a level the model does not support, so a run using
+     * this must verify what actually applied rather than trust what was requested.
+     */
+    effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   };
 
   costs: {

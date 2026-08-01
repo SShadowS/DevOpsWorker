@@ -254,6 +254,10 @@ export async function runAgent<T extends z.ZodType>(
   logger?.logJson('AGENT CONFIG', {
     name: agentName,
     model,
+    // Logged so a run's effort is recoverable from its transcript. The SDK silently
+    // downgrades an unsupported level, so this records what was REQUESTED — the
+    // applied level has to be read back from the run itself.
+    effort: context.config.models.effort ?? '(sdk default: high)',
     maxTurns: knobs.maxTurns,
     allowedTools: effectiveTools,
     mcpServers: Object.keys(resolvedMcpServers),
@@ -285,6 +289,10 @@ export async function runAgent<T extends z.ZodType>(
             disallowedTools: config.disallowedTools,
             mcpServers: resolvedMcpServers,
             model,
+            // Omitted entirely when unset, so the SDK default ('high') applies —
+            // passing `undefined` explicitly would be equivalent, but spreading keeps
+            // the option absent from the object a reader inspects.
+            ...(context.config.models.effort ? { effort: context.config.models.effort } : {}),
             cwd,
             maxTurns: knobs.maxTurns,
             maxBudgetUsd: config.maxBudgetUsd,
