@@ -35,7 +35,7 @@ export function PRReviewList() {
         return (
           <div key={r.id}>
             <div
-              class={`pr-review-row ${r.error ? 'pr-review-row--error' : ''} ${r.pendingStatus ? 'pr-review-row--pending' : ''} ${interactive ? 'pr-review-row--clickable' : ''}`}
+              class={`pr-review-row ${badgeForReview(r) ? 'pr-review-row--test' : ''} ${r.error ? 'pr-review-row--error' : ''} ${r.pendingStatus ? 'pr-review-row--pending' : ''} ${interactive ? 'pr-review-row--clickable' : ''}`}
               role={interactive ? 'button' : undefined}
               tabIndex={interactive ? 0 : undefined}
               aria-expanded={interactive ? expanded : undefined}

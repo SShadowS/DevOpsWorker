@@ -865,6 +865,12 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .pr-review-row { display: flex; flex-direction: column; gap: 4px; padding: var(--space-sm) var(--space-md); background: var(--color-bg-secondary); border-radius: 6px; border-left: 3px solid var(--color-border); transition: background 0.15s; }
 .pr-review-row:hover { background: var(--color-bg-hover); }
+/* A test run is a fact, not a problem: it gets its own stripe colour but is NOT dimmed
+   the way --error and --pending are, and never uses --color-accent, which is reserved
+   across this tab for "needs attention". Declared BEFORE --error/--pending so that a
+   failed or in-flight test run still shows the stripe for the state that needs acting
+   on — the `test` badge continues to identify it either way. */
+.pr-review-row--test { border-left-color: var(--color-info); }
 .pr-review-row--error { border-left-color: var(--color-error); opacity: 0.7; }
 .pr-review-row--pending { border-left-color: var(--color-text-muted); opacity: 0.6; }
 .pr-review-row--pending .pr-review-row__pr { color: var(--color-text-secondary); }
