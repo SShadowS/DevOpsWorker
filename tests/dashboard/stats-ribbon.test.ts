@@ -62,6 +62,7 @@ function integrityFixture(overrides: Partial<IntegrityStats> = {}): IntegritySta
     inferredEffort: { inferred: true, bands: { high: [43_000, 56_000], low: [21_000, 27_000] }, drift: { overall: { high: 0, low: 0, other: 0, unknown: 0 }, earlierHalf: { high: 0, low: 0, other: 0, unknown: 0 }, laterHalf: { high: 0, low: 0, other: 0, unknown: 0 } }, note: '' },
     findingsIntegrity: { comparedRows: 0, mismatchCount: 0, mismatchRate: null },
     errorRate: { count: 0, total: 100, rate: 0 },
+    subAgentModelAttribution: { entries: [], note: '' },
     ...overrides,
   };
 }

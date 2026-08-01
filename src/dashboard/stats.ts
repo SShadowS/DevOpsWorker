@@ -309,6 +309,52 @@ export function dispatchCountsForPercentile(rows: Array<{ tool_calls: Record<str
 }
 
 // ---------------------------------------------------------------------------
+// Pure shaping — per-sub-agent model attribution (contamination, observed side)
+// ---------------------------------------------------------------------------
+
+export interface SubAgentModelAttributionEntry {
+  agent: string;
+  /** `null` when the sub_agents entry has no `model` field recorded — never
+   *  coerced to a fake model string. */
+  model: string | null;
+  count: number;
+}
+
+/**
+ * Aggregates HOW MANY runs each named sub-agent (the `sub_agents` object KEY —
+ * same identity `rosterCount` already uses) executed under each OBSERVED
+ * model. This is the observed side only. Comparing it against each agent's
+ * DECLARED frontmatter pin is deliberately NOT done here: the pin lives in
+ * `ConfigReport` (`/api/config`), a separate, unwindowed endpoint this module
+ * has no access to (and should not — see the module doc comment on layering).
+ * The client (`stats-integrity.tsx`) already fetches both signals and does
+ * the cross-reference where both are in hand.
+ *
+ * Sorted by agent name, then by count descending within an agent, so the
+ * most common observed model for a given agent reads first.
+ */
+export function aggregateSubAgentModelAttribution(
+  rows: Array<Record<string, { model?: string }> | null>,
+): SubAgentModelAttributionEntry[] {
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    if (!row) continue;
+    for (const [agent, usage] of Object.entries(row)) {
+      const model = usage?.model ?? null;
+      totals.set(`${agent} ${model ?? ''}`, (totals.get(`${agent} ${model ?? ''}`) ?? 0) + 1);
+    }
+  }
+  return [...totals.entries()]
+    .map(([key, count]) => {
+      const sep = key.indexOf(' ');
+      const agent = key.slice(0, sep);
+      const modelPart = key.slice(sep + 1);
+      return { agent, model: modelPart === '' ? null : modelPart, count };
+    })
+    .sort((a, b) => a.agent.localeCompare(b.agent) || b.count - a.count);
+}
+
+// ---------------------------------------------------------------------------
 // Pure shaping — tool mix
 // ---------------------------------------------------------------------------
 
@@ -373,6 +419,11 @@ export function classifyEffort(outputTokens: number | null): EffortBand {
 
 interface SubAgentTokenUsage {
   tokens?: { output?: number };
+  /** Model this sub-agent ran on, as reported on its assistant messages —
+   *  see `SubAgentUsage.model` in `pipeline.types.ts`. Optional here because
+   *  older rows and the SDK's own `?` on that field both mean it may be
+   *  absent; consumed by `aggregateSubAgentModelAttribution` below. */
+  model?: string;
 }
 
 /**
@@ -826,6 +877,17 @@ export interface IntegrityStats extends WindowMeta {
     mismatchRate: number | null;
   };
   errorRate: { count: number; total: number; rate: number | null };
+  /** Observed per-sub-agent model attribution — the OTHER half of "model
+   *  contamination" (`modelUsage.flaggedKeys` above is the `[1m]`-pattern
+   *  half). Declared pins are NOT joined in here — see
+   *  `aggregateSubAgentModelAttribution`'s doc comment for why that
+   *  cross-reference belongs to the client, which already holds both
+   *  `IntegrityStats` (windowed) and `ConfigReport` (unwindowed, declared
+   *  pins) without this endpoint needing to reach across that boundary. */
+  subAgentModelAttribution: {
+    entries: SubAgentModelAttributionEntry[];
+    note: string;
+  };
 }
 
 export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow): Promise<IntegrityStats> {
@@ -876,6 +938,8 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow):
 
   const errorCount = rows.filter((r) => r.error != null).length;
 
+  const subAgentModelAttribution = aggregateSubAgentModelAttribution(rows.map((r) => r.sub_agents));
+
   return {
     ...buildWindowMeta(window, totalN),
     modelUsage: {
@@ -913,6 +977,15 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow):
       count: errorCount,
       total: rows.length,
       rate: rows.length > 0 ? errorCount / rows.length : null,
+    },
+    subAgentModelAttribution: {
+      entries: subAgentModelAttribution,
+      note:
+        'Observed models only — sub_agents is a known, nondeterministic undercount of true dispatch counts ' +
+        "(see dispatch.mismatchRate above): a dispatch missing from this roster has no model recorded here at " +
+        'all. Model contamination could therefore be WORSE than these counts show, never better. This field ' +
+        "reports what ran, not whether it matched what was pinned — cross-reference against each agent's " +
+        'declared frontmatter pin (/api/config) to find actual deviations.',
     },
   };
 }

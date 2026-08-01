@@ -20,6 +20,7 @@ import {
   dispatchCount,
   rosterCount,
   dispatchCountsForPercentile,
+  aggregateSubAgentModelAttribution,
   aggregateToolMix,
   classifyEffort,
   orchestratorOutputTokens,
@@ -363,6 +364,55 @@ describe('dispatchCountsForPercentile — defines the dispatch median/p90 popula
 
   test('empty input is an empty population, not an error', () => {
     expect(dispatchCountsForPercentile([])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-sub-agent model attribution — the observed side of contamination
+// detection (fix round 1: the declared-vs-observed comparison itself lives
+// client-side in stats-integrity.tsx, which has both this endpoint's
+// windowed data and /api/config's declared pins in hand).
+// ---------------------------------------------------------------------------
+
+describe('aggregateSubAgentModelAttribution', () => {
+  test('counts runs per agent per observed model, across rows', () => {
+    const rows: Array<Record<string, { model?: string }> | null> = [
+      { 'al-performance-analyzer': { model: 'claude-sonnet-5' } },
+      { 'al-performance-analyzer': { model: 'claude-sonnet-5' } },
+      { 'al-performance-analyzer': { model: 'claude-opus-5' } },
+    ];
+    const result = aggregateSubAgentModelAttribution(rows);
+    expect(result).toEqual([
+      { agent: 'al-performance-analyzer', model: 'claude-sonnet-5', count: 2 },
+      { agent: 'al-performance-analyzer', model: 'claude-opus-5', count: 1 },
+    ]);
+  });
+
+  test('a missing model field reads as null, never a fake model string', () => {
+    const rows: Array<Record<string, { model?: string }> | null> = [{ 'general-purpose': {} }];
+    expect(aggregateSubAgentModelAttribution(rows)).toEqual([{ agent: 'general-purpose', model: null, count: 1 }]);
+  });
+
+  test('null rows are skipped, not thrown on', () => {
+    expect(aggregateSubAgentModelAttribution([null, null])).toEqual([]);
+  });
+
+  test('multiple agents are kept separate, sorted by agent name then count descending', () => {
+    const rows: Array<Record<string, { model?: string }> | null> = [
+      { 'code-quality-assessor': { model: 'claude-sonnet-5' } },
+      { 'al-architecture-analyzer': { model: 'claude-opus-5' } },
+      { 'al-architecture-analyzer': { model: 'claude-sonnet-5' } },
+      { 'al-architecture-analyzer': { model: 'claude-sonnet-5' } },
+    ];
+    const result = aggregateSubAgentModelAttribution(rows);
+    expect(result.map((e) => e.agent)).toEqual(['al-architecture-analyzer', 'al-architecture-analyzer', 'code-quality-assessor']);
+    // Within al-architecture-analyzer, the more common model (sonnet, 2) sorts before the rarer one (opus, 1).
+    expect(result[0]).toEqual({ agent: 'al-architecture-analyzer', model: 'claude-sonnet-5', count: 2 });
+    expect(result[1]).toEqual({ agent: 'al-architecture-analyzer', model: 'claude-opus-5', count: 1 });
+  });
+
+  test('an empty sub_agents object contributes nothing (matches rosterCount treating {} as uncovered)', () => {
+    expect(aggregateSubAgentModelAttribution([{}])).toEqual([]);
   });
 });
 
@@ -770,6 +820,21 @@ describe('stats.ts SQL shape', () => {
     const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
     expect(fn![0]).toMatch(/dispatchSampleSize:\s*dispatchCounts\.length/);
+  });
+
+  // Fix round 1 (task-6): the endpoint previously discarded sub_agents[*].model
+  // entirely — modelUsage only ever saw model_usage (keyed by model id, not by
+  // sub-agent). This wires the OBSERVED half of contamination detection into
+  // the payload; the declared-pin half is cross-referenced client-side.
+  test('getIntegrityStats wires subAgentModelAttribution from the same sub_agents column, and states the undercount direction', () => {
+    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    expect(body).toMatch(/aggregateSubAgentModelAttribution\(rows\.map\(\(r\) => r\.sub_agents\)\)/);
+    expect(body).toMatch(/subAgentModelAttribution:\s*\{/);
+    // The undercount must be stated as a WORSE-not-better direction, not a
+    // vague "may be incomplete" — matching the fix round's explicit ask.
+    expect(body).toContain('WORSE than these counts show, never better');
   });
 
   // Fix-round-1 regression pin: the cost split previously exposed a plain
