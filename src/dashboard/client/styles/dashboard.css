@@ -1773,9 +1773,13 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   gap: var(--space-md);
 }
 
+/* Fix round 1: --color-text-muted measured 2.6-3.1:1, fails WCAG AA. This is
+   the "Small sample: n=X ... every statistic below is a small-sample
+   reading" text — non-negotiable #5 in design-constraints.md ("Small
+   samples say so") — missed in the first sweep. */
 .integrity-panel__low-sample {
   margin: 0;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: 0.8rem;
   font-style: italic;
 }
@@ -1843,9 +1847,16 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   margin-top: 6px;
   font-size: 0.8rem;
 }
+/* Fix round 1: this and the other three new tables' `th` rules
+   (.config-table, .cost-table/.quality-table, .operational-table) were
+   --color-text-muted (2.6-3.1:1, fails AA) — checked against the incumbent
+   tables at 8129ee0 (before this plan started): .plan-table/.telemetry-table/
+   .tool-table all use --color-text-secondary and pass. These five new
+   tables were the deviation from the house convention, not the other way
+   round — bumped to match. */
 .integrity-table th {
   text-align: left;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-weight: 600;
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -1924,10 +1935,18 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
    real content per design-constraints.md #4, not decoration. */
 .config-panel__qualifier { color: var(--color-text-secondary); }
 
+/* Fix round 1: live-verified — the resting (non-hover) colour is this rule's
+   own --color-text-muted (2.6-3.1:1, fails AA); an earlier live check
+   accidentally read the :hover override instead (Playwright's virtual
+   cursor stays over the element after a `.click()`), which reads
+   --color-text-primary and masked this. Confirmed by reading the actual
+   CSSOM rule for .config-panel__toggle-label, not just the hovered
+   computed style. This is the "Show details"/"Hide details" label — the
+   only affordance telling a reader the row is a disclosure control. */
 .config-panel__toggle-label {
   flex-shrink: 0;
   font-size: 0.78rem;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -2036,9 +2055,10 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   margin-top: 6px;
   font-size: 0.8rem;
 }
+/* Fix round 1: see .integrity-table th's comment — same deviation, same fix. */
 .config-table th {
   text-align: left;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-weight: 600;
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -2048,9 +2068,29 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 }
 .config-table td { padding: 3px 8px 3px 0; color: var(--color-text-secondary); vertical-align: top; }
 .config-table__mono { font-family: var(--font-mono); color: var(--color-text-primary); }
-.config-table__none { color: var(--color-text-muted); font-style: italic; }
+/* Fix round 1: live-verified with getComputedStyle. `.config-table__none`
+   is a real, live AA failure — it's a <span> nested in a <td>, so it gets
+   its own directly-specified colour (2.6-3.1:1, fails) rather than
+   inheriting the td's --color-text-secondary. This is constraint #3's own
+   "none declared"/"no overlay override" word, mandated to read as a word,
+   not a blank — measured at rgb(100,116,139) live before this fix. */
+.config-table__none { color: var(--color-text-secondary); font-style: italic; }
 .config-table__row--active { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
-.config-table__row--inert  { color: var(--color-text-muted); }
+/* `.config-table__row--inert` sets `color` on the <tr>, but every child
+   <td> in this table matches `.config-table td` directly (a MORE specific
+   selector for that element, 0,1,1 vs 0,1,0) — a direct match always wins
+   over an ancestor's value, so inheritance from this rule never even gets
+   consulted. Verified live by forcing a real present-but-inert lever
+   (PR_REVIEW_NO_POST=true): the <tr> itself computes to muted
+   (rgb(100,116,139)), but every cell — "present, but inert" included —
+   already renders at rgb(148,163,184), i.e. --color-text-secondary, and
+   already passes AA. The declared value was dead, not a live failure, but
+   it's also exactly backwards: this is the declared-but-silently-ignored
+   config scenario the whole plan is about (the PR_REVIEW_NO_POST case), so
+   dimming it was never the right call even if it had worked. Aligning the
+   source with what already (accidentally) renders removes the trap for
+   whoever next touches `.config-table td` and makes this row real muted. */
+.config-table__row--inert  { color: var(--color-text-secondary); }
 
 @media (max-width: 767px) {
   .config-dl { grid-template-columns: 1fr; row-gap: 2px; }
@@ -2101,9 +2141,11 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   gap: var(--space-sm);
 }
 
+/* Fix round 1: same "Small sample: n=X ..." text, same missed muted/AA
+   failure as .integrity-panel__low-sample above. */
 .cost-panel__low-sample, .quality-panel__low-sample {
   margin: 0;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: 0.8rem;
   font-style: italic;
 }
@@ -2203,9 +2245,10 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   margin-top: 6px;
   font-size: 0.8rem;
 }
+/* Fix round 1: see .integrity-table th's comment — same deviation, same fix. */
 .cost-table th, .quality-table th {
   text-align: left;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-weight: 600;
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -2395,9 +2438,10 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   margin-top: 6px;
   font-size: 0.8rem;
 }
+/* Fix round 1: see .integrity-table th's comment — same deviation, same fix. */
 .operational-table th {
   text-align: left;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-weight: 600;
   font-size: 0.7rem;
   text-transform: uppercase;
