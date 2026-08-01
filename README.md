@@ -86,6 +86,9 @@ bun run pipeline -- webhook-server [--port <n>]
 | `AZURE_DEVOPS_PROJECT` | No | Project name (default: `Your Project`; normally set via the overlay `ado` defaults) |
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | No | HMAC secret for webhook signature validation |
 | `WEBHOOK_PORT` | No | Webhook server port (default: `3002`) |
+| `BUILD_SHA` | No | Baked into images as a build arg and recorded per review; drives the dashboard's deployment-drift panel. Export it before `docker compose build`, or the image bakes the literal `unknown` |
+| `DEFAULT_MODEL` | No | Orchestrator model (default: `claude-opus-5`). An empty string falls through to the default too — resolution uses `\|\|`, not `??` |
+| `DEFAULT_EFFORT` | No | Reasoning effort; unset means the SDK default |
 
 \* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.
 
@@ -203,7 +206,7 @@ Some agents run outside the pipeline orchestrator, triggered by dashboard action
 
 ### State Storage
 
-Pipeline state is stored in PostgreSQL (JSONB columns). All services (watcher, dashboard, webhook server, pipeline containers) connect via the `DATABASE_URL` environment variable over the `pipeline-net` Docker network. Tables: `pipeline_state`, `pipeline_config`, `stage_logs`, `actions` (queue), `runner_status`, `webhook_events`.
+Pipeline state is stored in PostgreSQL (JSONB columns). All services (watcher, dashboard, webhook server, pipeline containers) connect via the `DATABASE_URL` environment variable over the `pipeline-net` Docker network. Tables: `pipeline_state`, `pipeline_config`, `stage_logs`, `actions` (queue), `runner_status`, `webhook_events`, `pr_reviews`.
 
 Schema is managed by `src/db/postgres.ts` — `CREATE TABLE IF NOT EXISTS` on first connection. Store implementations in `src/db/pg-*.ts` implement interfaces from `src/pipeline/*-store.interface.ts`. The `connectStores()` helper (`src/db/connect-stores.ts`) creates all store instances from `DATABASE_URL`.
 
@@ -259,7 +262,7 @@ The full stack runs as four services on a shared `pipeline-net` Docker network:
 |---------|------|-------------|
 | `postgres` | 5432 | PostgreSQL 17 — shared state store |
 | `watcher` | — | Polls Azure DevOps, spawns pipeline containers |
-| `dashboard` | 3000 | Web UI for monitoring and actions |
+| `dashboard` | 3000 | Web UI for monitoring and actions; mounts the repo's `.git` read-only to resolve `HEAD` for the drift panel |
 | `webhook-server` | 3001 | Receives Azure DevOps PR webhook events |
 
 ```bash
@@ -270,6 +273,45 @@ docker compose down               # Stop everything
 ```
 
 Pipeline containers are spawned by the watcher onto `pipeline-net`, giving them direct access to PostgreSQL via `DATABASE_URL=postgres://pipeline:...@postgres:5432/pipeline`.
+
+## Dashboard
+
+Three tabs at `http://localhost:3000`:
+
+| Tab | Shows |
+|-----|-------|
+| **Sessions** | Live pipeline runs — stage progression, logs, queued actions, telemetry |
+| **PR Reviews** | Automated review history, findings, and per-review detail |
+| **Stats & Config** | Is anything broken right now, what settings are actually in effect, what the numbers say |
+
+### Stats & Config
+
+A persistent status ribbon — deployment drift, model integrity, active levers, error rate —
+sits above five panels: resolved configuration, integrity, cost, quality, and operational
+statistics. All of it is read-only.
+
+The tab exists because a control can be set, forwarded, documented, and read by nobody.
+`docker compose up -d` recreates a container from the *existing* image without rebuilding
+it, so a variable can be present in a service's environment while the code that reads it is
+several builds old — no error, just a setting that does nothing.
+
+**Deployment drift.** Three build shas are compared: `HEAD`, the compose services, and the
+image that produced the most recent review. Services bake `BUILD_SHA` at image-build time,
+`pr_reviews.image_sha` records it per review, and `HEAD` is resolved live from a read-only
+`.git` bind mount. A distance that cannot be computed reads "distance unknown" — never `0`,
+which would look like agreement.
+
+**Resolved configuration** reports what the code actually resolves, not what a file
+declares. Where a value is a fallback rather than a choice, it says so. Where two
+independent config builders could disagree, both are resolved and compared on every request.
+Eval levers are classified by evaluating the same condition the consuming code evaluates, so
+a variable that is present but inert is reported as inert rather than as active.
+
+**Every statistic states what it cannot tell you.** Sample size and time window are always
+shown. Where a metric derives from sparse telemetry, its coverage is rendered beside it — a
+share computed from 10% of a window is labelled as such rather than presented as fact.
+Counts from an instrument known to undercount are stated as floors. Values inferred rather
+than recorded are labelled inferred. No state is conveyed by colour alone.
 
 ## Webhook Server
 
