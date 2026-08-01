@@ -510,7 +510,7 @@ function ErrorBreakdownTable({ rows }: { rows: ErrorCategoryRowView[] }) {
             <td>
               {r.label}
               {r.key === 'rate-limit' && r.count > 0 && (
-                <span class="operational-table__flag" title="A rate-limit event blocks review throughput"> ⚠</span>
+                <span class="operational-table__flag" title="A rate-limit event blocks review throughput"> ⚠ rate-limited</span>
               )}
             </td>
             <td>{r.count}</td>

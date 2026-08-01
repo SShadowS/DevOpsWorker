@@ -419,11 +419,21 @@ function ProvenanceTable({ rows }: { rows: ProvenanceRow[] }) {
         <div class="status-ribbon__provenance-row" key={row.label}>
           <span class="status-ribbon__provenance-label">{row.label}</span>
           <span class={`status-ribbon__provenance-value ${row.isSha ? 'status-ribbon__sha' : ''}`}>{row.display}</span>
-          <span class="status-ribbon__bar" aria-hidden="true">
-            {row.barPosition != null && (
+          {/* Task 10 fix: a `barPosition: null` row (today, EVERY production
+              "spawned image" row — image_sha is always null) used to still
+              render this track, just with no dot in it. A track with nothing
+              plotted on it reads as an unfinished/loading progress bar, not
+              as "there is no position to show" — the opposite of what
+              `describeNonShaState`'s text already says next to it. Omitting
+              the track entirely (rather than rendering an empty one) is the
+              fix: the row still has its label and word-based value, it just
+              has no decorative element implying a measurement that was never
+              taken. */}
+          {row.barPosition != null && (
+            <span class="status-ribbon__bar" aria-hidden="true">
               <span class="status-ribbon__bar-dot" style={{ left: `${row.barPosition * 100}%` }} />
-            )}
-          </span>
+            </span>
+          )}
           {row.distanceText && <span class="status-ribbon__distance">{row.distanceText}</span>}
         </div>
       ))}

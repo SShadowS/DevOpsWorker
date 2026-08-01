@@ -1591,41 +1591,17 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   padding: 1px 6px;
 }
 
-.stats-slot__task-tag {
-  margin-left: auto;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.stats-slot__sources {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.stats-slot__source {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  font-size: 0.85rem;
-}
-
-.stats-slot__source-label { color: var(--color-text-secondary); min-width: 140px; }
-.stats-slot__source-message { color: var(--color-text-primary); }
-.stats-slot__source--error .stats-slot__source-message { color: var(--color-error); }
-.stats-slot__source--loading .stats-slot__source-message { color: var(--color-text-muted); }
-
-.stats-slot__placeholder-note {
-  margin-top: var(--space-sm);
-  padding-top: var(--space-sm);
-  border-top: 1px dashed var(--color-border-muted);
-  color: var(--color-text-muted);
-  font-size: 0.8rem;
-  font-style: italic;
-}
+/* Task 10: `.stats-slot__task-tag`, `.stats-slot__sources`,
+   `.stats-slot__source*`, and `.stats-slot__placeholder-note` were the Task 4
+   placeholder's `<ul>` + note, rendered for every not-yet-built panel.
+   Task 6-9 each replaced that placeholder with a real panel body (see
+   stats-view.tsx's own module doc comment); grepping the component tree
+   turned up zero remaining users of any of these five classes — only a
+   reference inside a code COMMENT in stats-integrity.tsx. Removed as dead
+   CSS found during this pass, alongside the assigned `.operational-mono`
+   removal below. `.stats-slot`/`.stats-slot__header`/`.stats-slot__title`/
+   `.stats-slot__window`/`.stats-slot__status-text` are NOT touched — every
+   current panel still renders through that wrapper. */
 
 /* ============================================================
    Status ribbon (Task 5) — "the reason this entire feature exists."
@@ -1753,7 +1729,13 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 }
 
 .status-ribbon__distance {
-  color: var(--color-text-muted);
+  /* Task 10: was --color-text-muted (2.6-3.1:1 on this card's backgrounds —
+     fails WCAG AA's 4.5:1 for normal text). This is the exact commit-count
+     fact the drift card exists to report, not decoration — bumped to
+     --color-text-secondary (4.86-5.71:1, passes AA). Same reasoning applies
+     to every *__note/*__empty/*__exemplar/*__qualifier rule touched in this
+     pass below. */
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
@@ -1844,8 +1826,12 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   font-size: 0.82rem;
   color: var(--color-text-secondary);
 }
-.integrity-section__note { color: var(--color-text-muted); }
-.integrity-section__empty { margin: 4px 0 0 0; font-size: 0.82rem; color: var(--color-text-muted); font-style: italic; }
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 on this card's
+   background — fails WCAG AA (4.5:1) for the caveat/explanation prose this
+   class carries (e.g. "Known instrument caveat: ..."). --color-text-secondary
+   passes (4.86-5.71:1) without a new token. */
+.integrity-section__note { color: var(--color-text-secondary); }
+.integrity-section__empty { margin: 4px 0 0 0; font-size: 0.82rem; color: var(--color-text-secondary); font-style: italic; }
 
 .integrity-section__tag { font-weight: 600; }
 .integrity-section__tag--attention { color: var(--color-accent); }
@@ -1909,7 +1895,12 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   text-align: left;
   background: none;
   border: none;
-  padding: 0;
+  /* Task 10: was `padding: 0`, measuring 23px tall live — under the WCAG 2.2
+     Target Size (Minimum) 24px floor (SC 2.5.8) for the only disclosure
+     control in this panel. Vertical padding alone (no horizontal, it's
+     already full-width) clears the floor without changing the visible text
+     size. */
+  padding: 5px 0;
   cursor: pointer;
   color: var(--color-text-primary);
   font: inherit;
@@ -1928,7 +1919,10 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .config-panel__summary { flex: 1 1 auto; font-size: 0.9rem; color: var(--color-text-secondary); }
 .config-panel__summary--attention { color: var(--color-text-primary); }
 
-.config-panel__qualifier { color: var(--color-text-muted); }
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 here — fails WCAG AA
+   (4.5:1). This is the "fallback — DEFAULT_MODEL unset" qualifier text,
+   real content per design-constraints.md #4, not decoration. */
+.config-panel__qualifier { color: var(--color-text-secondary); }
 
 .config-panel__toggle-label {
   flex-shrink: 0;
@@ -1946,6 +1940,21 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   padding-top: var(--space-sm);
   border-top: 1px solid var(--color-border-muted);
 }
+/* Task 10 fix — real bug, confirmed live: the UA stylesheet's own
+   `[hidden] { display: none }` rule has the SAME specificity (0,1,0) as the
+   class selector above and loses the cascade because this author rule comes
+   later in the sheet. The result: `hidden={!expanded}` (stats-config.tsx)
+   set the attribute correctly, but `.config-panel__body` stayed
+   `display: flex` regardless — the ENTIRE ~2000px expanded body (every
+   section, every link) was always rendered, always in the accessibility
+   tree, and always in the keyboard tab order, even with the toggle showing
+   "▸ Show details" / `aria-expanded="false"`. "Collapsed by default" — the
+   panel's whole reason for a disclosure control, per task-7-brief.md and
+   design-constraints.md's Operate-mode scanability principle — was not
+   happening in the actual rendered page, only in the component's own state.
+   The attribute-selector override below has higher specificity (0,1,1) than
+   either rule above and wins regardless of source order. */
+.config-panel__body[hidden] { display: none; }
 
 .config-panel__generated-at { font-style: italic; }
 
@@ -2002,14 +2011,21 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 
 .config-section__summary,
 .config-section__note { margin: 4px 0 0 0; font-size: 0.82rem; color: var(--color-text-secondary); }
-.config-section__note { color: var(--color-text-muted); }
-.config-section__empty { margin: 4px 0 0 0; font-size: 0.82rem; color: var(--color-text-muted); font-style: italic; }
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 here — fails WCAG AA
+   (4.5:1) for the note/empty/none prose these three rules render (the
+   "Declared, not guaranteed: ..." caveat, "no overlay override", etc.) —
+   --color-text-secondary passes (4.86-5.71:1). */
+.config-section__empty { margin: 4px 0 0 0; font-size: 0.82rem; color: var(--color-text-secondary); font-style: italic; }
 
 .config-tag { font-weight: 600; }
 .config-tag--attention { color: var(--color-accent); }
 .config-tag--caveat    { color: var(--color-text-secondary); }
 
-.config-section__link { color: var(--color-info); }
+/* Task 10: was --color-info as link TEXT (3.39:1 on this section's
+   background — fails WCAG AA's 4.5:1 for normal-size text). See
+   .operational-section__link (Operational panel block, below) for the full
+   reasoning — both are the only two links this feature introduces. */
+.config-section__link { color: var(--color-text-secondary); text-decoration: underline; }
 
 .config-subagent-group { margin-top: var(--space-sm); }
 .config-subagent-group__title { font-size: 0.78rem; font-weight: 600; color: var(--color-text-secondary); margin: 0 0 4px 0; }
@@ -2127,11 +2143,14 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   font-size: 0.82rem;
   color: var(--color-text-secondary);
 }
-.cost-section__note, .quality-section__note { color: var(--color-text-muted); }
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 here — fails WCAG AA
+   (4.5:1) for the "Known instrument caveat: ..." prose and empty-state text
+   these carry — --color-text-secondary (already the shared rule above)
+   passes (4.86-5.71:1); no override needed for __note anymore. */
 .cost-section__empty, .quality-section__empty {
   margin: 4px 0 0 0;
   font-size: 0.82rem;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-style: italic;
 }
 
@@ -2281,7 +2300,8 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .severity-bar__swatch--major    { background: var(--color-warning); }
 .severity-bar__swatch--minor    { background: var(--color-info); }
 .severity-bar__swatch--nitpick  { background: var(--color-stage-pending); }
-.severity-bar__legend-divider-note { color: var(--color-text-muted); font-style: italic; }
+/* Task 10: was --color-text-muted (2.6-3.1:1, fails WCAG AA 4.5:1). */
+.severity-bar__legend-divider-note { color: var(--color-text-secondary); font-style: italic; }
 
 @media (max-width: 767px) {
   .cost-dl { grid-template-columns: 1fr; row-gap: 2px; }
@@ -2334,20 +2354,29 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   font-size: 0.82rem;
   color: var(--color-text-secondary);
 }
-.operational-section__note { color: var(--color-text-muted); }
+/* Task 10: --color-text-muted measured at 2.6-3.1:1 here — fails WCAG AA
+   (4.5:1) for the caveat/empty-state prose these carry; --color-text-secondary
+   (already the shared rule above) passes (4.86-5.71:1) — no override needed
+   for __note. */
 .operational-section__empty {
   margin: 4px 0 0 0;
   font-size: 0.82rem;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-style: italic;
 }
-.operational-section__link { color: var(--color-info); }
+/* Task 10: was --color-info as link TEXT (3.39:1 on this section's
+   background — fails WCAG AA's 4.5:1 for normal-size text; the default
+   browser underline, still in effect here since no `a { text-decoration }`
+   reset exists in this file, is a separate, already-satisfied requirement
+   for distinguishing links from prose, not a substitute for text contrast).
+   --color-text-secondary passes (4.86:1); underline made explicit rather
+   than relying on the UA default. Mirrors .config-section__link, the only
+   other link this feature introduces. */
+.operational-section__link { color: var(--color-text-secondary); text-decoration: underline; }
 
 .operational-tag { font-weight: 600; }
 .operational-tag--attention { color: var(--color-accent); }
 .operational-tag--caveat    { color: var(--color-text-secondary); }
-
-.operational-mono { font-family: var(--font-mono); color: var(--color-text-primary); }
 
 .operational-dl {
   display: grid;
