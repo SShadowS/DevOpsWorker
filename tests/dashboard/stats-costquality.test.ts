@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   combinePanelStatus,
   buildCostSplitView,
@@ -321,20 +323,56 @@ describe('buildReadBandGaugeView', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Fix round 2, Finding 2 — the 50% bar is ONE shared constant, not two
-// identically-valued copies. Both stats.ts's cost-split coverage and this
-// file's read-band coverage import the SAME binding from
-// src/dashboard/coverage-thresholds.ts; this test proves that by importing
-// it from BOTH re-export paths and asserting reference equality — a genuine
-// shared constant, not two declarations that happen to agree today.
+// Fix round 2, Finding 2 — the 50% bar is meant to be ONE shared constant,
+// not two identically-valued copies.
+//
+// Fix round 3: the first version of this guard asserted `.toBe()` between
+// three `number` values pulled from three import paths. That is VALUE
+// equality — JS primitives have no reference identity distinct from their
+// value — so it could not distinguish one shared binding from three
+// unrelated `= 50` declarations that happen to agree today. Demonstrated
+// live: a throwaway module with its own independent `export const
+// MIN_RELIABLE_COVERAGE_PCT = 50` (zero import relationship to the leaf
+// module) passed the old assertion. A future revert of this exact fix —
+// re-declaring a local constant in stats-costquality.tsx — would have
+// passed it forever.
+//
+// What CAN fail: source-text regex, the same technique already used for SQL
+// shape (`tests/dashboard/stats.test.ts`'s `describe('SQL shape', ...)`
+// blocks) for exactly the same reason — behavioural tests cannot see how a
+// value was produced, only what it equals. Checked on BOTH consumers named
+// in coverage-thresholds.ts's doc comment, not just the one this round's
+// finding was filed against — stats.ts could regress the same way (drop the
+// import, hand-roll `export const MIN_RELIABLE_COVERAGE_PCT = 50` again)
+// with nothing else here to catch it.
 // ---------------------------------------------------------------------------
 
-describe('MIN_RELIABLE_COVERAGE_PCT — shared, not duplicated', () => {
-  test('stats.ts re-exports the exact same binding stats-costquality.tsx imports directly', async () => {
-    const fromStats = await import('../../src/dashboard/stats.ts');
-    const fromLeafModule = await import('../../src/dashboard/coverage-thresholds.ts');
-    expect(fromStats.MIN_RELIABLE_COVERAGE_PCT).toBe(fromLeafModule.MIN_RELIABLE_COVERAGE_PCT);
-    expect(fromStats.MIN_RELIABLE_COVERAGE_PCT).toBe(MIN_RELIABLE_COVERAGE_PCT);
+describe('MIN_RELIABLE_COVERAGE_PCT — structural: imported, never re-declared locally', () => {
+  const costQualitySrc = readFileSync(
+    fileURLToPath(new URL('../../src/dashboard/client/components/stats-costquality.tsx', import.meta.url)),
+    'utf-8',
+  );
+  const statsSrc = readFileSync(fileURLToPath(new URL('../../src/dashboard/stats.ts', import.meta.url)), 'utf-8');
+
+  test('stats-costquality.tsx imports the constant from the shared leaf module', () => {
+    expect(costQualitySrc).toMatch(/import\s*\{\s*MIN_RELIABLE_COVERAGE_PCT\s*\}\s*from\s*['"]\.\.\/\.\.\/coverage-thresholds\.ts['"]/);
+  });
+
+  test('stats-costquality.tsx does NOT locally re-declare the constant', () => {
+    // This is the exact regression the reviewer demonstrated: a local
+    // `export const MIN_RELIABLE...COVERAGE...= ` would satisfy the import
+    // check above on its own (both can coexist) while quietly shadowing or
+    // duplicating the shared value. Checking for the import's PRESENCE
+    // alone is not enough — this second assertion is load-bearing.
+    expect(costQualitySrc).not.toMatch(/export const MIN_RELIABLE.*COVERAGE.*=/);
+  });
+
+  test('stats.ts (the other consumer) imports the constant from the shared leaf module', () => {
+    expect(statsSrc).toMatch(/import\s*\{\s*MIN_RELIABLE_COVERAGE_PCT\s*\}\s*from\s*['"]\.\/coverage-thresholds\.ts['"]/);
+  });
+
+  test('stats.ts does NOT locally declare the constant\'s value — only imports and re-exports it', () => {
+    expect(statsSrc).not.toMatch(/export const MIN_RELIABLE.*COVERAGE.*=/);
   });
 });
 
