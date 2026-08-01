@@ -20,7 +20,7 @@ import { z } from 'zod';
 
 const ENV_KEYS = [
   'DEFAULT_MODEL', 'DEFAULT_EFFORT', 'PR_REVIEW_ANTHROPIC_API_KEY',
-  'PR_REVIEW_NO_POST', 'PR_REVIEW_SUBAGENT_MODEL', 'PR_REVIEW_SUBAGENT_TOOL_RULE',
+  'PR_REVIEW_NO_POST', 'PR_REVIEW_TEST_RUN', 'PR_REVIEW_SUBAGENT_MODEL', 'PR_REVIEW_SUBAGENT_TOOL_RULE',
   'PR_REVIEW_AGENT_SET', 'PR_REVIEW_AGENT_ROUTING', 'PR_REVIEW_SCOPED_PAYLOAD',
   'PR_REVIEW_SECURITY_BC_ONLY', 'CI_WAITER_MODEL', 'AZURE_DEVOPS_PAT',
 ] as const;
@@ -117,8 +117,20 @@ describe('resolveEvalLevers — the ground-truth trap', () => {
     for (const k of oneFlagKeys) expect(levers.find((l) => l.key === k)!.state).toBe('present-but-inert');
   });
 
-  test('exactly 7 levers are reported (6 eval hooks + PR_REVIEW_NO_POST; the credential is reported separately)', () => {
-    expect(resolveEvalLevers({})).toHaveLength(7);
+  test('exactly 8 levers are reported (6 eval hooks + NO_POST + TEST_RUN; the credential is reported separately)', () => {
+    expect(resolveEvalLevers({})).toHaveLength(8);
+  });
+
+  test('PR_REVIEW_TEST_RUN set to empty string is present-but-inert, never active (same false-alarm shape as PR_REVIEW_NO_POST)', () => {
+    const levers = resolveEvalLevers({ PR_REVIEW_TEST_RUN: '' });
+    const testRun = levers.find((l) => l.key === 'PR_REVIEW_TEST_RUN')!;
+    expect(testRun.raw).toBe('');
+    expect(testRun.state).toBe('present-but-inert');
+  });
+
+  test('PR_REVIEW_TEST_RUN=1 is active', () => {
+    const levers = resolveEvalLevers({ PR_REVIEW_TEST_RUN: '1' });
+    expect(levers.find((l) => l.key === 'PR_REVIEW_TEST_RUN')!.state).toBe('active');
   });
 
   test('PR_REVIEW_ANTHROPIC_API_KEY is never classified as a lever', () => {

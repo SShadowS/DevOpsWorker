@@ -70,6 +70,11 @@ export function getContainerEnv(): Record<string, string> {
     DATABASE_URL: process.env['DATABASE_URL'] ?? '',
     DISCORD_WEBHOOK_URL: process.env['DISCORD_WEBHOOK_URL'] ?? '',
     PR_REVIEW_NO_POST: process.env['PR_REVIEW_NO_POST'] ?? '',
+    // Marks a review run as non-production (isTestRun() in review-pr.ts) even
+    // when it does post — e.g. a scripted probe run outside NO_POST. Forwarded
+    // for the same reason as PR_REVIEW_NO_POST: unset here means every such
+    // run is silently recorded as production, with no error.
+    PR_REVIEW_TEST_RUN: process.env['PR_REVIEW_TEST_RUN'] ?? '',
     // EVAL-ONLY A/B arms (no-ops when unset). Forwarded here because the
     // allowlist is the only route into a spawned container — a var the eval
     // hooks read but that is not listed silently does nothing, with no error.
