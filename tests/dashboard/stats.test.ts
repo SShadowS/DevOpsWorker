@@ -1075,6 +1075,15 @@ describe('stats.ts SQL shape', () => {
     expect(body).toContain('count(*) FILTER (WHERE duration_ms IS NOT NULL)');
     expect(body).toContain('count(*) FILTER (WHERE turns IS NOT NULL)');
     expect(body).not.toMatch(/sampleSize:\s*Number\(durationTurns\?\.n\s*\?\?\s*0\)/);
+    // Pin each sampleSize to ITS OWN count, not just that both FILTER texts
+    // exist somewhere in the function. Without this, swapping the two
+    // fields onto the wrong sampleSize (duration reading turns_n or vice
+    // versa) still satisfies every assertion above — today's data happens
+    // to have equal null counts on both columns, so that bug would be
+    // invisible in the payload too. This is the exact defect class the task
+    // exists to remove.
+    expect(body).toContain('sampleSize: Number(durationTurns?.duration_n ?? 0)');
+    expect(body).toContain('sampleSize: Number(durationTurns?.turns_n ?? 0)');
   });
 
   // -------------------------------------------------------------------------
