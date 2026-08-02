@@ -12,7 +12,7 @@ import { formatDurationDetailed } from '../format.ts';
 // fetch (unlike Task 8's cost+quality slot, which reads two) so this panel's
 // status is gated directly by `operationalStats`, the same shape as
 // `buildIntegrityPanelView`/`buildConfigPanelView` rather than Task 8's
-// `combinePanelStatus`.
+// two-fetch worst-of-two (`worstStatus`, `../assessors.ts`).
 //
 // Five sections:
 //   - Reviews per day  — a real hand-rolled bar chart (chart geometry pulled

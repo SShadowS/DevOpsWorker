@@ -1,4 +1,3 @@
-import type { FetchState } from './stats-store.ts';
 import type { IntegrityStats } from '../stats.ts';
 import type { LeverStatus } from '../config-report.ts';
 import type { SettledContaminationAvailability } from './model-contamination.ts';
@@ -6,18 +5,20 @@ import type { SettledContaminationAvailability } from './model-contamination.ts'
 // ---------------------------------------------------------------------------
 // Shared assessors (Task 3, follow-up) — pure severity/status logic consumed
 // by more than one panel. The four ribbon assessors originally lived inside
-// the status-ribbon component, and the `FetchState` classification helpers
-// below them originally lived inside the Stats & Config tab shell; the
-// Integrity panel and the Config panel already imported the ribbon
-// versions, and a third consumer would have closed an import cycle (a
-// component file exporting shared logic makes every additional consumer
-// choose between a cycle and a copy — the same problem `model-contamination.ts`
-// was extracted to solve earlier). This module holds NO component and NO
-// JSX, so any number of panels can import from it without risk of a cycle —
-// pinned by tests/dashboard/assessors.test.ts.
+// stats-ribbon.tsx, and the `FetchState` classification helpers below them
+// originally lived inside stats-view.tsx; stats-integrity.tsx and
+// stats-config.tsx already imported the ribbon versions, and a third
+// consumer would have closed an import cycle (a component file exporting
+// shared logic makes every additional consumer choose between a cycle and a
+// copy — the same problem `model-contamination.ts` was extracted to solve
+// earlier). This module holds NO component and NO JSX, so any number of
+// panels can import from it without risk of a cycle — pinned by
+// tests/dashboard/assessors.test.ts (fix round 1: the guard checks import
+// syntax, not a bare `.tsx` substring, so this comment is free to name
+// files without tripping it).
 //
-// `assessDrift` stays in the status-ribbon component: only the ribbon uses
-// it, and it returns a drift-specific shape, not `SimpleAssessment`.
+// `assessDrift` stays in stats-ribbon.tsx: only the ribbon uses it, and it
+// returns a drift-specific shape, not `SimpleAssessment`.
 // ---------------------------------------------------------------------------
 
 export interface SimpleAssessment {
@@ -31,7 +32,7 @@ export interface SimpleAssessment {
  *  precisely for what it checks (fix round 2) — it used to be called
  *  `assessModelIntegrity`, but "model integrity" now covers a SECOND signal
  *  (declared-pin contamination, below) this function knows nothing about;
- *  the Integrity panel's "Model usage" section still calls this one
+ *  `stats-integrity.tsx`'s "Model usage" panel section still calls this one
  *  directly, since that section is deliberately scoped to the `[1m]` pattern
  *  only (contamination has its own dedicated panel section). */
 export function assessFlaggedModelKeys(integrity: IntegrityStats): SimpleAssessment {
@@ -64,9 +65,9 @@ export function assessFlaggedModelKeys(integrity: IntegrityStats): SimpleAssessm
  *
  * `contamination.status === 'error'` (the declared-pin fetch failed) is
  * `'attention'` regardless of the flagged-key half, worded as "cannot
- * verify" — mirrors `assessDrift`'s established precedent in the
- * status-ribbon component ("unverifiable is not probably-fine"), and stays
- * consistent with the Integrity panel's `ContaminationSection`'s own
+ * verify" — mirrors `assessDrift`'s established precedent in
+ * stats-ribbon.tsx ("unverifiable is not probably-fine"), and stays
+ * consistent with `stats-integrity.tsx`'s `ContaminationSection`'s own
  * "Cannot verify: " tag (fix round 2, Finding 1) even though the ribbon's
  * shared `SimpleCard` only has ONE generic "Needs attention: " prefix
  * across all four cards — the distinguishing words live in this function's
@@ -74,9 +75,9 @@ export function assessFlaggedModelKeys(integrity: IntegrityStats): SimpleAssessm
  *
  * Takes `SettledContaminationAvailability`, not the full `ContaminationAvailability`
  * (fix round 3) — this function is never called while `configState` is still
- * loading. `buildModelIntegrityCard` (the status-ribbon component) holds the
- * WHOLE card at the ribbon's own `'loading'` status until both fetches
- * settle, same as every other card on the ribbon; computing a provisional
+ * loading. `buildModelIntegrityCard` (stats-ribbon.tsx) holds the WHOLE card
+ * at the ribbon's own `'loading'` status until both fetches settle, same as
+ * every other card on the ribbon; computing a provisional
  * `'ok'`/`'attention'`
  * from the flagged-key half alone (the round-2 behaviour) risked a
  * green-to-amber flip on the one card whose entire reason for existing is
@@ -156,9 +157,13 @@ export function assessErrorRate(errorRate: IntegrityStats['errorRate'], lowSampl
 }
 
 // ---------------------------------------------------------------------------
-// FetchState -> status/message helpers (moved from the Stats & Config tab
-// shell, fix round 2 leftovers — see that file's module doc comment for how
-// they ended up exported with no caller in the tab itself).
+// worstStatus and its supporting types (moved from stats-view.tsx).
+// `describeFetchState`, which used to sit here too, was deleted rather than
+// moved (fix round 1): it had zero production callers before the move and
+// zero after — only its own test called it. `SlotSourceInfo`/`SlotStatus`
+// stayed: they are `worstStatus`'s real parameter/return types, so they are
+// load-bearing even though nothing imports them by name (every caller
+// passes duck-typed object literals).
 // ---------------------------------------------------------------------------
 
 export type SlotStatus = 'loading' | 'error' | 'empty' | 'ready';
@@ -167,27 +172,6 @@ export interface SlotSourceInfo {
   label: string;
   status: SlotStatus;
   message: string;
-}
-
-/** Turn one fetch state into a labelled, human-readable status line. Pure —
- *  exported for unit testing. The four branches are exhaustive: an added
- *  `FetchState` variant fails to typecheck here instead of silently falling
- *  through to a blank slot. */
-export function describeFetchState<T>(
-  label: string,
-  state: FetchState<T>,
-  describeReady: (data: T) => string,
-): SlotSourceInfo {
-  switch (state.status) {
-    case 'loading':
-      return { label, status: 'loading', message: 'Loading…' };
-    case 'error':
-      return { label, status: 'error', message: `Failed to load: ${state.message}` };
-    case 'empty':
-      return { label, status: 'empty', message: 'No data recorded in this window.' };
-    case 'ready':
-      return { label, status: 'ready', message: describeReady(state.data) };
-  }
 }
 
 const STATUS_RANK: Record<SlotStatus, number> = { error: 0, loading: 1, empty: 2, ready: 3 };

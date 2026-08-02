@@ -23,8 +23,15 @@ describe('assessors module', () => {
   });
 
   test('the module holds no JSX — it must not import a component', () => {
+    // Fix round 1: anchored to import/require syntax, not a bare `.tsx`
+    // substring — the earlier version also tripped on prose that merely
+    // NAMED a `.tsx` file in a doc comment, which cost a round rewording
+    // accurate comments into vaguer ones for no real safety gain. `</` stays
+    // a bare substring check: JSX genuinely should never appear here, and
+    // prose essentially never contains a literal `</`.
     const src = read('../../src/dashboard/client/assessors.ts');
-    expect(src).not.toContain('.tsx');
+    expect(src).not.toMatch(/\bfrom\s+['"][^'"]*\.tsx['"]/);
+    expect(src).not.toMatch(/\brequire\(\s*['"][^'"]*\.tsx['"]\s*\)/);
     expect(src).not.toContain('</');
   });
 

@@ -25,11 +25,15 @@ import { OperationalPanel } from './stats-operational.tsx';
 // unit-tested as general-purpose `FetchState` classification helpers with no
 // caller left in this tab (flagged in task-9-report.md as a Task 10 prune
 // candidate, deferred because removing tested, still-correct code was a
-// bigger call than that task's stated scope). Task 3 (follow-up) moved them
-// to `../assessors.ts` instead of pruning them outright — a real second
-// consumer (`stats-costquality.tsx`'s own worst-of-two, previously
-// hand-rolled as `combinePanelStatus` to dodge a circular import) turned up,
-// which settles the "prune or keep" question the earlier report left open.
+// bigger call than that task's stated scope). Task 3 (follow-up) settled the
+// "prune or keep" question the earlier report left open, and it split
+// differently per symbol, not uniformly: `worstStatus` had genuinely
+// acquired a second consumer by then (`stats-costquality.tsx`'s own
+// worst-of-two, previously hand-rolled to dodge a circular import) and moved
+// to `../assessors.ts`, taking its supporting types `SlotSourceInfo`/
+// `SlotStatus` with it. `describeFetchState` had not — still zero
+// production callers — and was deleted along with its tests rather than
+// carried forward under a new path.
 //
 // Prod|Test population control (this task): the four population-aware
 // endpoints (cost/quality/integrity/operational) all report the SAME
