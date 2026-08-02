@@ -28,6 +28,12 @@
   --color-info:          #3b82f6;
   --color-warning:       #f59e0b;
   --color-error:         #ef4444;
+  /* Error as TEXT. --color-error (#ef4444) measures 3.89:1 on bg-secondary and 3.31:1 on
+     bg-tertiary — below WCAG AA — and error text is exactly what an operator must read when
+     something has already gone wrong. Borders and background tints keep #ef4444: they are
+     not held to a text-contrast bar and the saturated red reads correctly there.
+     #f87171 was rejected at 4.50 on bg-tertiary — the threshold to the digit, no margin. */
+  --color-error-text:    #ff8a8a;
 
   /* Stage status colors */
   --color-stage-completed: var(--color-success);
@@ -505,7 +511,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .btn--success { border-color: var(--color-success); color: var(--color-success); }
 .btn--warning { border-color: var(--color-warning); color: var(--color-warning); }
 .btn--info { border-color: var(--color-info); color: var(--color-info); }
-.btn--error { border-color: var(--color-error); color: var(--color-error); }
+.btn--error { border-color: var(--color-error); color: var(--color-error-text); }
 .btn--pending {
   opacity: 0.7;
   cursor: wait;
@@ -531,7 +537,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   text-align: left;
   font: inherit;
   cursor: pointer;
-  color: var(--color-error);
+  color: var(--color-error-text);
   font-size: 0.8rem;
 }
 
@@ -589,7 +595,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 
 .error-panel__type {
   font-weight: 600;
-  color: var(--color-error);
+  color: var(--color-error-text);
   font-size: 0.875rem;
 }
 
@@ -737,8 +743,8 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   cursor: pointer;
 }
 .env-overflow__item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.env-overflow__item--danger { color: var(--color-error); }
-.env-overflow__item--danger:hover { background: rgba(239, 68, 68, 0.1); color: var(--color-error); }
+.env-overflow__item--danger { color: var(--color-error-text); }
+.env-overflow__item--danger:hover { background: rgba(239, 68, 68, 0.1); color: var(--color-error-text); }
 
 .env-panel__share {
   display: flex;
@@ -769,7 +775,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 4px;
-  color: var(--color-error);
+  color: var(--color-error-text);
   font-size: 0.8rem;
   cursor: pointer;
   display: flex;
@@ -808,14 +814,14 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .badge { display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; padding: 2px 8px; border-radius: 3px; letter-spacing: 0.03em; }
 .badge--proceed, .badge--resolved { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
 .badge--needs-input, .badge--needs-clarification { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
-.badge--reject, .badge--blocking { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error); }
+.badge--reject, .badge--blocking { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error-text); }
 .badge--nice-to-have { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
 .badge--complexity { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
 .badge--create { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
 .badge--modify { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
 .badge--risk-low { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
 .badge--risk-medium { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
-.badge--risk-high { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error); }
+.badge--risk-high { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error-text); }
 
 .gap-item { padding: var(--space-sm); border-radius: 4px; border-left: 3px solid var(--color-border); background: var(--color-bg-secondary); }
 .gap-item--blocking { border-left-color: var(--color-error); }
@@ -880,13 +886,13 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review-row__repo { font-size: 0.75rem; color: var(--color-text-muted); font-family: var(--font-mono); }
 .pr-review-row__branch { font-size: 0.75rem; color: var(--color-text-secondary); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px; }
 .pr-review-row__meta { display: flex; gap: var(--space-md); font-size: 0.75rem; color: var(--color-text-muted); }
-.pr-review-row__error { font-size: 0.75rem; color: var(--color-error); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-review-row__error { font-size: 0.75rem; color: var(--color-error-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .pr-review__badge { display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; padding: 2px 8px; border-radius: 3px; letter-spacing: 0.03em; }
 .pr-review__badge--approve { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
-.pr-review__badge--changes { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error); }
+.pr-review__badge--changes { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error-text); }
 .pr-review__badge--discussion { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
-.pr-review__badge--error { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error); }
+.pr-review__badge--error { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error-text); }
 .pr-review__badge--legacy { background: color-mix(in srgb, var(--color-stage-pending) 25%, transparent); color: var(--color-text-muted); }
 .pr-review__badge--pending { background: color-mix(in srgb, var(--color-text-muted) 18%, transparent); color: var(--color-text-muted); animation: pulse 1.5s infinite; }
 /* Task 5: a test run (A/B arm, ad-hoc probe) is a fact, not a problem — borrows
@@ -899,7 +905,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review__findings { display: inline-flex; gap: 6px; }
 .pr-review__no-findings { font-size: 0.75rem; color: var(--color-text-muted); }
 .pr-review__pill { font-size: 0.7rem; padding: 1px 6px; border-radius: 3px; font-weight: 500; }
-.pr-review__pill--critical { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error); }
+.pr-review__pill--critical { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error-text); }
 .pr-review__pill--major { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
 .pr-review__pill--minor { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
 .pr-review__pill--nitpick { background: color-mix(in srgb, var(--color-text-muted) 12%, transparent); color: var(--color-text-muted); }
@@ -1321,7 +1327,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .mobile-card__badge--active { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
 .mobile-card__badge--waiting { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
 .mobile-card__badge--completed { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
-.mobile-card__badge--error { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error); }
+.mobile-card__badge--error { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error-text); }
 
 .mobile-card__duration {
   font-size: 0.8rem;
@@ -1500,7 +1506,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   margin-top: var(--space-xs);
   padding: var(--space-xs) var(--space-sm);
   background: color-mix(in srgb, var(--color-error, #ef4444) 12%, transparent);
-  color: var(--color-error, #ef4444);
+  color: var(--color-error-text, #ff8a8a);
   border-radius: 3px;
   font-family: var(--font-mono, monospace);
   font-size: 0.75rem;
@@ -1520,7 +1526,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .badge--info     { background: color-mix(in srgb, var(--color-info, #3b82f6) 18%, transparent);    color: var(--color-info, #3b82f6); }
 .badge--running  { background: color-mix(in srgb, var(--color-warning, #f59e0b) 18%, transparent); color: var(--color-warning, #f59e0b); animation: pulse 1.5s infinite; }
 .badge--success  { background: color-mix(in srgb, var(--color-success, #10b981) 18%, transparent); color: var(--color-success, #10b981); }
-.badge--error    { background: color-mix(in srgb, var(--color-error, #ef4444) 18%, transparent);   color: var(--color-error, #ef4444); }
+.badge--error    { background: color-mix(in srgb, var(--color-error, #ef4444) 18%, transparent);   color: var(--color-error-text, #ff8a8a); }
 
 /* ============================================================
    Stats & Config tab — shell (Task 4)
@@ -1851,7 +1857,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   font-size: 0.85rem;
   margin: 0;
 }
-.stats-slot__status-text--error { color: var(--color-error); }
+.stats-slot__status-text--error { color: var(--color-error-text); }
 
 .integrity-panel {
   display: flex;
