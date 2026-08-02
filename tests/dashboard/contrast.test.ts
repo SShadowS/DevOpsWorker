@@ -21,7 +21,24 @@ function contrast(a: string, b: string): number {
 }
 
 const clientDir = fileURLToPath(new URL('../../src/dashboard/client/', import.meta.url));
-const css = readFileSync(join(clientDir, 'styles', 'dashboard.css'), 'utf8');
+const TOKENS_CSS = join(clientDir, 'styles', 'dashboard.css');
+const css = readFileSync(TOKENS_CSS, 'utf8');
+
+/**
+ * Every file that can put a colour on screen: stylesheets, components, and the plain `.ts`
+ * helpers that build style strings. Named by extension rather than by path, because the two
+ * misses this guard has already had were both scope misses — the first version read only
+ * `dashboard.css` and never saw the TSX inline styles that carried the real bug, and a
+ * `.tsx`-only filter would still skip a `.ts` helper emitting the same thing.
+ */
+function styleBearingFiles(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) styleBearingFiles(full, acc);
+    else if (/\.(css|tsx?)$/.test(entry.name)) acc.push(full);
+  }
+  return acc;
+}
 
 function token(name: string): string {
   const m = css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`));
@@ -52,10 +69,19 @@ function token(name: string): string {
 // offender. `(?![\w-])` additionally forbids a following hyphen, so it stops at the real
 // token boundary.
 //
-// Anchored on the left the same way as the original: `(?<![\w-])color:` so this never matches
-// `border-color:` or `border-left-color:` (both legitimately keep `--color-error` — they are
-// not held to a text-contrast bar).
-const ERROR_TEXT_COLOR_RE = /(?<![\w-])color:\s*['"]?(var\(--color-(?:error|stage-error)(?![\w-])[^)'"]*\)|#ef4444)['"]?/gi;
+//   - `rgb(239, 68, 68)` / `rgba(239, 68, 68, …)` — the same red spelled a third way. Not
+//     hypothetical: `rgba(239, 68, 68, …)` is already native to this file, written 14 times
+//     for backgrounds, so it is the spelling most likely to be reached for next. Matched by
+//     exact channel values, and only after `color:`, so those 14 backgrounds stay ignored.
+//
+// Left anchor: `(?<![\w-])color:` so this never matches `border-color:` or
+// `border-left-color:` (both legitimately keep `--color-error` — they are not held to a
+// text-contrast bar). `-webkit-text-fill-color` is spelled out as a second alternative
+// because it DOES paint text, and the left anchor that correctly excludes `border-color`
+// would otherwise exclude it too. Zero uses today; listed so the guard does not have a hole
+// the moment someone reaches for it.
+const ERROR_TEXT_COLOR_RE =
+  /(?:(?<![\w-])color|-webkit-text-fill-color):\s*['"]?(var\(--color-(?:error|stage-error)(?![\w-])[^)'"]*\)|#ef4444|rgba?\(\s*239\s*,\s*68\s*,\s*68\b[^)]*\))['"]?/gi;
 
 function findErrorTextColorRules(source: string): string[] {
   return source.match(ERROR_TEXT_COLOR_RE) ?? [];
@@ -81,31 +107,28 @@ describe('error text contrast', () => {
     }
   });
 
-  test('no rule sets `color:` to the border-weight --color-error, in any written form, in dashboard.css', () => {
-    // The whole point of the split: --color-error keeps its saturated value for borders
-    // and tints, and must never be used for text again.
-    expect(findErrorTextColorRules(css)).toEqual([]);
+  test('nothing in the client sets `color:` to the border-weight --color-error, in any form', () => {
+    // One scan over every style-bearing file rather than a stylesheet check plus a component
+    // check. The split version is how the original miss happened: the guard read
+    // `dashboard.css` by name, so the inline `style={{ color: ... }}` in TSX that carried the
+    // real bug was outside everything it looked at. A scan named by extension picks up a
+    // second stylesheet, or a `.ts` helper building a style string, without anyone
+    // remembering to widen it.
+    const offenders = styleBearingFiles(clientDir)
+      .map((file) => ({ file, rules: findErrorTextColorRules(readFileSync(file, 'utf8')) }))
+      .filter((o) => o.rules.length > 0);
+    expect(offenders).toEqual([]);
   });
 
-  test('no client .tsx component sets `color:` to the border-weight --color-error', () => {
-    // Task 1's brief scoped the guard to dashboard.css, so nobody looked at inline
-    // `style={{ color: ... }}` in TSX — which is exactly where the actual bug (this branch's
-    // fix-wave item 1) survived. Scanning the client tree, not just the stylesheet, is what
-    // would have caught it.
-    const offenders: Array<{ file: string; rules: string[] }> = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(full);
-        } else if (entry.name.endsWith('.tsx')) {
-          const rules = findErrorTextColorRules(readFileSync(full, 'utf8'));
-          if (rules.length > 0) offenders.push({ file: full, rules });
-        }
-      }
-    };
-    walk(clientDir);
-    expect(offenders).toEqual([]);
+  test('the scan reaches every kind of style-bearing file, not just the ones that exist today', () => {
+    // Guards the guard's own scope — the thing that was wrong twice. If this ever finds no
+    // `.css`, no `.ts` and no `.tsx`, the sweep above is silently covering less than it reads
+    // as covering.
+    const files = styleBearingFiles(clientDir);
+    expect(files.some((f) => f.endsWith('.css'))).toBe(true);
+    expect(files.some((f) => f.endsWith('.tsx'))).toBe(true);
+    expect(files.some((f) => f.endsWith('.ts') && !f.endsWith('.tsx'))).toBe(true);
+    expect(files).toContain(TOKENS_CSS);
   });
 
   test('the widened regex actually fires — a guard that cannot fail proves nothing', () => {
