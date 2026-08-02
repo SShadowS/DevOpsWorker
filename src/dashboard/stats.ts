@@ -1222,10 +1222,17 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
   const totalN = await countInWindowForPopulation(sql, days, testFlag);
   const otherPopulationCount = await countInWindowForPopulation(sql, days, !testFlag);
 
+  // duration_n/turns_n (not the window's plain count(*)) back sampleSize below,
+  // because percentile_cont silently skips nulls — a row that errors before
+  // duration_ms/turns is ever written must not inflate the reported n beside
+  // a median that was never computed over it. Mirrors costSampleSize's
+  // `cost_usd IS NOT NULL` count on /api/stats/cost.
   const [durationTurns] = await sql<Array<{
-    n: string; medianDuration: number | null; p90Duration: number | null; medianTurns: number | null; p90Turns: number | null;
+    duration_n: string; turns_n: string;
+    medianDuration: number | null; p90Duration: number | null; medianTurns: number | null; p90Turns: number | null;
   }>>`
-    SELECT count(*)::text AS n,
+    SELECT count(*) FILTER (WHERE duration_ms IS NOT NULL)::text AS duration_n,
+      count(*) FILTER (WHERE turns IS NOT NULL)::text       AS turns_n,
       percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS "medianDuration",
       percentile_cont(0.9) WITHIN GROUP (ORDER BY duration_ms) AS "p90Duration",
       percentile_cont(0.5) WITHIN GROUP (ORDER BY turns) AS "medianTurns",
@@ -1287,12 +1294,12 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
     duration: {
       medianMs: numOrNull(durationTurns?.medianDuration),
       p90Ms: numOrNull(durationTurns?.p90Duration),
-      sampleSize: Number(durationTurns?.n ?? 0),
+      sampleSize: Number(durationTurns?.duration_n ?? 0),
     },
     turns: {
       median: numOrNull(durationTurns?.medianTurns),
       p90: numOrNull(durationTurns?.p90Turns),
-      sampleSize: Number(durationTurns?.n ?? 0),
+      sampleSize: Number(durationTurns?.turns_n ?? 0),
     },
     toolMix: aggregateToolMix(toolRows.map((r) => r.tool_calls)),
     perRepo: repoRows.map((r) => ({
