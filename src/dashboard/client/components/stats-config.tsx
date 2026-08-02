@@ -5,7 +5,7 @@ import type {
   ConfigReport, BuilderResolution, EffortResolution, PerAgentReport, LeverStatus,
   CredentialResolution, SubAgentGroupReport, InlineSubAgentReport, RuleLearnerReport, OverlayReport,
 } from '../../config-report.ts';
-import { assessLevers } from './stats-ribbon.tsx';
+import { assessLevers } from '../assessors.ts';
 
 // ---------------------------------------------------------------------------
 // Config panel (Task 7) — "what settings are actually in effect right now."

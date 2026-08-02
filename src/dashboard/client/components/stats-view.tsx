@@ -21,13 +21,15 @@ import { OperationalPanel } from './stats-operational.tsx';
 // `stats-costquality.tsx`, `stats-operational.tsx`); the generic
 // `<StatsSlot>` placeholder this file used to render for every not-yet-built
 // panel is gone (its last user was the Operational slot). `describeFetchState`/
-// `worstStatus`/`SlotSourceInfo` below are kept: they're exported, unit-tested
-// as general-purpose `FetchState` classification helpers independent of any
-// one panel (see stats-view.test.ts), not `StatsSlot`-specific — but nothing
-// in this tab calls them anymore now that every panel builds its own view
-// model. Flagged in task-9-report.md as a candidate for Task 10 to prune
-// rather than pruned here, since removing tested, still-correct code is a
-// bigger call than this task's stated scope.
+// `worstStatus`/`SlotSourceInfo` used to live below, exported and
+// unit-tested as general-purpose `FetchState` classification helpers with no
+// caller left in this tab (flagged in task-9-report.md as a Task 10 prune
+// candidate, deferred because removing tested, still-correct code was a
+// bigger call than that task's stated scope). Task 3 (follow-up) moved them
+// to `../assessors.ts` instead of pruning them outright — a real second
+// consumer (`stats-costquality.tsx`'s own worst-of-two, previously
+// hand-rolled as `combinePanelStatus` to dodge a circular import) turned up,
+// which settles the "prune or keep" question the earlier report left open.
 //
 // Prod|Test population control (this task): the four population-aware
 // endpoints (cost/quality/integrity/operational) all report the SAME
@@ -43,44 +45,6 @@ import { OperationalPanel } from './stats-operational.tsx';
 // one sentence didn't already say. `pickPopulationMeta` is the pure,
 // unit-tested seam that picks the first ready one.
 // ---------------------------------------------------------------------------
-
-type SlotStatus = 'loading' | 'error' | 'empty' | 'ready';
-
-export interface SlotSourceInfo {
-  label: string;
-  status: SlotStatus;
-  message: string;
-}
-
-/** Turn one fetch state into a labelled, human-readable status line. Pure —
- *  exported for unit testing. The four branches are exhaustive: an added
- *  `FetchState` variant fails to typecheck here instead of silently falling
- *  through to a blank slot. */
-export function describeFetchState<T>(
-  label: string,
-  state: FetchState<T>,
-  describeReady: (data: T) => string,
-): SlotSourceInfo {
-  switch (state.status) {
-    case 'loading':
-      return { label, status: 'loading', message: 'Loading…' };
-    case 'error':
-      return { label, status: 'error', message: `Failed to load: ${state.message}` };
-    case 'empty':
-      return { label, status: 'empty', message: 'No data recorded in this window.' };
-    case 'ready':
-      return { label, status: 'ready', message: describeReady(state.data) };
-  }
-}
-
-const STATUS_RANK: Record<SlotStatus, number> = { error: 0, loading: 1, empty: 2, ready: 3 };
-
-/** Combine multiple source statuses into the single worst one, for a slot's
- *  overall border colour — error beats loading beats empty beats ready.
- *  Pure — exported for unit testing. */
-export function worstStatus(sources: SlotSourceInfo[]): SlotStatus {
-  return sources.reduce<SlotStatus>((worst, s) => (STATUS_RANK[s.status] < STATUS_RANK[worst] ? s.status : worst), 'ready');
-}
 
 /**
  * Names how many rows of the OTHER population were excluded from the

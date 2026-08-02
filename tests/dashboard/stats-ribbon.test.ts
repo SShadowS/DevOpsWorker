@@ -7,16 +7,18 @@ import {
   buildProvenanceRow,
   buildProvenanceRows,
   assessDrift,
-  assessFlaggedModelKeys,
-  assessModelIntegrity,
-  assessLevers,
-  assessErrorRate,
-  ERROR_RATE_ATTENTION_THRESHOLD,
   buildDriftCard,
   buildModelIntegrityCard,
   buildLeversCard,
   buildErrorRateCard,
 } from '../../src/dashboard/client/components/stats-ribbon.tsx';
+import {
+  assessFlaggedModelKeys,
+  assessModelIntegrity,
+  assessLevers,
+  assessErrorRate,
+  ERROR_RATE_ATTENTION_THRESHOLD,
+} from '../../src/dashboard/client/assessors.ts';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { DriftStats, IntegrityStats, SubAgentModelAttributionEntry } from '../../src/dashboard/stats.ts';
 import type { ConfigReport, LeverStatus } from '../../src/dashboard/config-report.ts';

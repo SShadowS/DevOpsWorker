@@ -3,6 +3,7 @@ import type { FetchState } from '../stats-store.ts';
 import type { CostStats, QualityStats, SubAgentCoverage, CostPerReadBandItem, ModelUsageEntry } from '../../stats.ts';
 import { formatCost, formatPct } from '../format.ts';
 import { MIN_RELIABLE_COVERAGE_PCT } from '../../coverage-thresholds.ts';
+import { worstStatus } from '../assessors.ts';
 
 // ---------------------------------------------------------------------------
 // Cost + Quality cards (Task 8) — Sections B and C. Replaces the
@@ -11,11 +12,12 @@ import { MIN_RELIABLE_COVERAGE_PCT } from '../../coverage-thresholds.ts';
 // loading/error border-colour CSS carries over unchanged, matching Task 6/7's
 // precedent. Unlike Integrity/Config (one gating fetch each), this slot reads
 // TWO independent fetches (`costStats`, `qualityStats`) that can each be in a
-// different loading/error/empty/ready state — see `combinePanelStatus` for
-// why the outer wrapper's status is computed locally rather than by
-// importing `worstStatus`/`describeFetchState` from stats-view.tsx (that
-// would be a circular import: stats-view.tsx imports THIS file's exported
-// panel component).
+// different loading/error/empty/ready state — the outer wrapper's status is
+// the worst of the two, via `worstStatus` (`../assessors.ts`). That module
+// holds no component, so importing it here carries no cycle risk — unlike
+// importing straight from stats-view.tsx, which imports THIS file's exported
+// panel component (the reason this card used to hand-roll its own
+// worst-of-two helper instead).
 //
 // Unit convention used throughout this file (tests pin this so a mismatch
 // fails loudly, not silently): a value PURELY COMPUTED here (never sent by
@@ -48,14 +50,6 @@ import { MIN_RELIABLE_COVERAGE_PCT } from '../../coverage-thresholds.ts';
 
 type PanelStatus = 'loading' | 'error' | 'empty' | 'ready';
 type SectionStatus = 'ok' | 'attention' | 'neutral';
-
-const PANEL_STATUS_RANK: Record<PanelStatus, number> = { error: 0, loading: 1, empty: 2, ready: 3 };
-
-/** Worst-of-two, mirroring `worstStatus` (stats-view.tsx) without importing
- *  it — see the module doc comment for why importing would be circular. */
-export function combinePanelStatus(a: PanelStatus, b: PanelStatus): PanelStatus {
-  return PANEL_STATUS_RANK[a] <= PANEL_STATUS_RANK[b] ? a : b;
-}
 
 /** A server field already scaled 0..100 (name ends in `Pct`). Never route
  *  one of these through `formatPct` (format.ts), which expects a 0..1
@@ -829,7 +823,14 @@ function QualityCard({ view }: { view: QualityPanelView }) {
 export function CostQualityPanel() {
   const costView = buildCostPanelView(costStats.value);
   const qualityView = buildQualityPanelView(qualityStats.value);
-  const overall = combinePanelStatus(costView.status, qualityView.status);
+  // `worstStatus` takes `SlotSourceInfo[]` ({label, status, message}), not
+  // bare statuses — the two-argument worst-of-two helper this replaced took
+  // a shape this call site alone needed; adapting the call site (rather than
+  // giving `worstStatus` a second signature) keeps the shared helper single-shaped.
+  const overall = worstStatus([
+    { label: 'Cost', status: costView.status, message: costView.message ?? '' },
+    { label: 'Quality', status: qualityView.status, message: qualityView.message ?? '' },
+  ]);
   const window = statsWindow.value;
   return (
     <section id="stats-slot-cost-quality" class={`stats-slot stats-slot--${overall}`} aria-label="Cost and Quality">

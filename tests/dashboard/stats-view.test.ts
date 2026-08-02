@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test';
-import { describeFetchState, worstStatus, describePopulationExclusion, pickPopulationMeta } from '../../src/dashboard/client/components/stats-view.tsx';
+import { describeFetchState, worstStatus } from '../../src/dashboard/client/assessors.ts';
+import { describePopulationExclusion, pickPopulationMeta } from '../../src/dashboard/client/components/stats-view.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { PopulationMeta } from '../../src/dashboard/stats.ts';
 
