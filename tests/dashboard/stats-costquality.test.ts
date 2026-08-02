@@ -2,7 +2,6 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  combinePanelStatus,
   buildCostSplitView,
   describeCoverage,
   buildLowCoverageHeadline,
@@ -91,27 +90,13 @@ function qualityFixture(overrides: Partial<QualityStats> = {}): QualityStats {
   };
 }
 
-// ---------------------------------------------------------------------------
-// combinePanelStatus — worst-of-two, mirrors worstStatus (stats-view.tsx)
-// ---------------------------------------------------------------------------
-
-describe('combinePanelStatus', () => {
-  test('error beats everything', () => {
-    expect(combinePanelStatus('error', 'ready')).toBe('error');
-    expect(combinePanelStatus('ready', 'error')).toBe('error');
-  });
-  test('loading beats empty and ready', () => {
-    expect(combinePanelStatus('loading', 'ready')).toBe('loading');
-    expect(combinePanelStatus('empty', 'loading')).toBe('loading');
-  });
-  test('empty beats ready', () => {
-    expect(combinePanelStatus('empty', 'ready')).toBe('empty');
-    expect(combinePanelStatus('ready', 'empty')).toBe('empty');
-  });
-  test('ready + ready -> ready', () => {
-    expect(combinePanelStatus('ready', 'ready')).toBe('ready');
-  });
-});
+// combinePanelStatus (worst-of-two) was removed in the follow-up assessors
+// extraction — `CostQualityPanel` now calls the shared `worstStatus`
+// (../../src/dashboard/client/assessors.ts) instead; that function's own
+// worst-of-N ranking is covered by tests/dashboard/assessors.test.ts and
+// stats-view.test.ts. The four tests that used to live here (error/loading/
+// empty/ready-beats-ready) are removed, not migrated — their subject no
+// longer exists in this file.
 
 // ---------------------------------------------------------------------------
 // buildCostSplitView — the trustworthy-total / biased-boundary stacked bar

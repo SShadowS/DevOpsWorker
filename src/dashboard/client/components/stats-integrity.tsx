@@ -3,7 +3,7 @@ import type { FetchState } from '../stats-store.ts';
 import type { IntegrityStats, ModelUsageEntry, EffortMix, SubAgentModelAttributionEntry } from '../../stats.ts';
 import type { ConfigReport } from '../../config-report.ts';
 import { formatPct, formatCost } from '../format.ts';
-import { assessFlaggedModelKeys, assessErrorRate } from './stats-ribbon.tsx';
+import { assessFlaggedModelKeys, assessErrorRate } from '../assessors.ts';
 import { buildContaminationAvailability, formatObservedBreakdown } from '../model-contamination.ts';
 import type { AgentModelRow } from '../model-contamination.ts';
 
@@ -63,7 +63,7 @@ export type SectionStatus = 'ok' | 'attention' | 'neutral';
 
 // ---------------------------------------------------------------------------
 // Pure view-model builders — unit-tested with fixture data, no rendering,
-// no network. Model usage and error rate delegate to stats-ribbon.tsx's
+// no network. Model usage and error rate delegate to assessors.ts's
 // `assessFlaggedModelKeys`/`assessErrorRate` rather than re-deriving the same
 // severity call twice from the same fields — this panel adds the breakdown
 // table / error_max_turns note around that shared verdict, it does not
@@ -77,7 +77,7 @@ export interface ModelUsageSectionView {
 }
 
 /** The full model_usage breakdown plus the flagged-key verdict. Reuses
- *  `assessFlaggedModelKeys` (stats-ribbon.tsx) for the summary text/severity
+ *  `assessFlaggedModelKeys` (assessors.ts) for the summary text/severity
  *  so the ribbon's "Model integrity" card and this panel's detailed table
  *  never disagree about whether today's data carries a flagged `[1m]` key.
  *  Deliberately narrower than the ribbon's combined card (fix round 2): this
@@ -255,7 +255,7 @@ export interface ErrorRateSectionView {
   note: string;
 }
 
-/** Delegates severity/text to `assessErrorRate` (stats-ribbon.tsx) — same
+/** Delegates severity/text to `assessErrorRate` (assessors.ts) — same
  *  reuse rationale as `buildModelUsageSectionView`. Adds the one thing the
  *  ribbon's one-line card has no room for: stating explicitly that "error"
  *  is not narrowed to one failure cause. */

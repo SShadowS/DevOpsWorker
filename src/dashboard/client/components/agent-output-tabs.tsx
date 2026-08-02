@@ -219,7 +219,7 @@ function ChangesetView({ data, cfg }: { data?: ChangesetData; cfg?: AdoCfg }) {
       )}
       {data.compilationErrors && data.compilationErrors.length > 0 && (
         <Section title={`Compilation Errors (${data.compilationErrors.length})`}>
-          <ul class="context-list">{data.compilationErrors.map((e, i) => <li key={i} style={{ color: 'var(--color-error)' }}>{e}</li>)}</ul>
+          <ul class="context-list">{data.compilationErrors.map((e, i) => <li key={i} style={{ color: 'var(--color-error-text)' }}>{e}</li>)}</ul>
         </Section>
       )}
       {data.failedTests && data.failedTests.length > 0 && (
@@ -228,7 +228,7 @@ function ChangesetView({ data, cfg }: { data?: ChangesetData; cfg?: AdoCfg }) {
               stackTrace? }), not strings — the previous `(t: string) => <li>{t}</li>` rendered
               "[object Object]" for every failure. Render the actual failure detail instead. */}
           <ul class="context-list">{data.failedTests.map((t, i) => (
-            <li key={i} style={{ color: 'var(--color-error)' }}>
+            <li key={i} style={{ color: 'var(--color-error-text)' }}>
               <strong>{t.codeunitName}.{t.testName}</strong>: {t.errorMessage}
             </li>
           ))}</ul>

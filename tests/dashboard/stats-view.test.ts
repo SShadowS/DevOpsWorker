@@ -1,37 +1,13 @@
 import { describe, test, expect } from 'bun:test';
-import { describeFetchState, worstStatus, describePopulationExclusion, pickPopulationMeta } from '../../src/dashboard/client/components/stats-view.tsx';
+import { worstStatus } from '../../src/dashboard/client/assessors.ts';
+import { describePopulationExclusion, pickPopulationMeta } from '../../src/dashboard/client/components/stats-view.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { PopulationMeta } from '../../src/dashboard/stats.ts';
 
-describe('describeFetchState', () => {
-  test('loading -> a loading message, never the ready describer', () => {
-    const state: FetchState<{ n: number }> = { status: 'loading' };
-    const info = describeFetchState('Cost', state, () => {
-      throw new Error('describeReady must not run while loading');
-    });
-    expect(info).toEqual({ label: 'Cost', status: 'loading', message: 'Loading…' });
-  });
-
-  test('error -> states what failed, in words', () => {
-    const state: FetchState<{ n: number }> = { status: 'error', message: '500 Internal Server Error' };
-    const info = describeFetchState('Cost', state, () => 'unreachable');
-    expect(info.status).toBe('error');
-    expect(info.message).toContain('500 Internal Server Error');
-  });
-
-  test('empty -> reads distinctly from error (no data vs request failed)', () => {
-    const state: FetchState<{ n: number }> = { status: 'empty' };
-    const info = describeFetchState('Cost', state, () => 'unreachable');
-    expect(info.status).toBe('empty');
-    expect(info.message).not.toContain('Failed');
-  });
-
-  test('ready -> delegates to the caller-supplied describer with the real data', () => {
-    const state: FetchState<{ n: number }> = { status: 'ready', data: { n: 42 } };
-    const info = describeFetchState('Cost', state, (d) => `n=${d.n}`);
-    expect(info).toEqual({ label: 'Cost', status: 'ready', message: 'n=42' });
-  });
-});
+// describeFetchState's tests used to live here (fix round 1, task-3-report.md):
+// removed along with the function itself — it had zero production callers
+// before this file's Task 3 move and zero after, so the tests were the false
+// coverage the extraction was meant to end, not a fixture worth keeping.
 
 describe('worstStatus', () => {
   test('error outranks everything', () => {

@@ -1060,6 +1060,32 @@ describe('stats.ts SQL shape', () => {
     expect(body).toMatch(/errorClassification:\s*classifyErrors\(errorRows\.map\(\(r\) => r\.error\)\)/);
   });
 
+  // Fix-round: duration.sampleSize and turns.sampleSize both reported
+  // `durationTurns.n` — count(*) over the WHOLE window — beside a median
+  // that `percentile_cont` silently computes with nulls skipped. A live
+  // window holds a handful of rows with a null duration_ms/turns (errored
+  // before either field was written), so the two sample sizes described a
+  // larger population than their own statistic was computed over. Mirrors
+  // costSampleSize on /api/stats/cost, which already carries its own
+  // `IS NOT NULL` count rather than the whole window's count(*).
+  test('duration and turns sample sizes come from non-null counts, not count(*) over the whole window', () => {
+    const fn = src.match(/export async function getOperationalStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    expect(body).toContain('count(*) FILTER (WHERE duration_ms IS NOT NULL)');
+    expect(body).toContain('count(*) FILTER (WHERE turns IS NOT NULL)');
+    expect(body).not.toMatch(/sampleSize:\s*Number\(durationTurns\?\.n\s*\?\?\s*0\)/);
+    // Pin each sampleSize to ITS OWN count, not just that both FILTER texts
+    // exist somewhere in the function. Without this, swapping the two
+    // fields onto the wrong sampleSize (duration reading turns_n or vice
+    // versa) still satisfies every assertion above — today's data happens
+    // to have equal null counts on both columns, so that bug would be
+    // invisible in the payload too. This is the exact defect class the task
+    // exists to remove.
+    expect(body).toContain('sampleSize: Number(durationTurns?.duration_n ?? 0)');
+    expect(body).toContain('sampleSize: Number(durationTurns?.turns_n ?? 0)');
+  });
+
   // -------------------------------------------------------------------------
   // Task 3 — population predicate. getDriftStats (and the plain, unfiltered
   // countInWindow() helper it alone still calls — see that helper's own doc
