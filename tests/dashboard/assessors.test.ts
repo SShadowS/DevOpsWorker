@@ -1,10 +1,15 @@
 import { describe, test, expect } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { worstStatus, ERROR_RATE_ATTENTION_THRESHOLD } from '../../src/dashboard/client/assessors.ts';
 
 const read = (p: string) =>
   readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
+
+const componentsDir = fileURLToPath(
+  new URL('../../src/dashboard/client/components/', import.meta.url),
+);
 
 describe('assessors module', () => {
   // SlotSourceInfo is { label, status, message } — all three required.
@@ -35,11 +40,29 @@ describe('assessors module', () => {
     expect(src).not.toContain('</');
   });
 
-  test('no panel imports an assessor from stats-ribbon any more', () => {
-    for (const p of ['stats-integrity.tsx', 'stats-config.tsx', 'stats-costquality.tsx']) {
-      const src = read(`../../src/dashboard/client/components/${p}`);
-      expect(src).not.toContain("from './stats-ribbon.tsx'");
-    }
+  test('no component other than stats-view.tsx imports from stats-ribbon.tsx', () => {
+    // Final fix wave: the previous version hard-coded three filenames and checked
+    // `.not.toContain("from './stats-ribbon.tsx'")` — a single-quote-only substring match
+    // that missed double-quoted imports and a `from`/path split across lines, and left a
+    // fourth panel added tomorrow completely unguarded (the invariant is "no component but
+    // stats-view.tsx imports stats-ribbon.tsx", which wants a directory scan, not a list).
+    // Reuses the no-JSX guard's shape above: anchored to import/require syntax, not a bare
+    // substring. `\s+` / `\s*` match newlines by default, so a `from` split onto its own
+    // line from the path is still caught without a multiline flag.
+    const importRibbon = /\bfrom\s+['"][^'"]*stats-ribbon\.tsx['"]/;
+    const requireRibbon = /\brequire\(\s*['"][^'"]*stats-ribbon\.tsx['"]\s*\)/;
+
+    const offenders = readdirSync(componentsDir)
+      .filter((f) => f.endsWith('.tsx') && f !== 'stats-view.tsx')
+      .filter((f) => {
+        const src = readFileSync(join(componentsDir, f), 'utf8');
+        return importRibbon.test(src) || requireRibbon.test(src);
+      });
+    expect(offenders).toEqual([]);
+
+    // stats-view.tsx is the one file that SHOULD still import it — without this, a guard
+    // that also (wrongly) caught the legitimate import would pass by testing nothing.
+    expect(importRibbon.test(read('../../src/dashboard/client/components/stats-view.tsx'))).toBe(true);
   });
 
   test('combinePanelStatus is gone — worstStatus is the one ranking', () => {
