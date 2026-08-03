@@ -44,7 +44,7 @@ const STAGE_DEFS: {
   { name: 'checkpoint:plan-approved', label: 'Plan Approval', stateField: 'checkpoint', isCheckpoint: true },
   { name: 'env-provision', label: 'Environment', stateField: 'environment' },
   { name: 'coding', label: 'Code', stateField: 'changeset', isLoop: true, iterationsField: 'codeReviews', reviewerLabel: 'Review', reviewerStage: 'code-reviewer' },
-  { name: 'test-cases', label: 'Tests', stateField: 'testCases', isLoop: true, iterationsField: 'testCaseReviews', reviewerLabel: 'Review', reviewerStage: 'test-case-reviewer' },
+  { name: 'test-cases', label: 'Test Cases', stateField: 'testCases', isLoop: true, iterationsField: 'testCaseReviews', reviewerLabel: 'Review', reviewerStage: 'test-case-reviewer' },
   { name: 'draft-pr', label: 'Draft PR', stateField: 'draftPR' },
   { name: 'checkpoint:pr-published', label: 'PR Published', stateField: 'checkpoint', isCheckpoint: true },
   { name: 'test-case-activation', label: 'Activate Tests', stateField: 'testCaseActivation' },
