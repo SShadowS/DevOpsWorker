@@ -909,6 +909,15 @@ function stageSuccessMessage(output: { value: string }, opts?: {
 }
 
 describe('agentStage (integration)', () => {
+  // The imageSha tests set BUILD_SHA. Save and restore the real value so they
+  // cannot leak into any other test in this process — including the ones above
+  // that assert on the full telemetry entry.
+  const realBuildSha = process.env['BUILD_SHA'];
+  afterEach(() => {
+    if (realBuildSha === undefined) delete process.env['BUILD_SHA'];
+    else process.env['BUILD_SHA'] = realBuildSha;
+  });
+
   test('execute calls runAgent, applies output, and records telemetry', async () => {
     mockQuery = mock(() => fakeMessages(
       initMessage('stage-sess-1'),
@@ -1009,6 +1018,98 @@ describe('agentStage (integration)', () => {
     });
 
     await expect(stage.execute(freshState(), testContext())).rejects.toBeInstanceOf(TransientAgentError);
+  });
+
+  // -------------------------------------------------------------------------
+  // Telemetry parity with the PR-review path: sessionId + imageSha.
+  //
+  // `pr_reviews` records both as first-class columns; pipeline stage telemetry
+  // recorded neither, so a stage run could not be joined back to its SDK
+  // transcript and could not say which image it ran on. These drive the whole
+  // stage.execute -> runAgent -> consumeAgentStream path, not the shape of a
+  // literal, because the point is that the values SURVIVE that path.
+  // -------------------------------------------------------------------------
+
+  test('telemetry carries the sessionId, so a stage run joins back to its transcript', async () => {
+    mockQuery = mock(() => fakeMessages(
+      initMessage('stage-sess-join'),
+      stageSuccessMessage({ value: 'ok' }, { costUsd: 0.01, durationMs: 100, numTurns: 1 }),
+    ));
+
+    const stage = agentStage({
+      agent: stageAgentConfig('analyzer'),
+      canRun: () => true,
+      applyOutput: (s, _output) => s,
+    });
+
+    const { state: result } = await stage.execute(freshState(), testContext());
+
+    expect(result.telemetry.stages[0]!.sessionId).toBe('stage-sess-join');
+  });
+
+  test('a FAILED stage still records its sessionId — the case the join key exists for', async () => {
+    // The reason this field was added. A successful run is the one you least
+    // need to go read the transcript of; `partialTelemetry` is built from
+    // `AgentExecutionError.details`, so the id has to be put there too or it is
+    // absent exactly when someone is debugging.
+    mockQuery = mock(() => fakeMessages(
+      initMessage('stage-sess-failed'),
+      errorMessage('error_max_turns', ['Exceeded 50 turns']),
+    ));
+
+    const stage = agentStage({
+      agent: stageAgentConfig('analyzer'),
+      canRun: () => true,
+      applyOutput: (s, _output) => s,
+    });
+
+    const err = await stage.execute(freshState(), testContext()).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(AgentExecutionError);
+    expect((err as AgentExecutionError).partialTelemetry?.sessionId).toBe('stage-sess-failed');
+  });
+
+  test('telemetry records the image sha the stage ran on', async () => {
+    // BUILD_SHA is baked as an ENV into the image (Dockerfile), and the spawned
+    // container is NOT handed one by `getContainerEnv()` — its allowlist has no
+    // BUILD_SHA entry — so what a stage reads is its OWN image's sha, not the
+    // watcher's. That is what makes this worth recording per stage.
+    process.env['BUILD_SHA'] = 'deadbee';
+    mockQuery = mock(() => fakeMessages(
+      initMessage('stage-sess-img'),
+      stageSuccessMessage({ value: 'ok' }, { costUsd: 0.01, durationMs: 100, numTurns: 1 }),
+    ));
+
+    const stage = agentStage({
+      agent: stageAgentConfig('analyzer'),
+      canRun: () => true,
+      applyOutput: (s, _output) => s,
+    });
+
+    const { state: result } = await stage.execute(freshState(), testContext());
+
+    expect(result.telemetry.stages[0]!.imageSha).toBe('deadbee');
+  });
+
+  test('an unset or empty BUILD_SHA omits imageSha rather than storing a blank', async () => {
+    // An image built without `--build-arg BUILD_SHA=<sha>` bakes `BUILD_SHA=""`,
+    // and `'' ?? null` keeps the empty string — a present-but-meaningless value
+    // reads as "recorded" to every consumer. Absent is honest; blank is not.
+    process.env['BUILD_SHA'] = '';
+    mockQuery = mock(() => fakeMessages(
+      initMessage('stage-sess-noimg'),
+      stageSuccessMessage({ value: 'ok' }, { costUsd: 0.01, durationMs: 100, numTurns: 1 }),
+    ));
+
+    const stage = agentStage({
+      agent: stageAgentConfig('analyzer'),
+      canRun: () => true,
+      applyOutput: (s, _output) => s,
+    });
+
+    const { state: result } = await stage.execute(freshState(), testContext());
+
+    expect(result.telemetry.stages[0]).not.toHaveProperty('imageSha');
   });
 });
 

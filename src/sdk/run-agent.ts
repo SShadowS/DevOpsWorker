@@ -353,6 +353,9 @@ export async function runAgent<T extends z.ZodType>(
               errorType: apiError.errorType,
               message: apiError.message,
               model,
+              // Carried so `agentStage`'s partialTelemetry can record it: a run
+              // that died is the one worth reading the transcript of.
+              sessionId,
             });
             logger?.stageError(err);
             throw err;
@@ -409,6 +412,7 @@ export async function runAgent<T extends z.ZodType>(
           durationMs,
           turns,
           model,
+          sessionId,
         });
         logger?.stageError(err);
         throw err;

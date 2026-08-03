@@ -337,6 +337,17 @@ export interface StageTelemetry {
   toolCalls?: Record<string, number>;
   /** Token usage from the SDK result. Optional — absent on telemetry recorded before this was captured. */
   tokens?: StageTokenUsage;
+  /** SDK session id — the join key back to this run's transcript. `pr_reviews`
+   *  has carried this as a column for a while; stage telemetry did not, so a
+   *  stage run could not be traced to the session that produced it. Optional:
+   *  absent on telemetry recorded before this was captured. */
+  sessionId?: string;
+  /** Sha of the image this stage ran in, read from the `BUILD_SHA` baked into it.
+   *  A spawned container is not handed a BUILD_SHA by `getContainerEnv()`, so
+   *  this is the STAGE's own image, not the watcher's — which is the point:
+   *  "the container silently ran stale code" is otherwise invisible after the
+   *  fact. Absent for local runs and for images built without the build-arg. */
+  imageSha?: string;
   /** Per-model cost/token split — separates an orchestrator from its sub-agents. */
   modelUsage?: Record<string, StageModelUsage>;
   /** Per-named-sub-agent usage, keyed by subagent_type. Present only for
