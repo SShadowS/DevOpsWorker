@@ -248,7 +248,7 @@ DATABASE_URL=postgres://pipeline:pipeline@localhost:5432/pipeline \
 |--------|-------|-----|
 | Trigger pipeline | Work item | Add tag `analyse` |
 | Approve plan | Work item | Add tag `plan-approved` |
-| Resume after error | Work item | Add tag `resume` — clears the error, refills the revision budget, retries from the failed stage |
+| Resume a stopped run | Work item | Add tag `continue` — clears the error, refills the revision budget, retries from the failed stage. Overrides `need-input` |
 | Publish PR | Pull request | Remove draft status |
 | Redo planning | Work item | Comment `/rerun-plan` |
 | Targeted fix | Pull request | Comment `/fix <feedback>` |

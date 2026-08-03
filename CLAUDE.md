@@ -262,7 +262,10 @@ The `pipeline watch` command polls Azure DevOps and dispatches work automaticall
 
 1. **`analyse` tag** → `start-fresh` — new work item with no existing state
 2. **`plan-approved` tag** → `continue-pipeline` — checkpoint-paused item ready to proceed
-3. **`resume` tag** → `continue-pipeline` — error-state item to retry from failed stage (clears error, removes tag)
+3. **`continue` tag** → `continue-pipeline` — resume a stopped item (errored, or paused at a checkpoint) from where it
+   stopped. Clears the error, refills the revision budget on an exhausted loop, and removes BOTH `continue` and
+   `need-input`. Unlike path 2 it **overrides `need-input`**: that tag exists to stop automatic retry loops, and this is
+   an explicit human signal. Named to match the dashboard button, the `continue` action type and `pipeline -- continue`.
 4. **Rerun comments** (`/rerun-plan`, `/fix`) → `continue-pipeline` — checkpoint-paused item with human feedback in comments
 5. **PR completed** (`status === 'completed'`) → `continue-pipeline` — auto-detected for items paused at `pr-completed` checkpoint, no manual tag/comment needed
 
@@ -270,8 +273,9 @@ The `pipeline watch` command polls Azure DevOps and dispatches work automaticall
 
 On pipeline error, the watcher adds `need-input` and removes `analyse`. The error comment posted to the work item lists recovery options:
 
-1. **`resume` tag** — add to work item; watcher picks it up, clears error, resumes from failed stage
-2. **Dashboard** — use the "Retry" button
+1. **`continue` tag** — add to work item; watcher picks it up, clears error, resumes from the failed stage, and removes
+   `need-input` (which it overrides — see the detection paths above)
+2. **Dashboard** — use the "Continue" button
 3. **CLI** — `bun run pipeline -- continue --work-item <id>`
 4. **Re-analyse** — re-tag with `analyse` (restarts from scratch)
 
