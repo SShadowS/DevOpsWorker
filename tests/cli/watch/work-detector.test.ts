@@ -30,6 +30,7 @@ function inputs(overrides: Partial<WorkDetectionInputs> = {}): WorkDetectionInpu
     skipIds: new Set<number>(),
     needInputIds: new Set<number>(),
     analyseIds: [],
+    continueTagged: [],
     planApproved: [],
     checkpointScans: [],
     prCompleted: [],
@@ -353,5 +354,96 @@ describe('sinceFor', () => {
     expect(sinceFor(baseState({ error: { type: 'E', stage: 's', message: 'm', timestamp: 'E-TS' }, checkpoint: { name: 'x', enteredAt: 'C-TS' } }))).toBe('E-TS');
     expect(sinceFor(baseState({ checkpoint: { name: 'x', enteredAt: 'C-TS' } }))).toBe('C-TS');
     expect(sinceFor(baseState())).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The `continue` tag.
+//
+// Until 2026-08-03 there was NO tag that resumed an errored item. `CLAUDE.md` and
+// the README both documented a `resume` tag; the watcher read only `analyse`,
+// `plan-approved` and `need-input`, so tagging `resume` did nothing at all — a
+// documented recovery path that had never worked.
+//
+// The gap that mattered: the watcher adds `need-input` itself on every pipeline
+// error, and `need-input` GATES the plan-approved error-resume path (deliberately
+// — it stops a crash-looping container from retrying forever). So an errored item
+// marked itself in a way that disabled its own tag-based recovery. After the
+// analyzer asks for input, the human supplies it and then has no tag that works:
+// `analyse` discards the run, `plan-approved` is gated, and comment scans only
+// cover items paused at a checkpoint, never errored ones.
+//
+// `continue` is the explicit human signal, so it OVERRIDES `need-input` where the
+// automatic path correctly does not. Named to match the vocabulary that already
+// exists everywhere else: the dashboard button, the `continue` action type, and
+// `pipeline -- continue`.
+// ---------------------------------------------------------------------------
+
+describe('detectWork — continue tag', () => {
+  const errored = (stage = 'coding') =>
+    baseState({ error: { type: 'E', stage, message: 'm', timestamp: 't' } });
+
+  test('resumes an errored item EVEN WHEN need-input is set', () => {
+    // THE point of the tag. `plan-approved` is gated on need-input's absence;
+    // this must not be, or the documented recovery is unusable exactly when it
+    // is needed — need-input is present on every errored item by construction.
+    const actions = detectWork(inputs({
+      continueTagged: [{ id: 101, state: errored() }],
+      needInputIds: new Set([101]),
+    }));
+    expect(actions.map((a) => a.kind)).toEqual(['continue']);
+  });
+
+  test('clears the error and removes both tags, so it cannot re-fire every poll', () => {
+    const [action] = detectWork(inputs({
+      continueTagged: [{ id: 101, state: errored() }],
+      needInputIds: new Set([101]),
+    }));
+    expect(action!.stateDelta).toEqual({ error: undefined });
+    expect(action!.tagOps?.remove).toEqual(['continue', 'need-input']);
+  });
+
+  test('refills the revision budget when the loop was exhausted', () => {
+    // Matches the plan-approved path: without skipResetState an exhausted loop
+    // resumes with a spent budget and dies again on its first review round.
+    const [action] = detectWork(inputs({
+      continueTagged: [{
+        id: 101,
+        state: baseState({ error: { type: 'revision-exhausted', stage: 'coding', message: 'm', timestamp: 't' } }),
+      }],
+    }));
+    expect(action!.stateDelta?.skipResetState).toBe(true);
+  });
+
+  test('resumes an item paused at a checkpoint too, not only errored ones', () => {
+    const actions = detectWork(inputs({
+      continueTagged: [{ id: 101, state: baseState({ checkpoint: { name: 'plan-approved', enteredAt: 't' } }) }],
+    }));
+    expect(actions.map((a) => a.kind)).toEqual(['continue']);
+  });
+
+  test('does nothing for an item with neither error nor checkpoint', () => {
+    // A stray tag on a healthy or never-run item must not dispatch work.
+    const actions = detectWork(inputs({ continueTagged: [{ id: 101, state: baseState() }] }));
+    expect(actions).toEqual([]);
+  });
+
+  test('skips items already running', () => {
+    const actions = detectWork(inputs({
+      continueTagged: [{ id: 101, state: errored() }],
+      skipIds: new Set([101]),
+    }));
+    expect(actions).toEqual([]);
+  });
+
+  test('does not double-dispatch when plan-approved is also present', () => {
+    // Both tags on one errored item is the common real case — the operator adds
+    // `continue` without removing the old `plan-approved`. One action, not two.
+    const st = errored();
+    const actions = detectWork(inputs({
+      continueTagged: [{ id: 101, state: st }],
+      planApproved: [{ id: 101, state: st }],
+    }));
+    expect(actions.map((a) => a.kind)).toEqual(['continue']);
   });
 });

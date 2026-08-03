@@ -77,6 +77,18 @@ WHERE [System.Tags] CONTAINS 'plan-approved'
   AND (${AREA_FILTER})
 `.trim();
 
+// The explicit "resume this run" signal. Named `continue` to match the vocabulary
+// that already exists everywhere else — the dashboard button, the `continue`
+// action type, and `pipeline -- continue`. Unlike plan-approved's error-resume,
+// this one overrides `need-input` (see continueTagged in work-detector.ts).
+const WIQL_CONTINUE = `
+SELECT [System.Id] FROM WorkItems
+WHERE [System.Tags] CONTAINS 'continue'
+  AND [System.State] <> 'Closed'
+  AND [System.State] <> 'Removed'
+  AND (${AREA_FILTER})
+`.trim();
+
 const WIQL_NEED_INPUT = `
 SELECT [System.Id] FROM WorkItems
 WHERE [System.Tags] CONTAINS 'need-input'
@@ -155,9 +167,11 @@ async function gatherWorkDetectionInputs(
   const needInputIds = new Set(
     await queryWorkItems(WIQL_NEED_INPUT, config).catch(() => [] as number[]),
   );
-  // WIQL order is load-bearing for the fetch-ordinal tests: need-input, analyse, plan-approved.
+  // WIQL order is load-bearing for the fetch-ordinal tests: need-input, analyse,
+  // plan-approved, continue.
   const analyseIds = await queryWorkItems(WIQL_ANALYSE, config);
   const planApprovedIds = await queryWorkItems(WIQL_PLAN_APPROVED, config);
+  const continueIds = await queryWorkItems(WIQL_CONTINUE, config).catch(() => [] as number[]);
 
   const planApproved: PlanApprovedItem[] = [];
   for (const id of planApprovedIds) {
@@ -165,11 +179,17 @@ async function gatherWorkDetectionInputs(
     planApproved.push({ id, state: await stateStore.load(id) });
   }
 
+  const continueTagged: PlanApprovedItem[] = [];
+  for (const id of continueIds) {
+    if (skipIds.has(id)) continue;
+    continueTagged.push({ id, state: await stateStore.load(id) });
+  }
+
   // Ids the analyse / plan-approved paths already claim. Later (expensive) scans
   // skip these, exactly like the legacy poll's `actions.some(...)` guards. Reusing
   // the pure decision keeps the gate and the decision from ever drifting apart.
   const claimed = new Set(
-    detectWork({ skipIds, needInputIds, analyseIds, planApproved, checkpointScans: [], prCompleted: [], reprovision: [] })
+    detectWork({ skipIds, needInputIds, analyseIds, continueTagged, planApproved, checkpointScans: [], prCompleted: [], reprovision: [] })
       .map(a => a.workItemId),
   );
 
@@ -263,7 +283,7 @@ async function gatherWorkDetectionInputs(
   }
 
   return {
-    detection: { skipIds, needInputIds, analyseIds, planApproved, checkpointScans, prCompleted, reprovision },
+    detection: { skipIds, needInputIds, analyseIds, continueTagged, planApproved, checkpointScans, prCompleted, reprovision },
     reprovisionCtx,
   };
 }

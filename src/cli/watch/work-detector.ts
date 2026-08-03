@@ -69,6 +69,19 @@ export interface WorkDetectionInputs {
   /** Items tagged need-input — blocks the plan-approved error-resume auto-retry. */
   needInputIds: Set<number>;
   analyseIds: number[];
+  /**
+   * Items tagged `continue` — the explicit "resume this run" signal.
+   *
+   * Distinct from `plan-approved` because it OVERRIDES `need-input`. The watcher
+   * sets `need-input` on every pipeline error, and that tag gates the
+   * plan-approved error-resume path (deliberately — it stops a crash-looping
+   * container retrying forever). The effect was that an errored item disabled its
+   * own tag-based recovery: after the analyzer asks for input, the human supplies
+   * it and `analyse` discards the run, `plan-approved` is gated, and comment scans
+   * only cover items paused at a checkpoint. `continue` is a human acting on a
+   * specific item, so it is trusted where the automatic path is not.
+   */
+  continueTagged: PlanApprovedItem[];
   planApproved: PlanApprovedItem[];
   checkpointScans: CheckpointScan[];
   prCompleted: PrCompletedItem[];
@@ -246,9 +259,12 @@ function decideCheckpointScan(scan: CheckpointScan): DetectedAction | null {
  * does NOT dedup against path 1 (an item tagged both yields both actions).
  */
 export function detectWork(inputs: WorkDetectionInputs): DetectedAction[] {
-  const { skipIds, needInputIds, analyseIds, planApproved, checkpointScans, prCompleted, reprovision } = inputs;
+  const { skipIds, needInputIds, analyseIds, continueTagged, planApproved, checkpointScans, prCompleted, reprovision } = inputs;
   const actions: DetectedAction[] = [];
   const claimed = new Set<number>();
+  /** Claimed by the `continue` tag specifically. Path 2 dedups against THIS but
+   *  still not against path 1, preserving the analyse+plan-approved behaviour. */
+  const continueClaimed = new Set<number>();
 
   // Path 1: 'analyse' tag → start fresh. Explicit restart signal; honoured even
   // when state already exists (user re-running after a previous attempt).
@@ -258,10 +274,44 @@ export function detectWork(inputs: WorkDetectionInputs): DetectedAction[] {
     claimed.add(id);
   }
 
+  // Path 1b: 'continue' tag → resume, overriding need-input.
+  //
+  // Only acts on an item that is actually stopped — errored or paused at a
+  // checkpoint. A stray tag on a healthy or never-run item dispatches nothing,
+  // so the tag cannot start work that was never approved.
+  //
+  // Both tags are removed on pickup: `continue` because it is a one-shot signal
+  // that would otherwise re-fire every poll, and `need-input` because the human
+  // supplying it has answered the question that tag was asking.
+  for (const { id, state } of continueTagged) {
+    if (skipIds.has(id)) continue;
+    if (!state?.error && !state?.checkpoint) continue;
+    const stateDelta: Partial<PipelineState> = {};
+    if (state.error) {
+      stateDelta.error = undefined;
+      // An exhausted loop resumes with a spent budget unless this is set — it
+      // would die again on its first review round.
+      if (state.error.type === 'revision-exhausted') stateDelta.skipResetState = true;
+    }
+    actions.push({
+      kind: 'continue',
+      workItemId: id,
+      stateDelta,
+      tagOps: { remove: ['continue', 'need-input'] },
+      log: state.error
+        ? `continue tag present with error at "${state.error.stage}" — resuming`
+        : `continue tag present at checkpoint "${state.checkpoint?.name}" — resuming`,
+    });
+    claimed.add(id);
+    continueClaimed.add(id);
+  }
+
   // Path 2: 'plan-approved' tag → continue. NOTE: not deduped against path 1 —
   // preserves the legacy behaviour where an item tagged both gets both actions.
+  // It IS deduped against path 1b: an operator adding `continue` without removing
+  // an old `plan-approved` is the common case, and must not dispatch twice.
   for (const { id, state } of planApproved) {
-    if (skipIds.has(id)) continue;
+    if (skipIds.has(id) || continueClaimed.has(id)) continue;
     if (state?.checkpoint?.name === 'plan-approved') {
       actions.push({ kind: 'continue', workItemId: id });
       claimed.add(id);
