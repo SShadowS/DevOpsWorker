@@ -72,8 +72,20 @@ export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeo
           `Review and revise the existing test cases for work item #${ctx.workItemId}.`,
           revisionSource,
           ``,
-          `## Existing Test Cases`,
+          `## Existing Test Cases (as last reported — may be INCOMPLETE)`,
           existingIds,
+          ``,
+          // The list above is only what the previous round REPORTED, and a round that
+          // consolidates or replaces cases under-reports by construction — one run left
+          // 20 superseded cases linked in ADO while reporting 5. The ADO links are the
+          // ground truth; reconcile against them, not against this list.
+          `Before changing anything, call \`get_work_item\` for #${ctx.workItemId} with relations`,
+          `and list every linked Test Case ("Tested By"). That set is the real current suite.`,
+          `Reconcile it against the plan's scenarios: UPDATE cases that need changes, CREATE`,
+          `only what is genuinely missing, and for every case the revised suite supersedes,`,
+          `set its state to "Closed" and remove its link from #${ctx.workItemId}`,
+          `(\`manage_work_item_link\` with operation "remove"). A superseded case left linked`,
+          `becomes a duplicate QA has to puzzle over.`,
           ``,
           `## Files Changed`,
           `**Created:** ${changeset.filesCreated.join(', ') || '(none)'}`,

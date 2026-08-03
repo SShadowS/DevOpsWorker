@@ -91,7 +91,29 @@ After creating each test case, link it to the parent work item using `manage_wor
 - `relationType`: `"Microsoft.VSTS.Common.TestedBy-Forward"`
 - `operation`: `"add"`
 
-This creates a "Tested By" link from the parent work item to the test case.
+This creates a "Tested By" link from the parent work item to the test case. (Direction
+matters and this one is verified correct: the parent shows "Tested By", the test case
+shows "Tests" — the topology ADO's requirement-based suites expect.)
+
+## Revision Rounds: Reconcile Against ADO, Not Against Your Last Report
+
+The "existing test cases" list in a revision prompt is what the PREVIOUS round reported —
+not necessarily everything linked in ADO. A round that consolidates or replaces cases
+leaves its superseded creations linked unless someone removes them; one run accumulated 20
+superseded cases against a 4-case approved suite that way.
+
+In every revision round:
+
+1. Call `get_work_item` for the parent with relations and list every linked Test Case.
+   That set — not the prompt's list — is the current suite.
+2. UPDATE existing cases in place wherever the scenario survives. Prefer updating over
+   creating; a new work item is only for a genuinely new scenario.
+3. For every case your revised suite supersedes: set its state to `Closed` and remove its
+   link (`manage_work_item_link`, operation `"remove"`). Closed-and-unlinked is the
+   difference between a clean suite and a pile of duplicates QA has to puzzle over.
+4. Your structured output's `testCases` array must list the COMPLETE surviving suite —
+   every case still linked after your changes — not only the cases you touched this
+   round. The pipeline stores exactly what you report; under-reporting orphans the rest.
 
 ## Rules
 
