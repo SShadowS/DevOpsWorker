@@ -144,7 +144,7 @@ describe('state-reader: stage progression', () => {
     const session = await saveAndRead(store, 1, freshState());
     expect(session.stages.map((s) => s.label)).toEqual([
       'Analyze', 'Plan', 'Plan Approval', 'Environment',
-      'Code', 'Tests', 'Draft PR', 'PR Published',
+      'Code', 'Test Cases', 'Draft PR', 'PR Published',
       'Activate Tests', 'PR Completed', 'Document', 'Docs Drafts',
     ]);
   });

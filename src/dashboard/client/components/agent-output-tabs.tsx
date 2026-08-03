@@ -32,7 +32,7 @@ const TABS: TabDef[] = [
   { key: 'planReviews', label: 'Plan Reviews', hasData: (s) => (s.planReviews?.length ?? 0) > 0, render: (s) => <ReviewList reviews={s.planReviews} /> },
   { key: 'changeset', label: 'Code', hasData: (s) => !!s.changeset, render: (s) => <ChangesetView data={s.changeset} cfg={s.config} /> },
   { key: 'codeReviews', label: 'Code Reviews', hasData: (s) => (s.codeReviews?.length ?? 0) > 0, render: (s) => <ReviewList reviews={s.codeReviews} /> },
-  { key: 'testCases', label: 'Tests', hasData: (s) => !!s.testCases, render: (s) => <TestCasesView data={s.testCases} cfg={s.config} /> },
+  { key: 'testCases', label: 'Test Cases', hasData: (s) => !!s.testCases, render: (s) => <TestCasesView data={s.testCases} cfg={s.config} /> },
   { key: 'testCaseReviews', label: 'Test Reviews', hasData: (s) => (s.testCaseReviews?.length ?? 0) > 0, render: (s) => <ReviewList reviews={s.testCaseReviews} /> },
   { key: 'draftPR', label: 'Draft PR', hasData: (s) => !!s.draftPR, render: (s) => <DraftPRView data={s.draftPR} cfg={s.config} /> },
   { key: 'workItemUpdate', label: 'Docs', hasData: (s) => !!s.workItemUpdate, render: (s) => <JsonBlock data={s.workItemUpdate} /> },
