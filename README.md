@@ -207,10 +207,13 @@ To iterate on agent behavior: **edit the agent's `CLAUDE.md`** — no TypeScript
 | **pr-reviewer** | Reviews manually-created PRs using 7 parallel analysis sub-agents |
 | **cherry-pick-reviewer** | Focused single-agent review of backport/cherry-pick PRs |
 
-Models are not fixed per agent: the orchestrator model resolves from `DEFAULT_MODEL` /
-the overlay's `models` knobs at the `runAgent` chokepoint, and review **sub-agents** pin
-their own models in frontmatter (currently `claude-sonnet-5`). The dashboard's
-Stats & Config tab shows the per-agent resolution actually in effect.
+Models resolve per agent at the `runAgent` chokepoint, precedence high to low:
+overlay `models` knobs → per-agent core defaults → `DEFAULT_MODEL` → `claude-opus-5`.
+The shipped per-agent defaults (`src/cli/config.ts`) put **coder, draft-pr, test-cases
+and documenter on `claude-sonnet-5`** — strong (Opus) planning and review, cheap (Sonnet)
+execution — while analyzer, planner and the reviewers inherit the Opus default. Review
+**sub-agents** additionally pin `claude-sonnet-5` in their own frontmatter. The
+dashboard's Stats & Config tab shows the resolution actually in effect per agent.
 
 ### Standalone Paths
 
