@@ -590,7 +590,7 @@ async function waitForRow(pr: number, since: string, timeoutMs = 30_000) {
  *
  * Runs a throwaway container on the same network with the same DATABASE_URL and
  * has it count rows. Costs seconds and no tokens; catches the exact failure that
- * wasted a full run's spend.
+ * once wasted an entire eight-arm matrix.
  */
 async function preflightDb(dbUrl: string): Promise<boolean> {
   const proc = Bun.spawn([
@@ -733,8 +733,8 @@ for (const prId of prIds) {
       // HARD GATE. A review that finishes but records nothing is worse than one
       // that fails: it costs the same and yields nothing, and the store swallows
       // connection errors so it looks like success. Eight arms once ran to
-      // completion against an unreachable DB — wasted a full run's spend, zero rows. Never spend a
-      // second run without proof the first was recorded.
+      // completion against an unreachable DB — a whole matrix's worth of spend,
+      // zero rows. Never spend a second run without proof the first was recorded.
       const recorded = await waitForRow(prId, startedAt);
       if (!recorded) {
         // State what was OBSERVED, not a diagnosis. A prior version of this

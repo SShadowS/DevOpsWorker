@@ -65,7 +65,7 @@ An unexpected model means the run is void, not interesting. Watch for:
 
 **2. Dispatch count comes from `tool_calls->'Agent'`, never from `sub_agents`.** The `sub_agents`
 roster undercounts nondeterministically — one run recorded ONE agent while emitting seven dispatches
-and billing several dollars of sub-agent work. A conclusion built on the roster count is worthless.
+and billing real sub-agent work. A conclusion built on the roster count is worthless.
 This is how a prompt lever was found to have never bound: every "routed" run emitted the full seven.
 
 **3. `applied_levers` proves a prompt was MODIFIED, never that the model OBEYED it.** A lever can
