@@ -103,6 +103,9 @@ export async function consumeAgentStream(
    *  Tool-call blocks are NOT deduped: each fragment carries its own. */
   const countedMessageIds = new Set<string>();
   const subAgentByToolUseId = new Map<string, string>();
+  /** task_id → subagent_type, from `task_started`. The later `task_progress` /
+   *  `task_notification` messages carry usage but never the sub-agent's name. */
+  const taskIdToSubAgent = new Map<string, string>();
   let resultMessage: SDKResultMessage | undefined;
 
   for await (const message of stream) {
@@ -112,6 +115,62 @@ export async function consumeAgentStream(
     // Capture session ID from init message
     if (message.type === 'system' && message.subtype === 'init') {
       sessionId = message.session_id;
+    }
+
+    // --- Sub-agents that run as BACKGROUND TASKS ---
+    //
+    // The block further down reconstructs a sub-agent from its own assistant
+    // messages, which only reach the parent stream while the sub-agent runs in
+    // the FOREGROUND. A background one never streams here, so it produced no
+    // roster entry at all while `toolCalls.Agent` still counted the dispatch —
+    // measured on WI 76447 as 4 dispatches against 1 recorded.
+    //
+    // The SDK announces these on three system messages (shapes per its sdk.d.ts):
+    // `task_started` carries `subagent_type`, `task_progress` and
+    // `task_notification` carry coarse usage. Only `task_started` names the
+    // sub-agent, so the id map is what lets the later usage find its entry.
+    if (message.type === 'system' && (message as any).subtype === 'task_started') {
+      const m = message as any;
+      // `subagent_type` is present ONLY for subagent tasks — a backgrounded Bash
+      // command or an MCP monitor is a task too, and must not enter the roster.
+      const subName = typeof m.subagent_type === 'string' ? m.subagent_type : undefined;
+      if (subName) {
+        if (typeof m.task_id === 'string') taskIdToSubAgent.set(m.task_id, subName);
+        // Also feed the dispatch map, so any message that does arrive carrying
+        // only a parent_tool_use_id still resolves to the right sub-agent.
+        if (typeof m.tool_use_id === 'string') subAgentByToolUseId.set(m.tool_use_id, subName);
+        if (!subAgents[subName]) {
+          subAgents[subName] = {
+            name: subName,
+            turns: 0,
+            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+            toolCalls: {},
+            source: 'background_task',
+          };
+        }
+      }
+    }
+
+    // Coarse usage for a background task. `task_progress` reports cumulative
+    // usage as it runs and `task_notification` reports it on settle, so both are
+    // last-wins rather than additive — summing them would multiply-count.
+    // Neither message names the sub-agent, so both join on `task_id`.
+    if (
+      message.type === 'system'
+      && ((message as any).subtype === 'task_notification' || (message as any).subtype === 'task_progress')
+    ) {
+      const m = message as any;
+      const subName = typeof m.subagent_type === 'string'
+        ? m.subagent_type
+        : taskIdToSubAgent.get(typeof m.task_id === 'string' ? m.task_id : '');
+      const entry = subName ? subAgents[subName] : undefined;
+      // Only a background entry takes this: a streamed one already has the real
+      // split, and overwriting it with a single total would lose that.
+      if (entry && entry.source === 'background_task' && m.usage) {
+        if (typeof m.usage.total_tokens === 'number') entry.totalTokens = m.usage.total_tokens;
+        if (typeof m.usage.tool_uses === 'number') entry.toolUseCount = m.usage.tool_uses;
+        if (typeof m.usage.duration_ms === 'number') entry.durationMs = m.usage.duration_ms;
+      }
     }
 
     // Detect rate limit events (Claude MAX subscription or API quota).
@@ -141,6 +200,11 @@ export async function consumeAgentStream(
           tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
           toolCalls: {},
         };
+        // Streamed detail is strictly richer than the coarse per-task usage, so
+        // it wins even if a task_started already registered this sub-agent — the
+        // SDK can background an in-flight foreground task, firing both paths for
+        // one dispatch.
+        entry.source = 'stream';
         entry.model ??= message.message?.model;
         const messageId = message.message?.id;
         if (!messageId || !countedMessageIds.has(messageId)) {

@@ -556,3 +556,159 @@ describe('consumeAgentStream subAgents — split assistant turns', () => {
     expect(out.subAgents['security-reviewer']!.tokens.input).toBe(20);
   });
 });
+
+// ---------------------------------------------------------------------------
+// subAgents — sub-agents that run as BACKGROUND TASKS
+//
+// The roster undercounts, and it undercounts silently. Every entry above is
+// reconstructed from the sub-agent's own assistant messages, which reach the
+// parent stream only for sub-agents running in the FOREGROUND. A sub-agent the
+// SDK runs as a background task never streams into the parent at all, so it
+// produced no entry — while `toolCalls.Agent` counted the dispatch.
+//
+// Measured on WI 76447 (2026-08-03): both plan-reviewer rounds recorded
+// `Agent: 4` while the roster held 1 and 2. Five of eight dispatches were
+// invisible, model included. The same defect is documented on the PR-review path
+// in scripts/pr-review-eval/compliance.ts — it lives HERE, in shared code, so it
+// was never PR-reviewer-specific; nobody had checked the pipeline because the
+// pipeline had no roster data at all until 2026-08-03.
+//
+// The SDK does announce these, on message types this parser ignored:
+//   task_started      — task_id, tool_use_id?, subagent_type?
+//   task_progress     — task_id, subagent_type?, usage{total_tokens,tool_uses,duration_ms}
+//   task_notification — task_id, status, usage?  (no subagent_type — join on task_id)
+// Shapes taken from the SDK's own sdk.d.ts, not guessed from observed traffic.
+// ---------------------------------------------------------------------------
+
+function taskStarted(taskId: string, subagentType?: string, toolUseId?: string): Record<string, unknown> {
+  return {
+    type: 'system', subtype: 'task_started',
+    task_id: taskId,
+    ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+    ...(subagentType ? { subagent_type: subagentType } : {}),
+    description: 'doing work',
+    uuid: '00000000-0000-0000-0000-0000000000aa', session_id: 'sess-1',
+  };
+}
+
+function taskNotification(
+  taskId: string,
+  usage?: { total_tokens: number; tool_uses: number; duration_ms: number },
+): Record<string, unknown> {
+  return {
+    type: 'system', subtype: 'task_notification',
+    task_id: taskId, status: 'completed', output_file: '/tmp/out', summary: 'done',
+    ...(usage ? { usage } : {}),
+    uuid: '00000000-0000-0000-0000-0000000000bb', session_id: 'sess-1',
+  };
+}
+
+describe('consumeAgentStream subAgents — background tasks', () => {
+  test('a background sub-agent gets a roster entry, so the count matches the dispatches', async () => {
+    // THE bug. Nothing here streams an assistant message carrying subagent_type,
+    // which is exactly the situation that produced 4 dispatches and 1 entry.
+    async function* stream() {
+      yield initMessage() as never;
+      yield assistantToolUse('Agent', { id: 'tu-1', input: { subagent_type: 'feasibility-reviewer' } }) as never;
+      yield assistantToolUse('Agent', { id: 'tu-2', input: { subagent_type: 'scope-creep-reviewer' } }) as never;
+      yield taskStarted('task-1', 'feasibility-reviewer', 'tu-1') as never;
+      yield taskStarted('task-2', 'scope-creep-reviewer', 'tu-2') as never;
+      yield taskNotification('task-1', { total_tokens: 4200, tool_uses: 7, duration_ms: 31000 }) as never;
+      yield taskNotification('task-2', { total_tokens: 1100, tool_uses: 2, duration_ms: 9000 }) as never;
+      yield resultSuccess() as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'plan-reviewer' });
+
+    expect(Object.keys(out.subAgents).sort()).toEqual(['feasibility-reviewer', 'scope-creep-reviewer']);
+    // the invariant the undercount broke: roster size == dispatch count
+    expect(Object.keys(out.subAgents)).toHaveLength(out.toolCalls['Agent']!);
+  });
+
+  test('a background entry is marked as such, so zero tokens does not read as "did nothing"', async () => {
+    // Fixing the COUNT without this swaps one lie for another: a background entry
+    // has no input/output/cache split, so it would look like a sub-agent that was
+    // dispatched and produced nothing.
+    async function* stream() {
+      yield initMessage() as never;
+      yield taskStarted('task-1', 'feasibility-reviewer', 'tu-1') as never;
+      yield taskNotification('task-1', { total_tokens: 4200, tool_uses: 7, duration_ms: 31000 }) as never;
+      yield resultSuccess() as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'plan-reviewer' });
+    const entry = out.subAgents['feasibility-reviewer']!;
+
+    expect(entry.source).toBe('background_task');
+    expect(entry.totalTokens).toBe(4200);
+    expect(entry.toolUseCount).toBe(7);
+    expect(entry.durationMs).toBe(31000);
+    // the detailed fields stay honestly empty rather than being faked from a total
+    expect(entry.tokens).toEqual({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0 });
+    expect(entry.model).toBeUndefined();
+  });
+
+  test('a streamed sub-agent keeps its full detail and is marked stream, not background', async () => {
+    async function* stream() {
+      yield initMessage() as never;
+      yield {
+        type: 'assistant', subagent_type: 'security-reviewer',
+        message: {
+          id: 'm1', model: 'claude-sonnet-5', content: [{ type: 'text', text: 'hi' }],
+          usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 5, cache_creation_input_tokens: 1 },
+        },
+      } as never;
+      yield resultSuccess() as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'code-reviewer' });
+    const entry = out.subAgents['security-reviewer']!;
+
+    expect(entry.source).toBe('stream');
+    expect(entry.tokens.input).toBe(10);
+    expect(entry.model).toBe('claude-sonnet-5');
+    expect(entry.totalTokens).toBeUndefined();
+  });
+
+  test('a sub-agent that starts as a task AND streams keeps the streamed detail', async () => {
+    // The SDK can background an in-flight foreground task, so both paths can fire
+    // for one dispatch. Streamed detail is strictly richer — a later task_started
+    // must not downgrade it to a background entry.
+    async function* stream() {
+      yield initMessage() as never;
+      yield {
+        type: 'assistant', subagent_type: 'feasibility-reviewer',
+        message: {
+          id: 'm1', model: 'claude-sonnet-5', content: [{ type: 'text', text: 'hi' }],
+          usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        },
+      } as never;
+      yield taskStarted('task-1', 'feasibility-reviewer', 'tu-1') as never;
+      yield taskNotification('task-1', { total_tokens: 4200, tool_uses: 7, duration_ms: 31000 }) as never;
+      yield resultSuccess() as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'plan-reviewer' });
+    const entry = out.subAgents['feasibility-reviewer']!;
+
+    expect(entry.source).toBe('stream');
+    expect(entry.tokens.input).toBe(10);
+    expect(entry.model).toBe('claude-sonnet-5');
+    expect(Object.keys(out.subAgents)).toHaveLength(1);
+  });
+
+  test('non-subagent background tasks (shell, monitor, workflow) never enter the roster', async () => {
+    // `subagent_type` is present only for subagent tasks. A backgrounded Bash
+    // command must not surface as a sub-agent.
+    async function* stream() {
+      yield initMessage() as never;
+      yield taskStarted('task-shell', undefined, 'tu-9') as never;
+      yield taskNotification('task-shell', { total_tokens: 10, tool_uses: 1, duration_ms: 500 }) as never;
+      yield resultSuccess() as never;
+    }
+
+    const out = await consumeAgentStream(stream(), { agentName: 'coder' });
+
+    expect(out.subAgents).toEqual({});
+  });
+});

@@ -147,11 +147,18 @@ export interface DispatchEvidence {
    * `pr_reviews.tool_calls->'Agent'` — how many sub-agent dispatches the orchestrator
    * actually EMITTED. This is the authoritative dispatch signal.
    *
-   * The `sub_agents` roster is not: it undercounts nondeterministically because
-   * `src/sdk/agent-stream.ts` only records an entry from an assistant message carrying
-   * `subagent_type`, while background-task sub-agents stream as system messages and are
+   * The `sub_agents` roster is not: it undercounted nondeterministically because
+   * `src/sdk/agent-stream.ts` only recorded an entry from an assistant message carrying
+   * `subagent_type`, while background-task sub-agents stream as system messages and were
    * lost. Row 1715 recorded ONE agent while emitting seven dispatches and billing real
    * sub-agent work.
+   *
+   * 2026-08-03: `agent-stream.ts` now also reads the SDK's `task_started` /
+   * `task_progress` / `task_notification` messages, so a background sub-agent gets an
+   * entry (marked `source: 'background_task'`, carrying only coarse per-task usage).
+   * That closes the KNOWN cause — it is not proof the roster is now complete, and rows
+   * written before that date still undercount. Keep using this field as the
+   * authoritative signal; treat a roster count as corroboration, never as the measure.
    *
    * This is also how the routing lever was caught doing nothing: every routed run
    * emitted 7 dispatches, so the prompt was written and ignored.

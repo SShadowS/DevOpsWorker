@@ -396,8 +396,34 @@ export interface SubAgentUsage {
   turns: number;
   tokens: StageTokenUsage;
   toolCalls: Record<string, number>;
-  /** Model this sub-agent ran on, as reported on its assistant messages. */
+  /** Model this sub-agent ran on, as reported on its assistant messages.
+   *  Undefined for `background_task` entries — the SDK's task messages do not
+   *  report a model, so absence here is "not reported", never "inherited". */
   model?: string;
+  /**
+   * Where this entry came from, because the two sources know different things.
+   *
+   * `stream` — reconstructed from the sub-agent's own assistant messages: turns,
+   * the input/output/cache token split, per-tool counts and the model are all
+   * measured.
+   *
+   * `background_task` — the sub-agent ran as a background task and never streamed
+   * into the parent, so only the coarse per-task usage the SDK reports is known.
+   * `turns`, `tokens` and `toolCalls` stay ZERO on these entries and that is NOT
+   * a claim the sub-agent did nothing — read `totalTokens` / `toolUseCount`
+   * instead. Before these entries existed the sub-agent was absent entirely,
+   * which is how a stage could dispatch four and record one.
+   */
+  source?: 'stream' | 'background_task';
+  /** Total tokens for a `background_task` entry. The SDK reports one figure per
+   *  task with no input/output/cache split, so it is deliberately NOT folded into
+   *  `tokens` — doing that would silently corrupt every consumer of the split. */
+  totalTokens?: number;
+  /** Tool-use COUNT for a `background_task` entry. The SDK reports a count per
+   *  task, not the per-tool breakdown `toolCalls` carries for streamed entries. */
+  toolUseCount?: number;
+  /** Wall-clock duration for a `background_task` entry, as reported by the SDK. */
+  durationMs?: number;
   /**
    * DERIVED, not SDK-reported. The SDK bills one total per run and splits it only
    * by model, so eight sub-agents sharing Sonnet share one number. This estimates
