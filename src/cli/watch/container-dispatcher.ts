@@ -88,6 +88,13 @@ export function getContainerEnv(): Record<string, string> {
     // AL Object ID Ninja backend app pool; name marks commits as AI-made.
     GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',
     GIT_USER_EMAIL: process.env['GIT_USER_EMAIL'] ?? '',
+    // Which ADO org/project `scripts/await-pipeline.ts` talks to. Absent from this
+    // list until 2026-08-03, so the script fell through to a placeholder org and
+    // every CI wait 404'd in a way that read as "no such build" — 11 work items,
+    // 83 occurrences, since March. A var the container reads but nobody forwards
+    // does not crash; it takes its default and reports something confidently wrong.
+    AZURE_DEVOPS_ORG_URL: process.env['AZURE_DEVOPS_ORG_URL'] ?? '',
+    AZURE_DEVOPS_PROJECT: process.env['AZURE_DEVOPS_PROJECT'] ?? '',
     // Operational policy read by loadConfig()/buildConfigFromRepo() INSIDE the
     // container. This list is an allowlist: a variable the config layer reads but
     // that is not forwarded here silently falls back to its default, with no error

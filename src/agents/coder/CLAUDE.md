@@ -120,7 +120,7 @@ Report the implementation result:
 | `bash: cat file.al` | **Read** with file path |
 | `bash: ls directory/` | **Glob** with pattern `directory/*` |
 | `bash: cat app.json \| python3 -c "import json…"` | **`jq`** — e.g. `jq -r '.application, .platform' app.json` (jq is installed; never inline-python to read JSON) |
-| `bash: git diff master...<branch>` | **`bun scripts/branch-diff.ts <branch>`** — your branch name contains `#` which the shell mangles; the helper handles it (see "Reviewing your own changes") |
+| `bash: git diff master...<branch>` | **`bun /app/scripts/branch-diff.ts <branch>`** — your branch name contains `#` which the shell mangles; the helper handles it (see "Reviewing your own changes") |
 
 Bash is only for commands that have no dedicated tool equivalent (e.g., `git log`, `az` CLI). If you catch yourself writing `find`, `grep`, `cat`, `ls`, `head`, a `git diff master...`, or an inline `python3 -c` to read JSON — stop and use the dedicated tool/helper instead.
 
@@ -131,7 +131,7 @@ Bash is only for commands that have no dedicated tool equivalent (e.g., `git log
 When MCP tools (e.g., `list_pipeline_runs`, `pipeline_timeline`) return large results, the output is saved to a file. **Do NOT write python3 scripts to parse these files.** Use the provided helper:
 
 ```bash
-bun scripts/parse-mcp.ts <file> [command]
+bun /app/scripts/parse-mcp.ts <file> [command]
 ```
 
 Commands:
@@ -144,8 +144,8 @@ Commands:
 If no command is given, it auto-detects from the filename. Examples:
 
 ```bash
-bun scripts/parse-mcp.ts /path/to/mcp-azureDevOps-list_pipeline_runs-*.txt
-bun scripts/parse-mcp.ts /path/to/mcp-azureDevOps-pipeline_timeline-*.txt errors
+bun /app/scripts/parse-mcp.ts /path/to/mcp-azureDevOps-list_pipeline_runs-*.txt
+bun /app/scripts/parse-mcp.ts /path/to/mcp-azureDevOps-pipeline_timeline-*.txt errors
 ```
 
 ### Repository Operations
@@ -162,10 +162,10 @@ bun scripts/parse-mcp.ts /path/to/mcp-azureDevOps-pipeline_timeline-*.txt errors
 To see what your branch changed vs `master`, use the helper — **do NOT hand-write `git diff master...<branch>`**. Branch names contain `#`, which the shell mangles, and the branch may be local or only on `origin`. The helper passes the branch to git as a single argument (no quoting needed) and resolves local-vs-origin automatically:
 
 ```bash
-bun scripts/branch-diff.ts <branch>                 # full patch (capped at 500 lines)
-bun scripts/branch-diff.ts <branch> --stat          # summary of files + line counts
-bun scripts/branch-diff.ts <branch> --name-only     # just the changed paths
-bun scripts/branch-diff.ts <branch> --head 0         # full patch, no line cap
+bun /app/scripts/branch-diff.ts <branch>                 # full patch (capped at 500 lines)
+bun /app/scripts/branch-diff.ts <branch> --stat          # summary of files + line counts
+bun /app/scripts/branch-diff.ts <branch> --name-only     # just the changed paths
+bun /app/scripts/branch-diff.ts <branch> --head 0         # full patch, no line cap
 ```
 
 Run from inside the target repo, or add `--repo <dir>`. It exits 2 (and prints recent history) if the branch can't be resolved.
