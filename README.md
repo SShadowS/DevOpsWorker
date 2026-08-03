@@ -1,5 +1,9 @@
 # DevOpsWorker
 
+[![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org/)
+[![Runtime: Bun](https://img.shields.io/badge/runtime-bun-black)](https://bun.sh)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+
 Multi-agent AI pipeline that takes Azure DevOps work items through analysis, planning, coding, review, and PR creation — orchestrated by a chain of specialized Claude agents with human-in-the-loop approval gates. Also provides automated PR reviews for manually-created pull requests via webhook integration.
 
 ```mermaid
@@ -8,10 +12,11 @@ flowchart TD
     A --> B[Planner]
     B <-->|revise / approve| C[Plan Reviewer]
     B --> CP1{{Plan Checkpoint}}
-    CP1 --> ENV[Env Provision]
+    CP1 --> ENV[Env Provision*]
     ENV --> D[Coder]
     D <-->|revise / approve| E[Code Reviewer]
     D --> TC[Test Cases]
+    TC <-->|revise / approve| TCR[Test Case Reviewer]
     TC --> F[Draft PR]
     F --> CP2{{PR Checkpoint}}
     CP2 --> G[Documenter]
@@ -20,6 +25,9 @@ flowchart TD
     style CP1 fill:#f9a825,stroke:#f57f17,color:#000
     style CP2 fill:#f9a825,stroke:#f57f17,color:#000
 ```
+
+\* Env Provision is injected by the [private overlay](#private-overlay)'s `pipeline` stage
+edits — with no overlay, the pipeline goes straight from the plan checkpoint to the coder.
 
 ## Quick Start
 
@@ -83,7 +91,8 @@ bun run pipeline -- webhook-server [--port <n>]
 | `ANTHROPIC_API_KEY` | Yes* | Pay-per-token fallback (takes precedence if both set) |
 | `PG_PASSWORD` | No | PostgreSQL password (default: `pipeline`) |
 | `AZURE_DEVOPS_ORG` | No | Org name (default: `your-org`; normally set via the overlay `ado` defaults — see [Private Overlay](#private-overlay)) |
-| `AZURE_DEVOPS_PROJECT` | No | Project name (default: `Your Project`; normally set via the overlay `ado` defaults) |
+| `AZURE_DEVOPS_ORG_URL` | No | Full org URL, e.g. `https://dev.azure.com/<org>` (default derived from `AZURE_DEVOPS_ORG`). Forwarded into spawned containers — `scripts/await-pipeline.ts` resolves the CI org from it |
+| `AZURE_DEVOPS_PROJECT` | No | Project name (default: `Your Project`; normally set via the overlay `ado` defaults). Also forwarded into spawned containers |
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | No | HMAC secret for webhook signature validation |
 | `WEBHOOK_PORT` | No | Webhook server port (default: `3002`) |
 | `BUILD_SHA` | No | Baked into images as a build arg and recorded per review; drives the dashboard's deployment-drift panel. Export it before `docker compose build`, or the image bakes the literal `unknown` |
@@ -182,27 +191,34 @@ To iterate on agent behavior: **edit the agent's `CLAUDE.md`** — no TypeScript
 
 ### Agents
 
-| Agent | Model | Purpose |
-|-------|-------|---------|
-| **analyzer** | opus | Assesses work item readiness, extracts requirements |
-| **planner** | sonnet | Produces development plan with file-level changes |
-| **plan-reviewer** | opus | Evaluates plan quality and feasibility |
-| **coder** | sonnet | Writes code, commits, triggers CI |
-| **code-reviewer** | opus | 7-domain parallel review via specialized subagents |
-| **test-cases** | sonnet | Creates ADO Test Case work items |
-| **draft-pr** | sonnet | Creates draft PR in Azure DevOps |
-| **documenter** | sonnet | Generates user-facing documentation |
-| **docs-writer** | sonnet | Drafts documentation site articles |
-| **rule-learner** | opus | Extracts coding patterns from PR reviews |
-| **env-reprovision** | opus | Recreates purged BC environments, deploys existing PR code |
-| **pr-reviewer** | opus | Reviews manually-created PRs using 7 parallel analysis sub-agents |
+| Agent | Purpose |
+|-------|---------|
+| **analyzer** | Assesses work item readiness, extracts requirements |
+| **planner** | Produces development plan with file-level changes |
+| **plan-reviewer** | Evaluates plan quality and feasibility (4 parallel review sub-agents) |
+| **coder** | Writes code, commits, triggers CI |
+| **code-reviewer** | 8-domain parallel review via specialized sub-agents |
+| **test-cases** | Creates ADO Test Case work items (manual or Test-Tool runner cases) |
+| **test-case-reviewer** | Reviews test cases for executability and coverage |
+| **draft-pr** | Creates draft PR in Azure DevOps |
+| **documenter** | Generates user-facing documentation |
+| **docs-writer** | Drafts documentation site articles |
+| **rule-learner** | Extracts coding patterns from PR reviews |
+| **pr-reviewer** | Reviews manually-created PRs using 7 parallel analysis sub-agents |
+| **cherry-pick-reviewer** | Focused single-agent review of backport/cherry-pick PRs |
 
-### Standalone Agents
+Models are not fixed per agent: the orchestrator model resolves from `DEFAULT_MODEL` /
+the overlay's `models` knobs at the `runAgent` chokepoint, and review **sub-agents** pin
+their own models in frontmatter (currently `claude-sonnet-5`). The dashboard's
+Stats & Config tab shows the per-agent resolution actually in effect.
 
-Some agents run outside the pipeline orchestrator, triggered by dashboard actions, PR comments, or webhooks:
+### Standalone Paths
 
-- **env-reprovision** — Recreates a purged BC environment and deploys the existing PR code. Triggered by the "Reprovision Env" dashboard button or a `/reprovision-env` PR comment.
-- **pr-reviewer** — Reviews non-pipeline PRs using 7 parallel analysis sub-agents (correctness, quality, security, performance, architecture, error handling, integration). Triggered by the webhook server when a PR is created or updated.
+Some work runs outside the pipeline orchestrator, triggered by dashboard actions, PR comments, or webhooks:
+
+- **pr-reviewer** — Reviews non-pipeline PRs using 7 parallel analysis sub-agents. Triggered by the webhook server when a PR is created or updated.
+- **cherry-pick-reviewer** — Lighter single-agent path for backport PRs (no sub-agent fan-out by design).
+- **Env reprovisioning** — Recreates a purged BC test environment and redeploys the existing PR code. An action handled by the watcher (`/reprovision-env` PR comment or the dashboard button); the environment backend comes from the overlay's `envProvider`.
 
 ### State Storage
 
@@ -229,9 +245,12 @@ DATABASE_URL=postgres://pipeline:pipeline@localhost:5432/pipeline \
 |--------|-------|-----|
 | Trigger pipeline | Work item | Add tag `analyse` |
 | Approve plan | Work item | Add tag `plan-approved` |
+| Resume after error | Work item | Add tag `resume` — clears the error, refills the revision budget, retries from the failed stage |
 | Publish PR | Pull request | Remove draft status |
 | Redo planning | Work item | Comment `/rerun-plan` |
 | Targeted fix | Pull request | Comment `/fix <feedback>` |
+| Fix failing tests | Work item or PR | Comment `/fix-test <feedback>` |
+| Answer a convergence escalation | Work item | Comment `/fix <your decision>` when the coding loop pauses with recurring findings |
 | Reprovision env | Pull request | Comment `/reprovision-env` (or dashboard button) |
 
 ## Project Structure
@@ -249,7 +268,7 @@ src/
   types/           # TypeScript interfaces (PipelineState, PipelineConfig, AgentConfig)
   webhook-server/  # Azure DevOps webhook receiver (PR events)
 tests/             # Mirrors src/ structure, uses bun:test
-docs/              # Design specs and implementation plans
+docs/              # Public docs (extending guide); design specs live in the private overlay
 private.example/   # Worked overlay skeleton — copy to private/ to customize
 private/           # Gitignored overlay (your repos, prompts, env backend); absent in public clones
 ```
@@ -263,7 +282,7 @@ The full stack runs as four services on a shared `pipeline-net` Docker network:
 | `postgres` | 5432 | PostgreSQL 17 — shared state store |
 | `watcher` | — | Polls Azure DevOps, spawns pipeline containers |
 | `dashboard` | 3000 | Web UI for monitoring and actions; mounts the repo's `.git` read-only to resolve `HEAD` for the drift panel |
-| `webhook-server` | 3001 | Receives Azure DevOps PR webhook events |
+| `webhook-server` | 3001 | Receives Azure DevOps PR webhook events (host 3001 → container `WEBHOOK_PORT` 3002) |
 
 ```bash
 docker compose up -d              # Start everything
@@ -318,7 +337,7 @@ than recorded are labelled inferred. No state is conveyed by colour alone.
 The webhook server receives Azure DevOps service hook events and triggers automated PR reviews for manually-created pull requests.
 
 ```bash
-# Start the webhook server
+# Start the webhook server standalone (compose runs it for you on host port 3001)
 bun run pipeline -- webhook-server --port 3002
 ```
 
@@ -326,9 +345,9 @@ bun run pipeline -- webhook-server --port 3002
 
 1. Start the webhook server alongside the watcher and dashboard
 2. In Azure DevOps, go to **Project Settings > Service hooks**
-3. Create subscriptions for:
-   - `Pull request created` → `POST https://your-server:3002/webhook`
-   - `Pull request updated` → `POST https://your-server:3002/webhook`
+3. Create subscriptions pointing at the port you exposed (`3001` under compose, `--port` standalone):
+   - `Pull request created` → `POST https://your-server:3001/webhook`
+   - `Pull request updated` → `POST https://your-server:3001/webhook`
 4. Set the webhook secret (optional but recommended) matching `AZURE_DEVOPS_WEBHOOK_SECRET`
 
 ### How It Works
