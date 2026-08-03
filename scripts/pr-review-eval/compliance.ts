@@ -150,8 +150,8 @@ export interface DispatchEvidence {
    * The `sub_agents` roster is not: it undercounts nondeterministically because
    * `src/sdk/agent-stream.ts` only records an entry from an assistant message carrying
    * `subagent_type`, while background-task sub-agents stream as system messages and are
-   * lost. Row 1715 recorded ONE agent while emitting seven dispatches and billing several
-   * dollars of sub-agent work.
+   * lost. Row 1715 recorded ONE agent while emitting seven dispatches and billing real
+   * sub-agent work.
    *
    * This is also how the routing lever was caught doing nothing: every routed run
    * emitted 7 dispatches, so the prompt was written and ignored.
