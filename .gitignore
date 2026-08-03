@@ -66,12 +66,18 @@ scripts/ab-results/
 # environments). Loads automatically at the workspace root. Never commit it here.
 /CLAUDE.local.md
 
-# Screenshots. Browser tooling writes them to the repo root by default, and a dashboard
-# screenshot carries real work-item titles, branch names and customer-facing text into a
-# PUBLIC repo. One landed here untracked-but-committable before this rule existed, where a
-# reflexive `git add .` would have published it. Ignored at the root only — an intentionally
-# committed image under docs/ or elsewhere still works.
+# Screenshots and screen recordings. Browser tooling writes them to the repo root by
+# default, and a dashboard capture carries real work-item titles, branch names and
+# customer-facing text into a PUBLIC repo. One landed here untracked-but-committable before
+# this rule existed, where a reflexive `git add .` would have published it. Ignored at the
+# root only — an intentionally committed image under docs/ or elsewhere still works.
+#
+# .gif is not decoration: the browser tooling in use records interaction GIFs, so a
+# recording leaks strictly more than the still that prompted this rule. .svg because a
+# rendered chart or diagram dropped at the root carries the same text.
 /*.png
 /*.jpg
 /*.jpeg
 /*.webp
+/*.gif
+/*.svg
