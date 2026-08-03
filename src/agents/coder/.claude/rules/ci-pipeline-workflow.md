@@ -5,7 +5,7 @@
 ## Step 1 — Trigger only (you own the runId)
 
 ```bash
-bun scripts/await-pipeline.ts --branch <your-branch> --trigger-only
+bun /app/scripts/await-pipeline.ts --branch <your-branch> --trigger-only
 ```
 
 This triggers the build, prints `runId=<id>`, and exits **0** immediately — it does NOT wait. Capture `<id>`: it is your authoritative CI run id. Report it as `ciRunId` in your output (the server-side CI backstop verifies that exact run).
@@ -17,7 +17,7 @@ Call the **`Task`** tool with `subagent_type: "ci-waiter"`. Put the exact attach
 ```
 Wait for the CI build and report the outcome. Run this, following its exit-code rules:
 
-  bun scripts/await-pipeline.ts --attach <id> --timeout 100
+  bun /app/scripts/await-pipeline.ts --attach <id> --timeout 100
 ```
 
 The subagent runs on Haiku with a tiny context, loops the `--attach` round-trips itself, and returns a single final line:
@@ -38,4 +38,4 @@ It is **blocking** — you wait for its result, then continue. This is far cheap
 - NEVER `sleep`. NEVER poll `get_pipeline_run` in a loop. All waiting happens inside the `ci-waiter` subagent.
 - After the build completes, ALWAYS check for AppSourceCop errors — `succeeded`/`partiallySucceeded` can still hide task-level errors. The subagent's FAILED report and `parse-mcp.ts errors <file>` surface these.
 
-To inspect a previously saved pipeline timeline file, use `bun scripts/parse-mcp.ts <file> errors`.
+To inspect a previously saved pipeline timeline file, use `bun /app/scripts/parse-mcp.ts <file> errors`.

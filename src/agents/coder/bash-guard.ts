@@ -129,12 +129,12 @@ export function classifyUtil(cmd: string, stage: string, cdWarn: string): string
   }
   if (cmd === 'python' || cmd === 'python3') {
     if (/\s-c\b/.test(stage) && /json/i.test(stage)) {
-      return `Do not parse JSON with inline python. Use \`jq\` (e.g. jq -r '.application' app.json); for saved MCP result files use \`bun scripts/parse-mcp.ts <file>\`.`;
+      return `Do not parse JSON with inline python. Use \`jq\` (e.g. jq -r '.application' app.json); for saved MCP result files use \`bun /app/scripts/parse-mcp.ts <file>\`.`;
     }
     return null;
   }
   if (cmd === 'git' && /\bdiff\b/.test(stage) && /(?:master|main|origin\/\S+)\.\.\./.test(stage)) {
-    return `Do not run \`git diff <ref>...\` — the shell mangles \`#\` in branch names. Use \`bun scripts/branch-diff.ts <branch>\` (handles the quoting and local-vs-origin).`;
+    return `Do not run \`git diff <ref>...\` — the shell mangles \`#\` in branch names. Use \`bun /app/scripts/branch-diff.ts <branch>\` (handles the quoting and local-vs-origin).`;
   }
   return null;
 }

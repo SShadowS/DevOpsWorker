@@ -15,14 +15,18 @@
  * re-runs with `--attach <runId>` (which inherits the same short timeout) to keep watching
  * the SAME run — no new build, no sleep loop, no backgrounding.
  *
- * Usage:
- *   bun run scripts/await-pipeline.ts --branch <branch> [--pipeline <id>] [--timeout <seconds>]
- *   bun run scripts/await-pipeline.ts --attach <runId> [--timeout <seconds>]   # resume watching, no new build
+ * Usage (ALWAYS the absolute path — an agent's cwd is the session root, which has
+ * no `scripts/` directory):
+ *   bun /app/scripts/await-pipeline.ts --branch <branch> [--pipeline <id>] [--timeout <seconds>]
+ *   bun /app/scripts/await-pipeline.ts --attach <runId> [--timeout <seconds>]   # resume watching, no new build
  *
  * Environment:
- *   AZURE_DEVOPS_PAT   — Personal access token (required)
- *   ADO_ORG_URL        — e.g. https://dev.azure.com/your-org (or --org flag)
- *   ADO_PROJECT        — e.g. Your Project (or --project flag)
+ *   AZURE_DEVOPS_PAT      — Personal access token (required)
+ *   AZURE_DEVOPS_ORG_URL  — e.g. https://dev.azure.com/<org> (or --org flag)
+ *   AZURE_DEVOPS_PROJECT  — the ADO project name (or --project flag)
+ *   ADO_ORG_URL / ADO_PROJECT — legacy aliases, honoured as a fallback only. These
+ *     were once the ONLY names read, and they are set nowhere: every run silently
+ *     targeted the placeholder org and 404'd in a way that read as "no such build".
  *
  * Exit codes:
  *   0 — Pipeline succeeded
@@ -32,6 +36,51 @@
  */
 
 import { parseArgs } from 'util';
+
+// ---------------------------------------------------------------------------
+// Where this script lives inside the image, and how it finds the org it targets
+// ---------------------------------------------------------------------------
+
+/**
+ * Absolute path to this script in `devopsworker:latest`. Every command quoted to
+ * an agent must use it: an agent's cwd is the SESSION root, which has no
+ * `scripts/` directory, so a relative path to this file dies with
+ * `Module not found` before it can do anything.
+ */
+export const SCRIPT_PATH = '/app/scripts/await-pipeline.ts';
+
+/** Placeholder org used when nothing is configured — see `assertOrgConfigured`. */
+export const PLACEHOLDER_ORG = 'https://dev.azure.com/your-org';
+
+/**
+ * Resolve the ADO org URL. `AZURE_DEVOPS_ORG_URL` is the name the deployment sets
+ * and forwards into containers; `ADO_ORG_URL` is this script's original name, kept
+ * as an alias. Reading only the alias — which is set nowhere — silently produced
+ * the placeholder and a route-level 404 on every run for four months.
+ */
+export function resolveOrgUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return env.AZURE_DEVOPS_ORG_URL || env.ADO_ORG_URL || PLACEHOLDER_ORG;
+}
+
+/** Resolve the ADO project. Same aliasing rule as `resolveOrgUrl`. */
+export function resolveProject(env: NodeJS.ProcessEnv = process.env): string {
+  return env.AZURE_DEVOPS_PROJECT || env.ADO_PROJECT || 'Your Project';
+}
+
+/**
+ * Fail LOUDLY and self-diagnosingly rather than 404ing against a placeholder.
+ * The original failure mode was indistinguishable from "that build id does not
+ * exist", which is why it survived 83 occurrences — the message named the run,
+ * never the org it was asking.
+ */
+export function assertOrgConfigured(org: string): void {
+  if (org !== PLACEHOLDER_ORG) return;
+  throw new Error(
+    `ADO org URL is not configured — resolved to the placeholder ${PLACEHOLDER_ORG}. `
+    + `Set AZURE_DEVOPS_ORG_URL (and AZURE_DEVOPS_PROJECT) in the environment. `
+    + `Any 404 from here is a wrong-org route error, NOT a missing build.`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -117,7 +166,10 @@ export function buildResumeHint(runId: number, timeoutS: number, waiter = false)
     `Pipeline run #${runId} is still in progress (did not finish within ${timeoutS}s).`,
     `To keep watching the SAME run without triggering a new build, re-run:`,
     ``,
-    `  bun scripts/await-pipeline.ts --attach ${runId} --timeout ${timeoutS}${waiterFlag}`,
+    // ABSOLUTE. The ci-waiter is told to re-run this command verbatim, and its cwd
+    // is the session root, which has no `scripts/` — a relative path here handed the
+    // waiter a command it could not run and reported as a configuration error.
+    `  bun ${SCRIPT_PATH} --attach ${runId} --timeout ${timeoutS}${waiterFlag}`,
     ``,
     `Do NOT use sleep loops, and do NOT re-run with --branch (that starts a duplicate build).`,
   ].join('\n');
@@ -200,8 +252,14 @@ async function run(): Promise<void> {
       waiter: { type: 'boolean', default: false },  // ci-waiter sentinel: marks an --attach as coming from the subagent
       pipeline: { type: 'string', default: '973' },
       timeout:  { type: 'string', default: '100' },  // < 120s CLI auto-background cap (see header)
-      org:      { type: 'string', default: process.env.ADO_ORG_URL ?? 'https://dev.azure.com/your-org' },
-      project:  { type: 'string', default: process.env.ADO_PROJECT ?? 'Your Project' },
+      // AZURE_DEVOPS_* are the names the deployment actually sets and forwards to
+      // containers (see getContainerEnv). ADO_* were this script's original names
+      // and are kept as aliases, but they are set NOWHERE — reading only those is
+      // what made every invocation fall through to the placeholder org below and
+      // return a route-level 404 that read as "build not found". 11 work items,
+      // 83 occurrences, 2026-03-20 to 2026-08-02, silent the whole time.
+      org:      { type: 'string', default: resolveOrgUrl() },
+      project:  { type: 'string', default: resolveProject() },
       poll:     { type: 'string', default: '30' },
     },
     strict: true,
@@ -227,6 +285,9 @@ async function run(): Promise<void> {
 
   const orgUrl = values.org!;
   const project = values.project!;
+  // Before any request: a placeholder org 404s on EVERY path, and that 404 reads
+  // exactly like "no such build". Refuse up front and say why.
+  assertOrgConfigured(orgUrl);
   const ctx: AdoCtx = {
     authHeader: `Basic ${Buffer.from(`:${pat}`).toString('base64')}`,
     apiBase: `${orgUrl}/${encodeURIComponent(project)}/_apis`,
