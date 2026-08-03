@@ -63,6 +63,11 @@ export function agentStage<T extends z.ZodType>(
             startedAt,
             timestamp: new Date().toISOString(),
             toolCalls: {},
+            // A failed run is the one someone actually needs the transcript for,
+            // so the session id has to survive the error path too — `runAgent`
+            // puts it in `details` for exactly this.
+            ...(typeof d.sessionId === 'string' && d.sessionId ? { sessionId: d.sessionId } : {}),
+            ...(process.env['BUILD_SHA'] ? { imageSha: process.env['BUILD_SHA'] } : {}),
             subtype: typeof d.subtype === 'string' ? d.subtype : undefined,
           };
         }
@@ -80,6 +85,12 @@ export function agentStage<T extends z.ZodType>(
         timestamp: new Date().toISOString(),
         toolCalls: result.toolCalls,
         tokens: result.tokens,
+        ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+        // Omit rather than store a blank. An image built without
+        // `--build-arg BUILD_SHA=<sha>` bakes `BUILD_SHA=""`, and an empty string
+        // survives `??` — it would read as "recorded" to every consumer while
+        // saying nothing. Absent is honest.
+        ...(process.env['BUILD_SHA'] ? { imageSha: process.env['BUILD_SHA'] } : {}),
         // Omit when empty so entries for agents that dispatch nothing stay compact.
         ...(result.modelUsage && Object.keys(result.modelUsage).length > 0
           ? { modelUsage: result.modelUsage }
