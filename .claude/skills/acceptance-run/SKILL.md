@@ -12,7 +12,7 @@ description: >-
 
 One paid review, against the real container, writing nothing to the PR.
 
-**This costs real money — a full review is not cheap.** Never launch one to "see
+**This costs real money — a full review runs into two figures.** Never launch one to "see
 what happens". Know what you are testing and what result would falsify it.
 
 ## Step 1 — Pick the PR, and check it is ACTIVE

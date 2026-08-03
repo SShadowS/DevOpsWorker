@@ -78,10 +78,21 @@ function token(name: string): string {
 // `border-left-color:` (both legitimately keep `--color-error` — they are not held to a
 // text-contrast bar). `-webkit-text-fill-color` is spelled out as a second alternative
 // because it DOES paint text, and the left anchor that correctly excludes `border-color`
-// would otherwise exclude it too. Zero uses today; listed so the guard does not have a hole
-// the moment someone reaches for it.
+// would otherwise exclude it too. Its JSX spelling `WebkitTextFillColor` is a THIRD
+// alternative for the same reason: the anchor excludes that too, and this scan covers `.tsx`
+// precisely because that is where the original bug lived — covering only the CSS spelling
+// would leave the hole in the one file type the widening exists for. Zero uses of either
+// today; listed so the guard does not have a hole the moment someone reaches for it.
+//
+// Known NOT covered, deliberately, as of 2026-08-03 — each would be a real bypass, none is
+// reachable from anything in the tree today:
+//   - `rgb(239 68 68)` / `rgb(239 68 68 / 90%)` — CSS Color Level 4 space-separated syntax.
+//   - `color: color-mix(in srgb, var(--color-error) 80%, white)` — the token reached
+//     indirectly. This file already uses `color-mix` for tints (dashboard.css:818,819,910).
+//   - re-aliasing the raw hex under a new token (`--red: #ef4444` then `color: var(--red)`),
+//     which is exactly what the deleted `index-legacy.html` did.
 const ERROR_TEXT_COLOR_RE =
-  /(?:(?<![\w-])color|-webkit-text-fill-color):\s*['"]?(var\(--color-(?:error|stage-error)(?![\w-])[^)'"]*\)|#ef4444|rgba?\(\s*239\s*,\s*68\s*,\s*68\b[^)]*\))['"]?/gi;
+  /(?:(?<![\w-])color|-webkit-text-fill-color|WebkitTextFillColor):\s*['"]?(var\(--color-(?:error|stage-error)(?![\w-])[^)'"]*\)|#ef4444|rgba?\(\s*239\s*,\s*68\s*,\s*68\b[^)]*\))['"]?/gi;
 
 function findErrorTextColorRules(source: string): string[] {
   return source.match(ERROR_TEXT_COLOR_RE) ?? [];
@@ -141,11 +152,26 @@ describe('error text contrast', () => {
     expect(findErrorTextColorRules("style={{ color: 'var(--color-error)' }}")).toHaveLength(1);
     expect(findErrorTextColorRules('style={{ color: "var(--color-error)" }}')).toHaveLength(1);
     expect(findErrorTextColorRules('.x { color: #ef4444; }')).toHaveLength(1);
+    // The three forms the widening added. Pinned because reverting the regex to its
+    // pre-widening form left every other assertion in this file green — the capability
+    // was unguarded, which is the same shape as a guard that cannot fail.
+    expect(findErrorTextColorRules('.x { color: rgb(239, 68, 68); }')).toHaveLength(1);
+    expect(findErrorTextColorRules('.x { color: rgba(239, 68, 68, 0.9); }')).toHaveLength(1);
+    expect(findErrorTextColorRules('.x { -webkit-text-fill-color: var(--color-error); }')).toHaveLength(1);
+    // ...and its JSX spelling. `-webkit-text-fill-color` only ever appears that way in CSS;
+    // in the TSX inline styles this scan exists to cover it is written `WebkitTextFillColor`,
+    // which the `(?<![\w-])` anchor excludes. Covering only the CSS spelling would leave the
+    // hole in exactly the file type that carried the original bug.
+    expect(findErrorTextColorRules("style={{ WebkitTextFillColor: 'var(--color-error)' }}")).toHaveLength(1);
     // and it must NOT fire on the correct token, its fallback form, or border/background uses
     expect(findErrorTextColorRules('.x { color: var(--color-error-text); }')).toEqual([]);
     expect(findErrorTextColorRules('.x { color: var(--color-error-text, #ff8a8a); }')).toEqual([]);
     expect(findErrorTextColorRules('.x { border-color: var(--color-error); }')).toEqual([]);
     expect(findErrorTextColorRules('.x { background: var(--color-error); }')).toEqual([]);
+    // The 14 native `rgba(239, 68, 68, …)` backgrounds must stay ignored — the channel-value
+    // alternative is what could have swept them in.
+    expect(findErrorTextColorRules('.x { background: rgba(239, 68, 68, 0.18); }')).toEqual([]);
+    expect(findErrorTextColorRules("style={{ borderColor: 'var(--color-error)' }}")).toEqual([]);
   });
 
   test('--color-error itself is unchanged, so borders and tints keep their weight', () => {
