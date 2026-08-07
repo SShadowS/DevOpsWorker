@@ -182,6 +182,13 @@ CREATE TABLE IF NOT EXISTS finding_outcome_sweeps (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS model TEXT;
+-- How many requests the batch for this row was submitted with. Written BEFORE
+-- the batch is created, and it is what lets a crash between the row and the
+-- provider's acknowledgement be reconciled afterwards: a row whose batch id was
+-- never recorded can be matched against the provider's batch list by creation
+-- time AND request count, rather than guessed at. Null on rows written before
+-- this column existed. See the sweep's 'submitting' status.
+ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS request_count INTEGER;
 `;
 
 /**

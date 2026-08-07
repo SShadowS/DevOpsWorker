@@ -53,21 +53,31 @@ export function guardedRunner(
   log: (message: string) => void,
 ): () => Promise<void> {
   let running = false;
+  // Nothing in here may throw. The returned function is handed straight to
+  // `setInterval`, where a rejection is unhandled and takes the process down —
+  // so even the log sink is contained. A sink that throws outside the guard's
+  // `try` would also strand `running` at true and wedge the task forever.
+  const say = (message: string): void => {
+    try {
+      log(message);
+    } catch { /* no sink left to report the sink with */ }
+  };
   return async () => {
     // Set synchronously before the first `await`, so two ticks in the same turn
     // of the loop cannot both pass this check.
     if (running) {
-      log(`Scheduler: '${task.name}' is still running from an earlier tick — skipping this one`);
+      say(`Scheduler: '${task.name}' is still running from an earlier tick — skipping this one`);
       return;
     }
     running = true;
     const startedAt = Date.now();
-    log(`Scheduler: '${task.name}' starting`);
+    const elapsed = () => Math.round((Date.now() - startedAt) / 1000);
     try {
+      say(`Scheduler: '${task.name}' starting`);
       await task.run();
-      log(`Scheduler: '${task.name}' finished in ${Math.round((Date.now() - startedAt) / 1000)}s`);
+      say(`Scheduler: '${task.name}' finished in ${elapsed()}s`);
     } catch (err) {
-      log(`Scheduler: '${task.name}' FAILED after ${Math.round((Date.now() - startedAt) / 1000)}s: ${describe(err)}`);
+      say(`Scheduler: '${task.name}' FAILED after ${elapsed()}s: ${describe(err)}`);
     } finally {
       running = false;
     }

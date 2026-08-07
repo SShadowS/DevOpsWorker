@@ -126,27 +126,30 @@ describe('guardedRunner — re-entrancy', () => {
     await tick();
     expect(starts).toBe(1);
 
-    // Three more ticks arrive while the first is still in flight.
-    await run();
-    await run();
-    await run();
+    // Three more ticks arrive while the first is still in flight. Fired WITHOUT
+    // awaiting on purpose: with the guard removed each would block on the gate
+    // and an `await` here would hang the suite instead of failing it — a hung CI
+    // job, not a red test. Unawaited, the start count below fails cleanly.
+    const overlapping = [run(), run(), run()];
+    await tick();
     expect(starts).toBe(1);
     expect(lines.filter((l) => l.includes('still running from an earlier tick'))).toHaveLength(3);
 
     // Once it finishes, the guard reopens.
     gate.resolve();
-    await first;
+    await Promise.all([first, ...overlapping]);
     await run();
     expect(starts).toBe(2);
   });
 
-  test('the guard is per task — a slow task does not block a different one', async () => {
+  test('the guard is per task — it blocks the slow task and only the slow task', async () => {
     const { log } = collectLog();
     const gate = deferred();
+    let slowStarts = 0;
     let fastRuns = 0;
 
     const slow = guardedRunner(
-      { name: 'slow', everyMinutes: 1, run: async () => { await gate.promise; } },
+      { name: 'slow', everyMinutes: 1, run: async () => { slowStarts++; await gate.promise; } },
       log,
     );
     const fast = guardedRunner(
@@ -156,12 +159,20 @@ describe('guardedRunner — re-entrancy', () => {
 
     const inFlight = slow();
     await tick();
+    expect(slowStarts).toBe(1);
+
+    // Both halves are load-bearing. Asserting only that `fast` still runs passes
+    // with the guard deleted entirely — with no guard everything runs — so it
+    // proves nothing about isolation. The claim is that the SAME task is blocked
+    // while a DIFFERENT one is not, which needs both counts.
+    const blocked = slow();
     await fast();
-    await fast();
-    expect(fastRuns).toBe(2);
+    await tick();
+    expect(slowStarts).toBe(1);
+    expect(fastRuns).toBe(1);
 
     gate.resolve();
-    await inFlight;
+    await Promise.all([inFlight, blocked]);
   });
 
   test('the guard reopens after a throw, so one failure does not wedge the task', async () => {
@@ -209,6 +220,22 @@ describe('guardedRunner — error containment', () => {
     expect(failure).toContain('first tick exploded');
     // ...and the following tick reported success.
     expect(lines.some((l) => l.includes("'nightly' finished"))).toBe(true);
+  });
+
+  test('a throwing log sink neither wedges the guard nor escapes as a rejection', async () => {
+    // The sink is the one thing the guard cannot log about. If it throws outside
+    // the `try`, `running` is stranded at true and the task never runs again —
+    // and the rejection is unhandled, which kills the watcher.
+    let runs = 0;
+    const run = guardedRunner(
+      { name: 'sink-hostile', everyMinutes: 1, run: async () => { runs++; } },
+      () => { throw new Error('the log sink is broken'); },
+    );
+
+    await expect(run()).resolves.toBeUndefined();
+    await expect(run()).resolves.toBeUndefined();
+    // Second call proves the guard reopened rather than staying latched.
+    expect(runs).toBe(2);
   });
 
   test('a non-Error rejection is still logged with the task name', async () => {
