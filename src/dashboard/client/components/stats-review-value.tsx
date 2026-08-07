@@ -2,6 +2,7 @@ import { reviewValueStats, statsWindow } from '../stats-store.ts';
 import type { FetchState } from '../stats-store.ts';
 import type { ReviewValueStats, ReviewValueOutcome, ReviewValueEngagement, ReviewValueDisputed, ReviewValueLeadTime, ReviewValueSpend } from '../../stats.ts';
 import { formatCost, formatPct } from '../format.ts';
+import { countOf, agree } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
 // Review value — the Stats tab's fifth slot. Answers "what did PR review
@@ -91,6 +92,10 @@ export function describeAddressed(o: ReviewValueOutcome): ScorecardLine {
 /** Coverage — how much of the window has been judged at all. Rendered
  *  immediately beside the acted-on figure (R1), not in a footnote. */
 export function describeJudgedCoverage(o: ReviewValueOutcome): string {
+  // Zero raised is not "everything has a verdict" — there is nothing to have
+  // one. Rendered "0/0 findings judged (n/a) — every finding raised in this
+  // window has a verdict", which is vacuously true and reads as reassurance.
+  if (o.findingsRaised === 0) return 'No read-band findings were raised in this window.';
   const head = `${o.judged}/${o.findingsRaised} findings judged (${formatPct(o.judgedCoverage)})`;
   if (o.unjudgeable === 0) return `${head} — every finding raised in this window has a verdict.`;
   // "Not yet" and "never" are different facts and are never summed into one
@@ -107,12 +112,20 @@ export function describeJudgedCoverage(o: ReviewValueOutcome): string {
   // verdict: 28 awaiting a diff" says the same number either side of a colon.
   // Each single-reason case gets its own sentence rather than one template
   // with the reason slotted in: "all that can never be judged" is not English.
+  const n = o.unjudgeable;
   if (parts.length === 1) {
+    // The two singular/plural forms differ by more than a verb here — the
+    // negation moves. `agree(n, 'it has', 'none of them has') + ' an inline
+    // thread'` rendered "it HAS an inline thread" at n=1, the exact opposite
+    // of the fact, which is why these are written out rather than assembled.
     return o.awaitingDiff > 0
-      ? `${head} — ${o.unjudgeable} carry no verdict, all awaiting a diff to judge against.`
-      : `${head} — ${o.unjudgeable} carry no verdict and never can: none of them has an inline thread.`;
+      ? `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict, awaiting a diff to judge against.`
+      : `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict and never can: ` +
+        (n === 1 ? 'it has no inline thread.' : 'none of them has an inline thread.');
   }
-  return `${head} — ${o.unjudgeable} carry no verdict: ${parts.join(', ')}.`;
+  // Both parts non-empty here, so `n` is at least 2 and the plural is safe —
+  // asserted by a test rather than left to this comment.
+  return `${head} — ${n} carry no verdict: ${parts.join(', ')}.`;
 }
 
 /** The `did` breakdown as ordered rows. Zero-count labels are KEPT: a missing
@@ -160,18 +173,24 @@ export function describeEngagement(e: ReviewValueEngagement, o: ReviewValueOutco
     e.engagedRate == null
       ? 'No finding in this window carries an engagement signal either way.'
       : `${e.engaged} drew a written response (thread reply or PR discussion), ${e.silent} drew none — ` +
-        `${formatPct(e.engagedRate)} of the ${denominator} finding(s) where engagement could be read.${contrast}`;
+        `${formatPct(e.engagedRate)} of the ${countOf(denominator, 'finding')} where engagement could be read.${contrast}`;
   const missing: string[] = [];
   if (e.unrecorded > 0) {
-    missing.push(`${e.unrecorded} traced finding(s) carry no engagement signal this code classifies — in neither bucket, not folded into "no reply"`);
+    missing.push(
+      `${countOf(e.unrecorded, 'traced finding')} ${agree(e.unrecorded, 'carries', 'carry')} no engagement signal ` +
+      'this code classifies — in neither bucket, not folded into "no reply"',
+    );
   }
   if (o.traceability.untraceable > 0) {
-    missing.push(`${o.traceability.untraceable} raised finding(s) have no thread at all to read engagement from`);
+    const u = o.traceability.untraceable;
+    missing.push(`${countOf(u, 'raised finding')} ${agree(u, 'has', 'have')} no thread at all to read engagement from`);
   }
   return {
     label: 'Human engagement',
-    // States its OWN denominator, not the raised total.
-    value: `${e.engaged} of ${denominator} with a readable signal`,
+    // States its OWN denominator, not the raised total. "0 of 0 with a
+    // readable signal" is not a reading — it is the absence of one, and the
+    // fraction form implies a population that does not exist.
+    value: denominator === 0 ? 'no readable signal' : `${e.engaged} of ${denominator} with a readable signal`,
     detail,
     caveat: missing.length > 0 ? `${missing.join('; ')}.` : null,
     status: 'neutral',
@@ -194,7 +213,7 @@ export function describeDisputed(d: ReviewValueDisputed): ScorecardLine {
   return {
     label: 'Disputed as factually wrong',
     value: `${d.count}`,
-    detail: `A count, never a rate — n is small enough that a percentage would overstate what it can support. Measured over ${d.saidRecorded} finding(s) carrying a said label.`,
+    detail: `A count, never a rate — n is small enough that a percentage would overstate what it can support. Measured over ${countOf(d.saidRecorded, 'finding')} carrying a said label.`,
     caveat: null,
     status: 'neutral',
   };
@@ -206,7 +225,7 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
   // all and `s.note` (which is about the per-item figure) must not render.
   const floorClause =
     s.numeratorState === 'floor'
-      ? ` ${s.reviewsMissingCost} of ${s.reviewCount} review(s) carry no recorded cost, so this total is a FLOOR, not a complete sum.`
+      ? ` ${s.reviewsMissingCost} of ${countOf(s.reviewCount, 'review')} ${agree(s.reviewsMissingCost, 'carries', 'carry')} no recorded cost, so this total is a FLOOR, not a complete sum.`
       : '';
 
   if (s.costPerAddressed == null) {
@@ -218,7 +237,7 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
       label: 'Total spend this window',
       value: formatCost(s.totalCostUsd),
       detail:
-        `${formatCost(s.totalCostUsd)} across ${s.reviewCount} review(s) on the PRs these findings came from. ` +
+        `${formatCost(s.totalCostUsd)} across ${countOf(s.reviewCount, 'review')} on the PRs these findings came from. ` +
         `Nothing is confirmed acted on in this window, so there is no per-item figure to report.${floorClause}`,
       caveat: null,
       status: 'neutral',
@@ -236,7 +255,7 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
     // three times inside ~130 words. The no-per-item branch above keeps it,
     // because there the caveat is null and this is the only place it is said.
     detail:
-      `${formatCost(s.totalCostUsd)} across ${s.reviewCount} review(s) → ${formatCost(s.costPerAddressed)} ` +
+      `${formatCost(s.totalCostUsd)} across ${countOf(s.reviewCount, 'review')} → ${formatCost(s.costPerAddressed)} ` +
       `per confirmed acted-on finding (${formatCost(s.totalCostUsd)} ÷ ${addressed}).`,
     // Coverage restated INSIDE the caveat, not only beside the acted-on line:
     // this is the number a reader is most likely to quote out of context, and
@@ -252,18 +271,56 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
   };
 }
 
+/** Caption under the verdict table. Was inline JSX with two hardcoded
+ *  plurals and an unconditional "the rest reached only a majority" — which
+ *  describes an empty set whenever every judged row was unanimous, a state
+ *  that is reachable and was live at 7d/prod. Pulled out so it is swept and
+ *  tested like every other count-bearing string here. */
+export function describeVerdictCaption(o: ReviewValueOutcome): string {
+  const scope =
+    `Shares are over the ${countOf(o.judged, 'JUDGED finding')}, not over all ${o.findingsRaised} raised.`;
+  if (o.judged === 0) return scope;
+  const split = o.judged - o.unanimous;
+  if (split === 0) {
+    return `${scope} Every judged row had all three ballots agree.`;
+  }
+  if (o.unanimous === 0) {
+    return `${scope} No judged row had all three ballots agree; every one reached only a majority.`;
+  }
+  return (
+    `${scope} ${o.unanimous} of the ${countOf(o.judged, 'judged row')} had all three ballots agree; ` +
+    `the other ${split} reached only a majority.`
+  );
+}
+
 /** Optional and small, per the brief. The two populations are reported
  *  SEPARATELY and never averaged together: a negative lead time means the
  *  review landed after the PR had already settled, which is not a slow lead
  *  time, it is a different event. */
 export function describeLeadTime(l: ReviewValueLeadTime): string {
   const med = l.medianMinsBeforeSettle == null ? 'n/a' : `${Math.round(l.medianMinsBeforeSettle)} min`;
+  const a = l.afterSettleCount;
+  const b0 = l.beforeSettleCount === 0;
+  // "excluded from that median" needs a median to be excluded from. With no
+  // before-settle findings there is none, and the sentence pointed at
+  // something the previous sentence had just said does not exist.
   const after =
-    l.afterSettleCount === 0
+    a === 0
       ? ''
-      : ` ${l.afterSettleCount} finding(s) were raised AFTER the PR settled (a cherry-pick or post-merge review) and are excluded from that median rather than averaged into it — they have no lead time to measure.`;
-  const unrecorded = l.unrecordedCount === 0 ? '' : ` ${l.unrecordedCount} finding(s) have no lead time recorded.`;
-  return `Median ${med} from finding posted to PR settled, over the ${l.beforeSettleCount} finding(s) raised before the PR settled.${after}${unrecorded}`;
+      : ` ${countOf(a, 'finding')} ${agree(a, 'was', 'were')} raised AFTER the PR settled (a cherry-pick or ` +
+        `post-merge review); ${agree(a, 'it has', 'they have')} no lead time to measure` +
+        (b0 ? '.' : `, and ${agree(a, 'is', 'are')} excluded from the median above rather than averaged into it.`);
+  const u = l.unrecordedCount;
+  const unrecorded = u === 0 ? '' : ` ${countOf(u, 'finding')} ${agree(u, 'has', 'have')} no lead time recorded.`;
+  const b = l.beforeSettleCount;
+  // The median's own population can be zero (every finding raised after the PR
+  // settled), in which case `med` is already 'n/a' and "over the 0 findings"
+  // would be a denominator for a figure that does not exist.
+  const head =
+    b === 0
+      ? `No finding in this window was raised before its PR settled, so there is no lead time to report.`
+      : `Median ${med} from finding posted to PR settled, over the ${countOf(b, 'finding')} raised before the PR settled.`;
+  return `${head}${after}${unrecorded}`;
 }
 
 export interface ReviewValuePanelView {
@@ -371,10 +428,7 @@ function RaisedAndActedOnSection({ o }: { o: ReviewValueOutcome }) {
           ))}
         </tbody>
       </table>
-      <p class="review-value-section__note">
-        Shares are over the {o.judged} JUDGED finding(s), not over all {o.findingsRaised} raised. {o.unanimous} of the
-        judged rows had all three ballots agree; the rest reached only a majority.
-      </p>
+      <p class="review-value-section__note">{describeVerdictCaption(o)}</p>
       <p class="review-value-section__note">
         <strong class="review-value-tag review-value-tag--caveat">Known instrument caveat: </strong>
         {o.reproducibilityNote}
@@ -426,8 +480,8 @@ function ReviewValueBody({ data }: { data: ReviewValueStats }) {
     <div class="review-value-card__body">
       {data.lowSample && (
         <p class="review-value-panel__low-sample">
-          Small sample: n={data.sampleSize} finding(s) in this window — every statistic below is a small-sample
-          reading.
+          Small sample: n={countOf(data.sampleSize, 'finding')} in this window — every statistic below is a
+          small-sample reading.
         </p>
       )}
       <RaisedAndActedOnSection o={o} />

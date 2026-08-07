@@ -25,6 +25,7 @@ import { statSync } from 'node:fs';
 import type postgres from 'postgres';
 import type { PRFinding } from '../agents/pr-reviewer/schema.ts';
 import { MIN_RELIABLE_COVERAGE_PCT } from './coverage-thresholds.ts';
+import { countOf, agree, itThem } from './count-phrase.ts';
 
 // ---------------------------------------------------------------------------
 // Window handling — the one piece of "user input" every endpoint accepts.
@@ -1477,8 +1478,11 @@ export interface ReviewValueSpend extends ReviewValueSpendInput {
 function buildSpendNote(numerator: NumeratorState, denominator: DenominatorState, missing: number, reviewCount: number): string {
   const numeratorClause =
     numerator === 'exact'
-      ? 'The numerator is exact: every review on these PRs carries a recorded cost.'
-      : `The numerator is a FLOOR, not an exact sum — ${missing} of ${reviewCount} review(s) on these PRs carry no recorded cost, and backfilling them can only RAISE it.`;
+      ? reviewCount === 0
+        ? 'No review on these PRs carries a recorded cost, so the numerator is zero rather than exact.'
+        : 'The numerator is exact: every review on these PRs carries a recorded cost.'
+      : `The numerator is a FLOOR, not an exact sum — ${missing} of ${countOf(reviewCount, 'review')} on these PRs ` +
+        `${agree(missing, 'carries', 'carry')} no recorded cost, and backfilling ${itThem(missing)} can only RAISE it.`;
 
   const movementClause =
     denominator === 'settled'
@@ -1587,18 +1591,28 @@ export interface ReviewValueOutcome {
  * counting differently, so it gets said rather than clamped away silently.
  */
 function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileAnchor: number): string {
+  if (raisedCount === 0) {
+    return 'No read-band findings were raised in this window, so there is nothing to trace.';
+  }
+
   if (untraceable === 0) {
+    // The condition establishes that every raised finding has a ROW — nothing
+    // about whether any row was judged. An earlier version of the second
+    // branch said "has a verdict" here, which rendered as a flat falsehood on
+    // a window with nothing judged at all. Both branches now claim only
+    // traceability, which is what `untraceable === 0` actually means.
     return noFileAnchor === 0
       ? 'Every read-band finding raised in this window has an inline thread, so every one of them is traceable.'
-      : `Every read-band finding raised in this window has a verdict, yet ${noFileAnchor} of them were recorded ` +
-        'without a file anchor and should not have been traceable at all. The two sources are counting ' +
+      : `Every read-band finding raised in this window has an inline thread, yet ${countOf(noFileAnchor, 'of them was', 'of them were')} ` +
+        'recorded without a file anchor and should not have been traceable at all. The two sources are counting ' +
         'differently — reconcile them before quoting this section.';
   }
 
   const explained = Math.min(noFileAnchor, untraceable);
   const head =
-    `${untraceable} of ${raisedCount} read-band finding(s) raised in this window have NO verdict and can never ` +
-    'be given one. They are counted in "raised" and in nothing else.';
+    `${untraceable} of ${countOf(raisedCount, 'read-band finding')} raised in this window ` +
+    `${agree(untraceable, 'has', 'have')} NO verdict and can never be given one. ` +
+    `${agree(untraceable, 'It is', 'They are')} counted in "raised" and in nothing else.`;
 
   // MORE file-less findings than gap means some file-less finding was traced
   // anyway, which the anchoring rule says is impossible. That is a
@@ -1614,16 +1628,16 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
     );
   }
 
-  const isAre = explained === 1 ? 'is' : 'are';
+  const remainder = untraceable - explained;
   const cause =
     explained === 0
       ? ' None of that gap is explained by a missing file anchor, which is the only cause this card knows about — ' +
         'the two sources are counting differently, and the gap should be reconciled before this line is quoted.'
       : explained === untraceable
         ? ' The gap is fully accounted for: a thread is anchored to a file, and a PR-level finding has no file to anchor to.'
-        : ` ${explained} of them ${isAre} explained by having no file anchor (a thread is anchored to a file, and a ` +
-          `PR-level finding has no file to anchor to). The remaining ${untraceable - explained} are not explained, ` +
-          'and should be reconciled before this line is quoted.';
+        : ` ${explained} of ${itThem(untraceable)} ${agree(explained, 'is', 'are')} explained by having no file anchor ` +
+          '(a thread is anchored to a file, and a PR-level finding has no file to anchor to). The remaining ' +
+          `${remainder} ${agree(remainder, 'is', 'are')} not explained, and should be reconciled before this line is quoted.`;
 
   return head + cause;
 }

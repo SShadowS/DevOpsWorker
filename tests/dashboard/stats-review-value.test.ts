@@ -12,6 +12,7 @@ import {
   describeDisputed,
   describeSpend,
   describeLeadTime,
+  describeVerdictCaption,
   buildReviewValuePanelView,
 } from '../../src/dashboard/client/components/stats-review-value.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
@@ -554,6 +555,27 @@ describe('computeReviewValue — raised vs traced', () => {
       expect(o.traceabilityNote).toContain('counting differently');
       expect(o.traceabilityNote).not.toContain('every one of them is traceable');
     });
+
+    // This test previously asserted only `toContain('counting differently')`,
+    // which its own fixture satisfied while the sentence beside it read
+    // "Every read-band finding raised in this window HAS A VERDICT" on a
+    // window with nothing judged. The fixture rendered the falsehood and the
+    // test passed. It now pins the claim itself.
+    test('the untraceable===0 branch claims only TRACEABILITY — the condition says nothing about verdicts', () => {
+      const nothingJudged = [finding({ did: null }), finding({ did: null }), finding({ did: null })];
+      const o = computeReviewValue(nothingJudged, spend(), { readBandRaised: 3, noFileAnchor: 1 });
+      expect(o.judged).toBe(0);
+      expect(o.traceability.untraceable).toBe(0);
+      expect(o.traceabilityNote).not.toContain('has a verdict');
+      expect(o.traceabilityNote).toContain('has an inline thread');
+      expect(o.traceabilityNote).toContain('counting differently');
+    });
+
+    test('zero raised says there is nothing to trace rather than that everything is traceable', () => {
+      const o = computeReviewValue([], spend(), { readBandRaised: 0, noFileAnchor: 0 });
+      expect(o.traceabilityNote).toContain('No read-band findings were raised');
+      expect(o.traceabilityNote).not.toContain('Every read-band finding');
+    });
   });
 
   test('never renders a negative gap when the two sources disagree the other way', () => {
@@ -627,7 +649,7 @@ describe('describeJudgedCoverage', () => {
     const text = describeJudgedCoverage(compute(mixedWindow(), spend()));
     expect(text).toContain('8/20');
     expect(text).toContain('40.0%');
-    expect(text).toContain('12 carry no verdict, all awaiting a diff to judge against');
+    expect(text).toContain('12 carry no verdict, awaiting a diff to judge against');
   });
 
   test('separates "not yet" from "never" when some findings have no thread', () => {
@@ -645,7 +667,7 @@ describe('describeJudgedCoverage', () => {
     const o = compute([finding({ did: 'ADDRESSED' }), finding({ did: null }), finding({ did: null })], spend());
     const text = describeJudgedCoverage(o);
     expect(o.unjudgeable).toBe(2);
-    expect(text).toContain('2 carry no verdict, all awaiting a diff to judge against');
+    expect(text).toContain('2 carry no verdict, awaiting a diff to judge against');
     expect(text).not.toContain('2 carry no verdict: 2 awaiting');
   });
 
@@ -746,7 +768,7 @@ describe('describeSpend', () => {
     expect(line.caveat).not.toContain('The numerator is exact');
     // Said once, not twice: the detail no longer repeats it.
     expect(line.detail).not.toContain('FLOOR');
-    const occurrences = (`${line.detail} ${line.caveat}`.match(/carry no recorded cost/g) ?? []).length;
+    const occurrences = (`${line.detail} ${line.caveat}`.match(/carr(?:y|ies) no recorded cost/g) ?? []).length;
     expect(occurrences).toBe(1);
   });
 });
@@ -757,7 +779,7 @@ describe('describeEngagement / describeSilentlyFixed / describeLeadTime', () => 
     const line = describeEngagement(o.engagement, o);
     const denominator = o.engagement.engaged + o.engagement.silent;
     expect(line.value).toBe(`8 of ${denominator} with a readable signal`);
-    expect(line.detail).toContain(`${denominator} finding(s) where engagement could be read`);
+    expect(line.detail).toContain(`${denominator} findings where engagement could be read`);
   });
 
   test('the contrast clause is OMITTED when the denominator IS all findings raised', () => {
@@ -791,8 +813,8 @@ describe('describeEngagement / describeSilentlyFixed / describeLeadTime', () => 
       { readBandRaised: 5, noFileAnchor: 3 },
     );
     const line = describeEngagement(o.engagement, o);
-    expect(line.caveat).toContain('1 traced finding(s) carry no engagement signal');
-    expect(line.caveat).toContain('3 raised finding(s) have no thread at all');
+    expect(line.caveat).toContain('1 traced finding carries no engagement signal');
+    expect(line.caveat).toContain('3 raised findings have no thread at all');
   });
 
   test('silently fixed explains that these are invisible to reply-based measures', () => {
@@ -809,12 +831,17 @@ describe('describeEngagement / describeSilentlyFixed / describeLeadTime', () => 
     const text = describeLeadTime(o.leadTime);
     expect(text).toContain('Median 30 min');
     expect(text).toContain('AFTER the PR settled');
-    expect(text).toContain('excluded from that median');
+    expect(text).toContain('excluded from the median above');
   });
 
-  test('lead time with nothing before settle reports n/a rather than inventing a median', () => {
+  test('lead time with nothing before settle says there is none, rather than "Median n/a"', () => {
     const o = compute([finding({ leadTimeMins: -100 })], spend());
-    expect(describeLeadTime(o.leadTime)).toContain('Median n/a');
+    const text = describeLeadTime(o.leadTime);
+    expect(o.leadTime.medianMinsBeforeSettle).toBeNull();
+    expect(text).toContain('no lead time to report');
+    // "Median n/a" invited the reader to treat an absent population as a
+    // measured null.
+    expect(text).not.toContain('Median n/a');
   });
 });
 
@@ -859,6 +886,169 @@ describe('buildReviewValuePanelView', () => {
     expect(v.status).toBe('ready');
     expect(v.data).toBe(data);
     expect(v.message).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Count agreement, swept.
+//
+// Three consecutive review rounds found the same defect: a clause naming a
+// count with a hardcoded plural, correct for every value except 1. The third
+// round found three more of them INSIDE the functions written that round to
+// eliminate the previous three. So this block does not test instances — it
+// renders every count-bearing string on the card at n=1 and asserts that no
+// singular subject is followed by a plural verb, and that no "(s)" placeholder
+// survives anywhere.
+// ---------------------------------------------------------------------------
+
+describe('count agreement across every rendered string', () => {
+  /** Every string the card can render, for one outcome. */
+  function allStrings(o: ReturnType<typeof compute>): string[] {
+    const lines = [
+      describeAddressed(o),
+      describeSilentlyFixed(o),
+      describeEngagement(o.engagement, o),
+      describeSpend(o.spend, o.addressed, o),
+      describeDisputed(o.disputedAsWrong),
+    ];
+    return [
+      ...lines.flatMap((l) => [l.label, l.value, l.detail, l.caveat ?? '']),
+      describeJudgedCoverage(o),
+      describeVerdictCaption(o),
+      describeLeadTime(o.leadTime),
+      o.traceabilityNote,
+      o.reproducibilityNote,
+      o.scopeNote,
+      o.spend.note,
+    ];
+  }
+
+  /** Singular subject followed by a plural verb — "1 finding are", "1 review
+   *  carry", "1 of them were". The set of verbs is small because the card's
+   *  vocabulary is small; an unlisted verb is a gap, not a pass. */
+  const BAD_AGREEMENT = /\b1\s+(?:\w+\s+){0,3}?(are|were|have|carry)\b/;
+
+  const CASES: Array<[string, ReturnType<typeof compute>]> = [
+    ['everything at 1', computeReviewValue(
+      [finding({ did: 'ADDRESSED', didConfidence: 'majority', saidEvidence: 'thread-reply', leadTimeMins: 5 })],
+      { totalCostUsd: 100, reviewCount: 1, reviewsMissingCost: 1 },
+      { readBandRaised: 1, noFileAnchor: 0 },
+    )],
+    ['one untraceable, one traced', computeReviewValue(
+      [finding({ did: 'ADDRESSED', saidEvidence: 'thread-reply' })],
+      spend({ reviewCount: 1 }),
+      { readBandRaised: 2, noFileAnchor: 1 },
+    )],
+    ['gap 2 explained 1, remainder 1', computeReviewValue(
+      [finding({ did: 'not' })], spend(), { readBandRaised: 3, noFileAnchor: 1 },
+    )],
+    ['one after-settle, one unrecorded lead time, one unclassified signal', computeReviewValue(
+      [finding({ leadTimeMins: -5 }), finding({ leadTimeMins: null, saidEvidence: 'stale-signal' }), finding({ leadTimeMins: 9, saidEvidence: 'thread-reply' })],
+      spend(), { readBandRaised: 4, noFileAnchor: 1 },
+    )],
+    ['nothing at all', computeReviewValue([], { totalCostUsd: 0, reviewCount: 0, reviewsMissingCost: 0 }, { readBandRaised: 0, noFileAnchor: 0 })],
+    ['everything equal and settled', compute([
+      finding({ did: 'ADDRESSED', didConfidence: 'unanimous', saidEvidence: 'thread-reply' }),
+      finding({ did: 'not', didConfidence: 'unanimous', saidEvidence: 'none' }),
+    ], spend())],
+  ];
+
+  for (const [name, o] of CASES) {
+    test(`${name}: no singular subject takes a plural verb`, () => {
+      const offenders = allStrings(o).filter((s) => BAD_AGREEMENT.test(s));
+      expect(offenders).toEqual([]);
+    });
+
+    test(`${name}: no "(s)" placeholder survives`, () => {
+      const offenders = allStrings(o).filter((s) => s.includes('(s)'));
+      expect(offenders).toEqual([]);
+    });
+
+    test(`${name}: no clause states a count of zero as a category`, () => {
+      // "0 awaiting a diff", "0 findings carry", "Only 0 of them" — a zero
+      // count rendered as a listed reason reads as a category that exists and
+      // is empty, when it is simply not a reason anything here is unjudged.
+      const offenders = allStrings(o).filter((s) => /\b0 (awaiting|of them|traced finding|raised finding)/.test(s));
+      expect(offenders).toEqual([]);
+    });
+  }
+
+  test('the regex actually catches a bad string — a guard that matches nothing proves nothing', () => {
+    expect(BAD_AGREEMENT.test('1 of 65 reviews carry no recorded cost')).toBe(true);
+    expect(BAD_AGREEMENT.test('1 finding are excluded')).toBe(true);
+    expect(BAD_AGREEMENT.test('The remaining 1 are not explained')).toBe(true);
+    expect(BAD_AGREEMENT.test('1 of them were recorded')).toBe(true);
+    // ...and does not fire on the corrected forms.
+    expect(BAD_AGREEMENT.test('1 of 65 reviews carries no recorded cost')).toBe(false);
+    expect(BAD_AGREEMENT.test('The remaining 1 is not explained')).toBe(false);
+    expect(BAD_AGREEMENT.test('2 findings are excluded')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Individual clauses whose singular form flips a NEGATION, not just a verb —
+// these cannot be caught by an agreement regex.
+// ---------------------------------------------------------------------------
+
+describe('negation survives the singular form', () => {
+  test('one untraceable finding "has NO inline thread", not "has an inline thread"', () => {
+    const o = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 2, noFileAnchor: 1 });
+    const text = describeJudgedCoverage(o);
+    expect(text).toContain('it has no inline thread');
+    expect(text).not.toContain('it has an inline thread');
+  });
+
+  test('many untraceable findings read "none of them has an inline thread"', () => {
+    const o = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 3, noFileAnchor: 2 });
+    expect(describeJudgedCoverage(o)).toContain('none of them has an inline thread');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Clauses that must not reference a quantity the sentence before them denied
+// ---------------------------------------------------------------------------
+
+describe('no clause points at a figure that does not exist', () => {
+  test('with no before-settle findings the after-settle clause does not cite "that median"', () => {
+    const o = compute([finding({ leadTimeMins: -10 }), finding({ leadTimeMins: -20 })], spend());
+    const text = describeLeadTime(o.leadTime);
+    expect(text).toContain('no lead time to report');
+    expect(text).not.toContain('excluded from the median above');
+    expect(text).not.toContain('that median');
+  });
+
+  test('with a median present the after-settle clause DOES say what it is excluded from', () => {
+    const o = compute([finding({ leadTimeMins: 10 }), finding({ leadTimeMins: -20 })], spend());
+    expect(describeLeadTime(o.leadTime)).toContain('excluded from the median above');
+  });
+
+  test('zero engagement population reads as an absence, not as "0 of 0"', () => {
+    const o = compute([finding({ saidEvidence: 'stale-signal' })], spend());
+    expect(describeEngagement(o.engagement, o).value).toBe('no readable signal');
+  });
+
+  test('zero raised is not reported as "every finding has a verdict"', () => {
+    const o = computeReviewValue([], spend(), { readBandRaised: 0, noFileAnchor: 0 });
+    const text = describeJudgedCoverage(o);
+    expect(text).toBe('No read-band findings were raised in this window.');
+  });
+
+  test('the verdict caption does not describe an empty remainder', () => {
+    const allUnanimous = compute([
+      finding({ did: 'ADDRESSED', didConfidence: 'unanimous' }),
+      finding({ did: 'not', didConfidence: 'unanimous' }),
+    ], spend());
+    expect(describeVerdictCaption(allUnanimous)).toContain('Every judged row had all three ballots agree');
+    expect(describeVerdictCaption(allUnanimous)).not.toContain('the other');
+
+    const noneUnanimous = compute([finding({ did: 'ADDRESSED', didConfidence: 'majority' })], spend());
+    expect(describeVerdictCaption(noneUnanimous)).toContain('No judged row had all three ballots agree');
+
+    const mixed = compute([
+      finding({ did: 'ADDRESSED', didConfidence: 'unanimous' }),
+      finding({ did: 'not', didConfidence: 'majority' }),
+    ], spend());
+    expect(describeVerdictCaption(mixed)).toContain('the other 1 reached only a majority');
   });
 });
 
@@ -927,6 +1117,38 @@ describe('review-value structure', () => {
       if (status === 'neutral') continue;
       expect(cssSrc).toContain(`.review-value-figure--${status}`);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // The `findingKey` reproduction in SQL. It only ever executes against a live
+  // database, both of its normalisation steps are no-ops on current data (0 of
+  // 143 read-band entries carry a backslash or a leading slash), and nothing
+  // else asserts on the query text — so re-collapsing `'\\'` to `'\'` would
+  // leave the whole suite green while silently changing the headline number
+  // the first time a Windows-style path appears. `'\'` in a TS template is the
+  // escape for a quote, which makes the call `replace(x, '', '/')`: a no-op
+  // Postgres accepts without complaint.
+  // -------------------------------------------------------------------------
+  test("the backslash normalisation uses '\\\\', not the silently-empty '\\'", () => {
+    const raisedQuery = statsSrc.slice(statsSrc.indexOf('WITH read_band AS ('), statsSrc.indexOf('FROM identified'));
+    expect(raisedQuery).toContain("replace(btrim(f->>'file'), '\\\\', '/')");
+    // The collapsed form must not appear at all — it is the regression.
+    expect(raisedQuery).not.toMatch(/replace\([^)]*'\\'[^\\]/);
+  });
+
+  test('the file normalisation strips leading slashes as well, matching findingKey', () => {
+    const raisedQuery = statsSrc.slice(statsSrc.indexOf('WITH read_band AS ('), statsSrc.indexOf('FROM identified'));
+    expect(raisedQuery).toContain("'^/+'");
+  });
+
+  test('the raised query is windowed per FINDING, not only per PR', () => {
+    const fn = statsSrc.slice(statsSrc.indexOf('export async function getReviewValueStats'));
+    const raisedQuery = fn.slice(fn.indexOf('WITH read_band AS ('), fn.indexOf('// Spend over the REVIEWS'));
+    // The per-identity min(created_at) IS the window predicate; a PR-scoped
+    // EXISTS alone made "raised" a different, larger population than "traced".
+    expect(raisedQuery).toContain('min(created_at) AS first_raised_at');
+    expect(raisedQuery).toContain('GROUP BY pr_id, repo_key, norm_file, norm_title');
+    expect(raisedQuery).toMatch(/WHERE first_raised_at > now\(\) - \(\$\{days\}::int/);
   });
 
   test('the review-value signal is NOT fed to pickPopulationMeta — its otherPopulationCount counts findings, not reviews', () => {
