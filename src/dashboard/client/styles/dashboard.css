@@ -2633,7 +2633,6 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   border-radius: 4px;
   padding: var(--space-sm) var(--space-md);
 }
-.review-value-section--ok        { border-left-color: var(--color-stage-completed); }
 .review-value-section--attention {
   border-left-color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-tertiary));
@@ -2656,8 +2655,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 }
 
 .review-value-tag { font-weight: 600; }
-.review-value-tag--attention { color: var(--color-accent); }
-.review-value-tag--caveat    { color: var(--color-text-secondary); }
+.review-value-tag--caveat { color: var(--color-text-secondary); }
 
 /* A headline figure and its label. The value is deliberately NOT a large
    display number: on this card the qualifying sentence underneath is
@@ -2671,6 +2669,20 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   font-weight: 600;
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
+}
+/* A figure that is NOT a measurement — today only "Disputed as factually
+   wrong: not yet measured". It must not read as a measured value, so the
+   figure's value line drops to the secondary colour and picks up a left rule,
+   marking it as an absence rather than a reading. This is the one place
+   --color-accent appears outside tag text on this panel, and it marks a
+   missing measurement, not a finding. */
+.review-value-figure--attention {
+  border-left: 2px solid var(--color-accent);
+  padding-left: var(--space-sm);
+}
+.review-value-figure--attention .review-value-figure__value {
+  color: var(--color-text-secondary);
+  font-style: italic;
 }
 .review-value-figure__label {
   font-size: 0.72rem;

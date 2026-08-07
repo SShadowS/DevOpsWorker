@@ -1356,6 +1356,21 @@ export interface ReviewValueFindingRow {
   leadTimeMins: number | null;
 }
 
+/** The "raised" half, aggregated in SQL (the route) rather than here.
+ *  `finding_outcomes` holds one row per finding the sweep could TRACE, which
+ *  is not the same population as the findings review RAISED — so the raised
+ *  figure has to come from `pr_reviews.findings_list`, one level up, exactly
+ *  as the spec sources it. */
+export interface ReviewValueRaisedInput {
+  /** Distinct read-band findings in `findings_list` on these PRs, counted
+   *  under the SAME normalised file+title identity `findingKey` uses, so a
+   *  re-review raising the same finding again counts once. */
+  readBandRaised: number;
+  /** Of those, how many carry no file anchor — `findingKey` needs a file, so
+   *  these can never get an inline thread and can never be traced. */
+  noFileAnchor: number;
+}
+
 /** The spend half, aggregated in SQL (the route) rather than here — this is
  *  the one input the pure function cannot derive from finding rows, because
  *  cost lives on `pr_reviews`, one level up from a finding. */
@@ -1425,23 +1440,106 @@ export interface ReviewValueLeadTime {
   unrecordedCount: number;
 }
 
+/** Is the SUM that feeds `costPerAddressed` complete? `'floor'` whenever any
+ *  review on these PRs carries no recorded cost — backfilling it can only
+ *  RAISE the numerator. A machine-checkable state rather than a phrase buried
+ *  in prose, so a test can pin the claim instead of a substring of the
+ *  sentence that expresses it. */
+export type NumeratorState = 'exact' | 'floor';
+
+/** Can the DENOMINATOR still move? `'will-grow'` while any finding is
+ *  unjudged (classifying more can only add to `addressed`); `'settled'` at
+ *  full coverage, where the figure will not move as classification proceeds.
+ *  The distinction exists because an earlier version of this note asserted
+ *  unconditional growth and was falsified by the first fully-judged window
+ *  that rendered it. */
+export type DenominatorState = 'will-grow' | 'settled';
+
 export interface ReviewValueSpend extends ReviewValueSpendInput {
   /** totalCostUsd / addressed. Null when nothing is confirmed acted on.
-   *  Reported ALONGSIDE judged coverage and never as a settled figure — see
-   *  `note`. */
+   *  Reported ALONGSIDE judged coverage and never as a settled figure unless
+   *  BOTH states below say it is one. */
   costPerAddressed: number | null;
+  numeratorState: NumeratorState;
+  denominatorState: DenominatorState;
+  /** Prose derived from the two states above — never the other way round.
+   *  Whichever direction(s) the figure can still move is stated explicitly,
+   *  including the case where the two inputs move it in OPPOSITE directions
+   *  (missing cost pushes up, rising coverage pushes down), which is the one
+   *  case where calling it an upper bound would be wrong. */
   note: string;
 }
 
+/** Builds `spend.note` from the two states, so the sentence cannot drift out
+ *  of agreement with the flags a test asserts on. Split out (rather than
+ *  inlined in `computeReviewValue`) purely so the four state combinations are
+ *  readable side by side. */
+function buildSpendNote(numerator: NumeratorState, denominator: DenominatorState, missing: number, reviewCount: number): string {
+  const numeratorClause =
+    numerator === 'exact'
+      ? 'The numerator is exact: every review on these PRs carries a recorded cost.'
+      : `The numerator is a FLOOR, not an exact sum — ${missing} of ${reviewCount} review(s) on these PRs carry no recorded cost, and backfilling them can only RAISE it.`;
+
+  const movementClause =
+    denominator === 'settled'
+      ? numerator === 'exact'
+        ? 'The denominator is settled: every finding in this window has been judged, so this figure will not move as classification proceeds.'
+        : 'The denominator is settled — every finding here has been judged — so the only unsettled input is the missing cost above, which can only push this figure UP. It is a lower bound, not an upper one.'
+      : numerator === 'exact'
+        ? 'The denominator is not settled: only judged rows can contribute to `addressed`, so it grows as classification coverage rises and this figure can only FALL from where it stands at the coverage stated beside it. Treat it as an upper bound at the current coverage.'
+        : 'Both inputs are unsettled and they move this figure in OPPOSITE directions — backfilling the missing cost raises it, judging more findings lowers it. It is neither an upper nor a lower bound; it is a reading at the current coverage and cost completeness, and nothing more.';
+
+  return (
+    `${numeratorClause} ${movementClause} It is also NOT comparable with the Cost panel's "cost per read-band item": ` +
+    'that divides by findings RAISED, this divides by findings CONFIRMED ACTED ON, so the two are different ' +
+    'measurements and the difference between them is not a trend. Spend counts every review on these PRs, ' +
+    'including re-reviews that raised none of the findings counted here.'
+  );
+}
+
+/** Why the raised count and the traced count differ. A finding gets an inline
+ *  thread — and therefore a `finding_outcomes` row — only if it has a FILE to
+ *  anchor the thread to (`findingKey(file, title)`, src/sdk/ado/finding-key.ts,
+ *  takes a non-optional file). A PR-level finding with no file is raised, is
+ *  real, and can never be traced by this method. */
+export interface ReviewValueTraceability {
+  /** Distinct read-band findings in `pr_reviews.findings_list` on these PRs —
+   *  the spec's source for "raised", and the true figure. */
+  raised: number;
+  /** `finding_outcomes` rows: the raised findings the sweep could follow. */
+  traced: number;
+  /** raised - traced, floored at 0. */
+  untraceable: number;
+  /** untraceable / raised, 0..1. Null when nothing was raised. */
+  untraceableRate: number | null;
+  /** True when `untraceable` is FULLY explained by findings carrying no file
+   *  anchor. False means the two sources disagree for some other reason and
+   *  the gap is not understood — said out loud rather than presented as if it
+   *  were. */
+  reconciled: boolean;
+  /** The measured count of raised read-band findings with no file anchor. */
+  noFileAnchor: number;
+}
+
 export interface ReviewValueOutcome {
-  /** count(*) — every read-band finding on a settled PR in this window. Exact. */
+  /** Distinct read-band findings RAISED on these PRs, from
+   *  `pr_reviews.findings_list` — NOT a count of `finding_outcomes` rows,
+   *  which undercounts by every finding that has no file to anchor a thread
+   *  to (see `traceability`). Not claimed as exact: two re-reviews that
+   *  reword a finding substantially fork its identity key and count twice. */
   findingsRaised: number;
+  traceability: ReviewValueTraceability;
   /** `did IS NOT NULL`: the classifier reached a verdict. Includes `UNKNOWN`
    *  (it looked and could not tell), which is a judged row — distinct from a
    *  row with no diff to judge at all. */
   judged: number;
-  /** findingsRaised - judged. No diff to judge yet. */
+  /** findingsRaised - judged: everything with no verdict, for EITHER reason. */
   unjudgeable: number;
+  /** Of `unjudgeable`, the ones that have a row and are simply awaiting a
+   *  diff — they will be judged eventually. The remainder
+   *  (`traceability.untraceable`) never will be. Kept apart because "not yet"
+   *  and "never" are different facts. */
+  awaitingDiff: number;
   /** judged / findingsRaised, 0..1. Null when nothing was raised. THE number
    *  that must be rendered beside any rate over `judged`. */
   judgedCoverage: number | null;
@@ -1466,6 +1564,10 @@ export interface ReviewValueOutcome {
   disputedAsWrong: ReviewValueDisputed;
   leadTime: ReviewValueLeadTime;
   spend: ReviewValueSpend;
+  /** The spec's fourth stated limit, rendered with its MEASURED size rather
+   *  than as a rule of thumb — and stating explicitly whether the gap between
+   *  raised and traced is fully explained. */
+  traceabilityNote: string;
   reproducibilityNote: string;
   scopeNote: string;
 }
@@ -1488,8 +1590,18 @@ function median(sorted: number[]): number | null {
 export function computeReviewValue(
   findings: ReviewValueFindingRow[],
   spend: ReviewValueSpendInput,
+  raised: ReviewValueRaisedInput,
 ): ReviewValueOutcome {
-  const findingsRaised = findings.length;
+  // "Raised" comes from `findings_list`, NOT from `findings.length`. A finding
+  // with no file anchor gets no inline thread and therefore no
+  // `finding_outcomes` row, so counting rows silently undercounts what review
+  // actually raised — and every rate over "raised" would be overstated by
+  // exactly that gap. Floored at the traced count so a substantially-reworded
+  // re-review (which forks the identity key and can push the findings_list
+  // count either way) can never render a negative untraceable count.
+  const traced = findings.length;
+  const findingsRaised = Math.max(raised.readBandRaised, traced);
+  const untraceable = findingsRaised - traced;
 
   const judgedRows = findings.filter((f) => f.did != null);
   const judged = judgedRows.length;
@@ -1520,10 +1632,31 @@ export function computeReviewValue(
   const beforeSettle = withLeadTime.filter((f) => f.leadTimeMins! >= 0).map((f) => f.leadTimeMins!);
   const afterSettle = withLeadTime.filter((f) => f.leadTimeMins! < 0);
 
+  const numeratorState: NumeratorState = spend.reviewsMissingCost > 0 ? 'floor' : 'exact';
+  // 'settled' means NOTHING is left to judge — which requires the untraceable
+  // findings to be zero too, not merely that every ROW has a verdict. A window
+  // where all 135 rows are judged but 4 raised findings have no row is not
+  // settled: those 4 are permanently outside the denominator.
+  const denominatorState: DenominatorState = judged >= findingsRaised ? 'settled' : 'will-grow';
+
   return {
     findingsRaised,
+    traceability: {
+      raised: findingsRaised,
+      traced,
+      untraceable,
+      untraceableRate: findingsRaised > 0 ? untraceable / findingsRaised : null,
+      // The gap is understood exactly when it equals the count of raised
+      // findings with no file anchor. Anything else means the two sources
+      // disagree for a reason this code has not accounted for.
+      reconciled: untraceable === raised.noFileAnchor,
+      noFileAnchor: raised.noFileAnchor,
+    },
     judged,
     unjudgeable: findingsRaised - judged,
+    // Only TRACED rows can ever acquire a verdict; the untraceable ones never
+    // will. Floored at 0 for the same reason findingsRaised is.
+    awaitingDiff: Math.max(0, traced - judged),
     judgedCoverage: findingsRaised > 0 ? judged / findingsRaised : null,
     addressed,
     addressedRateOfJudged: judged > 0 ? addressed / judged : null,
@@ -1534,7 +1667,10 @@ export function computeReviewValue(
     engagement: {
       engaged,
       silent,
-      unrecorded: findingsRaised - engaged - silent,
+      // Over TRACED rows: engagement is read off a finding's thread, and an
+      // untraceable finding has no thread to read. Using findingsRaised here
+      // would silently reclassify "we cannot see" as "carries no signal".
+      unrecorded: traced - engaged - silent,
       engagedRate: engagementDenominator > 0 ? engaged / engagementDenominator : null,
       breakdown: evidenceBreakdown,
     },
@@ -1552,26 +1688,31 @@ export function computeReviewValue(
       beforeSettleCount: beforeSettle.length,
       afterSettleCount: afterSettle.length,
       medianMinsBeforeSettle: median([...beforeSettle].sort((a, b) => a - b)),
-      unrecordedCount: findingsRaised - withLeadTime.length,
+      // Over TRACED rows — an untraceable finding has no row and therefore no
+      // lead time to be missing.
+      unrecordedCount: traced - withLeadTime.length,
     },
     spend: {
       ...spend,
       costPerAddressed: addressed > 0 ? spend.totalCostUsd / addressed : null,
-      // Deliberately states no MAGNITUDE for the unjudged share — an earlier
-      // wording asserted it was "large", which is a claim about the data that
-      // a window with full classification coverage (a small Test population,
-      // say) falsifies while the note is still being rendered. The actual
-      // coverage is printed immediately beside this note by the card; this
-      // text only has to say which DIRECTION it moves the figure.
-      note:
-        'The numerator is exact; the denominator is not settled. Only judged rows can contribute to `addressed`, ' +
-        'so the denominator grows as classification coverage rises and the per-item figure can only fall — never ' +
-        'rise — from where it stands at the coverage stated beside it. Treat it as an upper bound at the current ' +
-        'coverage, not a settled rate. It is also NOT comparable with the Cost panel\'s ' +
-        '"cost per read-band item": that divides by findings RAISED, this divides by findings CONFIRMED ACTED ON, ' +
-        'so the two are different measurements and the difference between them is not a trend. Spend counts every ' +
-        'review on these PRs, including re-reviews that raised none of the findings counted here.',
+      numeratorState,
+      denominatorState,
+      // Derived from the two states above, never hand-written per case — an
+      // earlier version asserted a fixed "numerator is exact / can only fall"
+      // that BOTH a window with missing cost and a fully-judged window
+      // falsified while it was being rendered.
+      note: buildSpendNote(numeratorState, denominatorState, spend.reviewsMissingCost, spend.reviewCount),
     },
+    traceabilityNote:
+      untraceable === 0
+        ? 'Every read-band finding raised in this window has an inline thread, so every one of them is traceable.'
+        : `${untraceable} of ${findingsRaised} read-band finding(s) raised in this window have NO inline thread and ` +
+          'can never be given a verdict: a thread is anchored to a file, and a PR-level finding has no file to ' +
+          'anchor to. They are counted in "raised" and in nothing else. ' +
+          (untraceable === raised.noFileAnchor
+            ? 'The gap is fully accounted for by findings with no file anchor.'
+            : `Only ${raised.noFileAnchor} of them are explained by a missing file anchor — the rest of the gap is ` +
+              'not understood, and the two sources should be reconciled before this line is quoted.'),
     reproducibilityNote:
       'Row-level verdicts are not reproducible: a single ballot flipped on 33% of byte-identical re-runs, which is ' +
       'why each finding is judged by 3 ballots and why the verdict collapses to three values. The aggregates on ' +
@@ -1627,6 +1768,46 @@ export async function getReviewValueStats(sql: postgres.Sql, window: StatsWindow
       )
   `;
 
+  // What review actually RAISED, from `findings_list` — the spec's source for
+  // this line, and NOT the same as `rows.length` above. `finding_outcomes`
+  // only holds findings the sweep could trace, and tracing needs an inline
+  // thread, which needs a file to anchor to.
+  //
+  // The two normalisations below reproduce `findingKey` (src/sdk/ado/finding-key.ts)
+  // exactly — backslashes to forward slashes (plain `replace`, NOT
+  // `regexp_replace`: a lone backslash is an invalid regex escape in Postgres,
+  // and `findingKey` does a plain global string replace anyway), leading
+  // slashes stripped,
+  // title lowercased with every non-alphanumeric run collapsed to a single
+  // space — so "distinct" here means the same thing it means to the code that
+  // opens the threads. Verified against the live table: the distinct count
+  // restricted to findings WITH a file equals the `finding_outcomes` row
+  // count exactly. Hashing is unnecessary; the normalised pair IS the
+  // identity, and `findingKey` only hashes it to fit in a comment marker.
+  const [raised] = await sql<Array<{ n: string; no_file: string }>>`
+    WITH read_band AS (
+      SELECT DISTINCT
+        r.pr_id,
+        r.repo_key,
+        btrim(regexp_replace(replace(btrim(f->>'file'), '\', '/'), '^/+', '')) AS norm_file,
+        btrim(regexp_replace(lower(f->>'title'), '[^a-z0-9]+', ' ', 'g')) AS norm_title,
+        (f->>'file' IS NULL OR btrim(f->>'file') = '') AS no_file
+      FROM pr_reviews r
+      CROSS JOIN LATERAL jsonb_array_elements(r.findings_list) AS f
+      WHERE r.findings_list IS NOT NULL
+        AND r.is_test = ${testFlag}
+        AND f->>'severity' IN ('critical', 'major')
+        AND EXISTS (
+          SELECT 1 FROM finding_outcomes fo
+          WHERE fo.pr_id = r.pr_id AND fo.repo_key = r.repo_key
+            AND fo.first_raised_at > now() - (${days}::int * interval '1 day')
+        )
+    )
+    SELECT count(*)::text AS n,
+      count(*) FILTER (WHERE no_file)::text AS no_file
+    FROM read_band
+  `;
+
   // Spend over the REVIEWS that produced these findings, joined on
   // (pr_id, repo_key) — pr_id alone is not unique across repos. `sum` skips
   // nulls silently, so `missing_cost` is reported beside it rather than left
@@ -1663,6 +1844,10 @@ export async function getReviewValueStats(sql: postgres.Sql, window: StatsWindow
         totalCostUsd: Number(spend?.total ?? 0),
         reviewCount: Number(spend?.n ?? 0),
         reviewsMissingCost: Number(spend?.missing ?? 0),
+      },
+      {
+        readBandRaised: Number(raised?.n ?? 0),
+        noFileAnchor: Number(raised?.no_file ?? 0),
       },
     ),
   };

@@ -91,7 +91,16 @@ export function describeAddressed(o: ReviewValueOutcome): ScorecardLine {
 /** Coverage — how much of the window has been judged at all. Rendered
  *  immediately beside the acted-on figure (R1), not in a footnote. */
 export function describeJudgedCoverage(o: ReviewValueOutcome): string {
-  return `${o.judged}/${o.findingsRaised} findings judged (${formatPct(o.judgedCoverage)}) — ${o.unjudgeable} have no diff to judge against yet and are counted in no verdict.`;
+  const head = `${o.judged}/${o.findingsRaised} findings judged (${formatPct(o.judgedCoverage)})`;
+  if (o.unjudgeable === 0) return `${head} — every finding raised in this window has a verdict.`;
+  // "Not yet" and "never" are different facts and are never summed into one
+  // number here: `awaitingDiff` will eventually be judged, `untraceable`
+  // never will be.
+  const parts = [`${o.awaitingDiff} awaiting a diff to judge against`];
+  if (o.traceability.untraceable > 0) {
+    parts.push(`${o.traceability.untraceable} that can never be judged (no inline thread)`);
+  }
+  return `${head} — ${o.unjudgeable} carry no verdict: ${parts.join(', ')}.`;
 }
 
 /** The `did` breakdown as ordered rows. Zero-count labels are KEPT: a missing
@@ -118,20 +127,34 @@ export function describeSilentlyFixed(o: ReviewValueOutcome): ScorecardLine {
   };
 }
 
-export function describeEngagement(e: ReviewValueEngagement, findingsRaised: number): ScorecardLine {
+/** The headline fraction and the rate MUST share a denominator. They used to
+ *  not: the headline read `engaged of findingsRaised` while the rate divided
+ *  by `engaged + silent`, which are equal only while nothing is unrecorded and
+ *  nothing is untraceable — neither of which holds in production. Same defect
+ *  `describeAddressed` exists to prevent, so it gets the same treatment: the
+ *  headline states the denominator it actually used, and every population that
+ *  is NOT in that denominator is named separately. */
+export function describeEngagement(e: ReviewValueEngagement, o: ReviewValueOutcome): ScorecardLine {
+  const denominator = e.engaged + e.silent;
   const detail =
     e.engagedRate == null
       ? 'No finding in this window carries an engagement signal either way.'
       : `${e.engaged} drew a written response (thread reply or PR discussion), ${e.silent} drew none — ` +
-        `${formatPct(e.engagedRate)} of the ${e.engaged + e.silent} findings where engagement was recorded.`;
+        `${formatPct(e.engagedRate)} of the ${denominator} finding(s) where engagement could be read. ` +
+        `That is not all ${o.findingsRaised} raised: engagement is read off a finding's own thread.`;
+  const missing: string[] = [];
+  if (e.unrecorded > 0) {
+    missing.push(`${e.unrecorded} traced finding(s) carry no engagement signal this code classifies — in neither bucket, not folded into "no reply"`);
+  }
+  if (o.traceability.untraceable > 0) {
+    missing.push(`${o.traceability.untraceable} raised finding(s) have no thread at all to read engagement from`);
+  }
   return {
     label: 'Human engagement',
-    value: `${e.engaged} of ${findingsRaised}`,
+    // States its OWN denominator, not the raised total.
+    value: `${e.engaged} of ${denominator} with a readable signal`,
     detail,
-    caveat:
-      e.unrecorded > 0
-        ? `${e.unrecorded} finding(s) carry no engagement signal this code classifies — they are in neither bucket, not folded into "no reply".`
-        : null,
+    caveat: missing.length > 0 ? `${missing.join('; ')}.` : null,
     status: 'neutral',
   };
 }
@@ -159,23 +182,50 @@ export function describeDisputed(d: ReviewValueDisputed): ScorecardLine {
 }
 
 export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewValueOutcome): ScorecardLine {
-  const perItem = s.costPerAddressed == null ? 'n/a' : formatCost(s.costPerAddressed);
-  const detail =
-    s.costPerAddressed == null
-      ? `${formatCost(s.totalCostUsd)} across ${s.reviewCount} review(s) on the PRs these findings came from. Nothing is confirmed acted on in this window, so there is no per-item figure.`
-      : `${formatCost(s.totalCostUsd)} across ${s.reviewCount} review(s) → ${perItem} per confirmed acted-on finding (${formatCost(s.totalCostUsd)} ÷ ${addressed}).`;
+  // The floor disclosure belongs to the TOTAL, so it is said wherever the
+  // total is shown — including the branch where there is no per-item figure at
+  // all and `s.note` (which is about the per-item figure) must not render.
+  const floorClause =
+    s.numeratorState === 'floor'
+      ? ` ${s.reviewsMissingCost} of ${s.reviewCount} review(s) carry no recorded cost, so this total is a FLOOR, not a complete sum.`
+      : '';
+
+  if (s.costPerAddressed == null) {
+    // No per-item figure exists here, so the per-item caveat must not render.
+    // It used to: `label`/`value`/`detail` branched and `caveat` did not,
+    // leaving "Treat it as an upper bound" with no referent beside a total
+    // that is a floor — a reader landed on the exact inverse of the truth.
+    return {
+      label: 'Total spend this window',
+      value: formatCost(s.totalCostUsd),
+      detail:
+        `${formatCost(s.totalCostUsd)} across ${s.reviewCount} review(s) on the PRs these findings came from. ` +
+        `Nothing is confirmed acted on in this window, so there is no per-item figure to report.${floorClause}`,
+      caveat: null,
+      status: 'neutral',
+    };
+  }
+
   return {
     // Names the DENOMINATOR, not the section it sits in — "Spend" would just
     // repeat the section title above it, and the whole risk with this figure
     // is a reader forgetting what it was divided by.
-    label: s.costPerAddressed == null ? 'Total spend this window' : 'Cost per confirmed acted-on finding',
-    value: perItem === 'n/a' ? formatCost(s.totalCostUsd) : `${perItem} per acted-on`,
-    detail,
+    label: 'Cost per confirmed acted-on finding',
+    value: `${formatCost(s.costPerAddressed)} per acted-on`,
+    detail:
+      `${formatCost(s.totalCostUsd)} across ${s.reviewCount} review(s) → ${formatCost(s.costPerAddressed)} ` +
+      `per confirmed acted-on finding (${formatCost(s.totalCostUsd)} ÷ ${addressed}).${floorClause}`,
     // Coverage restated INSIDE the caveat, not only beside the acted-on line:
     // this is the number a reader is most likely to quote out of context, and
-    // the denominator moving is the whole reason it is not settled.
+    // whether the denominator can still move is the whole question.
     caveat: `${s.note} Judged coverage right now: ${o.judged}/${o.findingsRaised} (${formatPct(o.judgedCoverage)}).`,
-    status: 'attention',
+    // 'neutral', NOT 'attention': this IS a measurement, just an unsettled
+    // one, and the `--attention` figure treatment is reserved for a figure
+    // that is not a measurement at all. The unsettledness is already carried
+    // by the SECTION's own attention border (SpendSection) plus the caveat
+    // below the figure — rendering the dollar value itself in the
+    // absence-of-measurement style would say something false about it.
+    status: 'neutral',
   };
 }
 
@@ -235,9 +285,13 @@ function ReviewValueSection({ title, status, children }: { title: string; status
   );
 }
 
+/** `line.status` drives a modifier class. It used to be set by every builder
+ *  and read by nobody, so all six figures rendered identically — and the one
+ *  line that most needs to look unlike a measured figure ("Disputed as
+ *  factually wrong: not yet measured") looked exactly like one. */
 function ScorecardFigure({ line }: { line: ScorecardLine }) {
   return (
-    <div class="review-value-figure">
+    <div class={`review-value-figure review-value-figure--${line.status}`}>
       <div class="review-value-figure__value">{line.value}</div>
       <div class="review-value-figure__label">{line.label}</div>
       <p class="review-value-section__summary">{line.detail}</p>
@@ -256,10 +310,16 @@ function RaisedAndActedOnSection({ o }: { o: ReviewValueOutcome }) {
   const didRows = buildDidRows(o);
   return (
     <ReviewValueSection title="Findings raised, and what happened to them" status="neutral">
-      <div class="review-value-figure">
+      <div class="review-value-figure review-value-figure--neutral">
         <div class="review-value-figure__value">{o.findingsRaised}</div>
         <div class="review-value-figure__label">Read-band findings raised</div>
         <p class="review-value-section__summary">{o.scopeNote}</p>
+        {/* The spec's fourth stated limit, rendered rather than buried — and
+            with its measured size, not a rule of thumb. */}
+        <p class="review-value-section__note">
+          <strong class="review-value-tag review-value-tag--caveat">Known instrument caveat: </strong>
+          {o.traceabilityNote}
+        </p>
       </div>
       <ScorecardFigure line={addressed} />
       <p class="review-value-section__summary">Coverage: {describeJudgedCoverage(o)}</p>
@@ -297,22 +357,20 @@ function ResponseSection({ o }: { o: ReviewValueOutcome }) {
   return (
     <ReviewValueSection title="What the team said" status="neutral">
       <ScorecardFigure line={describeSilentlyFixed(o)} />
-      <ScorecardFigure line={describeEngagement(o.engagement, o.findingsRaised)} />
+      <ScorecardFigure line={describeEngagement(o.engagement, o)} />
       <ScorecardFigure line={describeDisputed(o.disputedAsWrong)} />
     </ReviewValueSection>
   );
 }
 
 function SpendSection({ o }: { o: ReviewValueOutcome }) {
+  // The missing-cost disclosure now lives INSIDE describeSpend's `detail`, on
+  // both branches. It used to be a separate paragraph here, which put "the
+  // numerator is exact" (in the caveat) two lines above "the total above is a
+  // floor" (here) — a direct contradiction, both live at the same time.
   return (
     <ReviewValueSection title="Spend" status="attention">
       <ScorecardFigure line={describeSpend(o.spend, o.addressed, o)} />
-      {o.spend.reviewsMissingCost > 0 && (
-        <p class="review-value-section__note">
-          {o.spend.reviewsMissingCost} of {o.spend.reviewCount} review(s) carry no cost — the total above is a floor,
-          not a complete sum.
-        </p>
-      )}
     </ReviewValueSection>
   );
 }
