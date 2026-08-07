@@ -28,9 +28,19 @@ export interface FindingOutcome {
   prSettledAt: string | null;
   /** Finding posted → PR merged. The strongest predictor of engagement found so far. */
   leadTimeMins: number | null;
+  /** Null both when nothing was judged AND when the ballots tied — `saidConfidence`
+   *  is what tells those apart ('none' vs 'split'). */
   said: SaidLabel | null;
+  /** A span copied verbatim from a human comment. Only ever written from a ballot
+   *  whose quote was checked against the human text, so it is never a sentence the
+   *  model composed — the labels that need no quote (`ignored`, `unclear`) store null. */
   saidQuote: string | null;
   saidEvidence: string | null;
+  saidConfidence: string | null;
+  /** Every said ballot's verdict AS GRADED, including the `ungrounded` sentinel the
+   *  tally folds into `unclear`. Storing the graded form (not the tally's votes) is
+   *  what keeps the caught-fabrication rate measurable from the table. */
+  saidVotes: string[] | null;
   did: DidLabel | null;
   didConfidence: string | null;
   /** Every ballot, not just the winner — a 2-1 split must stay visible to a reader. */
@@ -67,6 +77,8 @@ export function rowToFindingOutcome(row: Record<string, unknown>): FindingOutcom
     said: str(row['said']) as SaidLabel | null,
     saidQuote: str(row['said_quote']),
     saidEvidence: str(row['said_evidence']),
+    saidConfidence: str(row['said_confidence']),
+    saidVotes: arr(row['said_votes']),
     did: str(row['did']) as DidLabel | null,
     didConfidence: str(row['did_confidence']),
     didVotes: arr(row['did_votes']),

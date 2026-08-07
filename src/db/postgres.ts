@@ -164,6 +164,28 @@ CREATE TABLE IF NOT EXISTS finding_outcomes (
   PRIMARY KEY (pr_id, finding_key)
 );
 CREATE INDEX IF NOT EXISTS idx_finding_outcomes_computed ON finding_outcomes (computed_at DESC);
+-- How the ballots for said landed, mirroring did_confidence / did_votes. Null on
+-- a row no said ballot was ever cast for, which is the normal state for a
+-- finding nobody wrote a word about.
+--
+-- said_confidence is what makes a null said readable. The said tally reports a
+-- tie as said = NULL (SaidLabel has no SPLIT member), so without this column a
+-- disagreement and "nobody said anything" are the same stored value: NULL with
+-- confidence 'split' is a judged tie, NULL with confidence NULL is no ballot at
+-- all. It is also the key the upsert's said guard tests, precisely because said
+-- itself is null on a legitimate result.
+ALTER TABLE finding_outcomes ADD COLUMN IF NOT EXISTS said_confidence TEXT;
+-- Every said ballot's verdict AS GRADED, in ballot order -- deliberately NOT the
+-- tally's collapsed votes. The grading gate turns a decision label whose quote is
+-- not verbatim in the human text into the sentinel "ungrounded", and the tally
+-- then folds that into "unclear" because it must return a SaidLabel. Store the
+-- collapsed form and a caught fabrication becomes indistinguishable from a model
+-- that honestly answered "unclear" -- on the did side that gate downgraded 8.2%
+-- of live ballots, which is the evidence the gate is worth having. Storing the
+-- graded verdicts keeps the said equivalent of that number computable from the
+-- table, and re-tallying them reproduces said and said_confidence exactly, so a
+-- later coarser axis can be measured with no new spend.
+ALTER TABLE finding_outcomes ADD COLUMN IF NOT EXISTS said_votes JSONB;
 
 CREATE TABLE IF NOT EXISTS finding_outcome_sweeps (
   id          SERIAL PRIMARY KEY,
