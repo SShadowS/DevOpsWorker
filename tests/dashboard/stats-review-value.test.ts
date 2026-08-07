@@ -717,7 +717,7 @@ describe('describeDisputed', () => {
     const o = compute([finding({ said: 'rejected-wrong' })], spend());
     const line = describeDisputed(o.disputedAsWrong);
     expect(line.value).toBe('1');
-    expect(line.detail).toContain('never a rate');
+    expect(line.detail).toContain('not a rate');
   });
 });
 
@@ -838,7 +838,7 @@ describe('describeEngagement / describeSilentlyFixed / describeLeadTime', () => 
     const o = compute([finding({ leadTimeMins: -100 })], spend());
     const text = describeLeadTime(o.leadTime);
     expect(o.leadTime.medianMinsBeforeSettle).toBeNull();
-    expect(text).toContain('no lead time to report');
+    expect(text).toContain('no median to report');
     // "Median n/a" invited the reader to treat an absent population as a
     // measured null.
     expect(text).not.toContain('Median n/a');
@@ -1012,7 +1012,7 @@ describe('no clause points at a figure that does not exist', () => {
   test('with no before-settle findings the after-settle clause does not cite "that median"', () => {
     const o = compute([finding({ leadTimeMins: -10 }), finding({ leadTimeMins: -20 })], spend());
     const text = describeLeadTime(o.leadTime);
-    expect(text).toContain('no lead time to report');
+    expect(text).toContain('no median to report');
     expect(text).not.toContain('excluded from the median above');
     expect(text).not.toContain('that median');
   });
@@ -1033,6 +1033,119 @@ describe('no clause points at a figure that does not exist', () => {
     expect(text).toBe('No read-band findings were raised in this window.');
   });
 
+  // -------------------------------------------------------------------------
+  // ENTAILMENT, not agreement: does the sentence claim more than its gating
+  // condition establishes? A clause can be perfectly pluralised and still
+  // assert something the branch does not prove, which is why the count sweep
+  // above cannot catch these.
+  // -------------------------------------------------------------------------
+
+  test('the verdict caption claims nothing about what the NON-unanimous rows were', () => {
+    // `did_confidence` has five values (unanimous | majority | split |
+    // single-vote | none). `unanimous` licenses no claim about the rest, and
+    // a judged SPLIT row makes "every one reached only a majority" flatly
+    // contradict the verdict table two lines above it.
+    const oneSplit = compute([finding({ did: 'SPLIT', didConfidence: 'split' })], spend());
+    expect(oneSplit.didBreakdown['SPLIT']).toBe(1);
+    const caption = describeVerdictCaption(oneSplit);
+    expect(caption).not.toContain('majority');
+    expect(caption).toContain('No judged row had all three ballots agree');
+
+    const mixedConfidences = compute([
+      finding({ did: 'ADDRESSED', didConfidence: 'unanimous' }),
+      finding({ did: 'SPLIT', didConfidence: 'split' }),
+      finding({ did: 'not', didConfidence: 'single-vote' }),
+    ], spend());
+    const mixedCaption = describeVerdictCaption(mixedConfidences);
+    expect(mixedCaption).toContain('the other 2 did not');
+    expect(mixedCaption).not.toContain('majority');
+  });
+
+  test('the lead-time head is scoped to RECORDED lead times, not to every finding', () => {
+    // b === 0 establishes only that no finding WITH a recorded lead time was
+    // raised before settle. Claiming it of every finding is contradicted by
+    // the unrecorded clause in the same sentence.
+    const o = compute([
+      finding({ leadTimeMins: -30 }),
+      finding({ leadTimeMins: null }),
+      finding({ leadTimeMins: null }),
+    ], spend());
+    expect(o.leadTime.beforeSettleCount).toBe(0);
+    expect(o.leadTime.unrecordedCount).toBe(2);
+    const text = describeLeadTime(o.leadTime);
+    expect(text).toContain('No finding with a recorded lead time was raised before its PR settled');
+    expect(text).not.toContain('No finding in this window was raised before its PR settled');
+    // ...and the sentence that contradicted it still appears, scoped.
+    expect(text).toContain('2 findings have no lead time recorded at all');
+  });
+
+  test('with NO lead time recorded anywhere, the head says that rather than asserting about settle order', () => {
+    const o = compute([finding({ leadTimeMins: null }), finding({ leadTimeMins: null })], spend());
+    const text = describeLeadTime(o.leadTime);
+    expect(text).toContain('No finding in this window has a lead time recorded');
+    expect(text).not.toContain('raised before its PR settled, so there is no median');
+  });
+
+  test('coverage does not assert a CAUSE for untraceability the card says is not established', () => {
+    // reconciled === false means the traceability note two lines above says
+    // in terms that the gap is not understood. Asserting "(no inline thread)"
+    // beside it claimed a cause the card had just disclaimed.
+    const unreconciled = computeReviewValue(
+      [finding({ did: 'ADDRESSED' }), finding({ did: null })],
+      spend(),
+      { readBandRaised: 5, noFileAnchor: 0 },
+    );
+    expect(unreconciled.traceability.reconciled).toBe(false);
+    const text = describeJudgedCoverage(unreconciled);
+    expect(text).not.toContain('no inline thread');
+    expect(text).toContain('reason not established');
+
+    // ...and when it DOES reconcile, the cause is stated.
+    const reconciled = computeReviewValue(
+      [finding({ did: 'ADDRESSED' }), finding({ did: null })],
+      spend(),
+      { readBandRaised: 5, noFileAnchor: 3 },
+    );
+    expect(reconciled.traceability.reconciled).toBe(true);
+    expect(describeJudgedCoverage(reconciled)).toContain('no inline thread');
+  });
+
+  test('the single-reason coverage clause also withholds an unestablished cause', () => {
+    const o = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 3, noFileAnchor: 0 });
+    expect(o.awaitingDiff).toBe(0);
+    expect(o.traceability.reconciled).toBe(false);
+    const text = describeJudgedCoverage(o);
+    expect(text).toContain('for a reason this card has not established');
+    expect(text).not.toContain('inline thread');
+  });
+
+  test('unrecorded cost is reported as missing data, never as $0.00 per acted-on', () => {
+    // Every review on these PRs has a null cost. Dividing an unrecorded sum
+    // renders "$0.00 per acted-on", which asserts the reviews were free — the
+    // same error as reporting an unmeasured dispute count as 0.
+    const o = compute([finding({ did: 'ADDRESSED' })], spend({ totalCostUsd: 0, reviewCount: 4, reviewsMissingCost: 4 }));
+    expect(o.spend.costPerAddressed).toBeNull();
+    const line = describeSpend(o.spend, o.addressed, o);
+    expect(line.value).toBe('not recorded');
+    expect(line.value).not.toContain('$0.00');
+    expect(line.detail).toContain('missing data, not a measured zero');
+  });
+
+  test('a partially-recorded cost still yields a figure — only a WHOLLY unrecorded one does not', () => {
+    const o = compute([finding({ did: 'ADDRESSED' })], spend({ totalCostUsd: 50, reviewCount: 4, reviewsMissingCost: 3 }));
+    expect(o.spend.costPerAddressed).toBe(50);
+    expect(describeSpend(o.spend, o.addressed, o).value).toBe('$50.00 per acted-on');
+  });
+
+  test('the disputed line claims nothing about how large n is', () => {
+    const o = compute([finding({ said: 'rejected-wrong' })], spend());
+    const line = describeDisputed(o.disputedAsWrong);
+    // "n is small enough that a percentage would overstate it" is a claim
+    // about a population that does not exist yet, and false at any scale.
+    expect(line.detail).not.toContain('small enough');
+    expect(line.detail).toContain('Reported as a count, not a rate');
+  });
+
   test('the verdict caption does not describe an empty remainder', () => {
     const allUnanimous = compute([
       finding({ did: 'ADDRESSED', didConfidence: 'unanimous' }),
@@ -1048,7 +1161,7 @@ describe('no clause points at a figure that does not exist', () => {
       finding({ did: 'ADDRESSED', didConfidence: 'unanimous' }),
       finding({ did: 'not', didConfidence: 'majority' }),
     ], spend());
-    expect(describeVerdictCaption(mixed)).toContain('the other 1 reached only a majority');
+    expect(describeVerdictCaption(mixed)).toContain('the other 1 did not');
   });
 });
 
@@ -1132,8 +1245,11 @@ describe('review-value structure', () => {
   test("the backslash normalisation uses '\\\\', not the silently-empty '\\'", () => {
     const raisedQuery = statsSrc.slice(statsSrc.indexOf('WITH read_band AS ('), statsSrc.indexOf('FROM identified'));
     expect(raisedQuery).toContain("replace(btrim(f->>'file'), '\\\\', '/')");
-    // The collapsed form must not appear at all — it is the regression.
-    expect(raisedQuery).not.toMatch(/replace\([^)]*'\\'[^\\]/);
+    // A `not.toMatch(/replace\([^)]*'\\'[^\\]/)` used to sit here. It could
+    // never fire: `[^)]*` cannot cross the `)` in `btrim(f->>'file')`, so it
+    // did not match the regressed text either. Deleted rather than repaired —
+    // the positive assertion above already fails on the collapse, and a line
+    // that cannot fail reads as protection while being none.
   });
 
   test('the file normalisation strips leading slashes as well, matching findingKey', () => {

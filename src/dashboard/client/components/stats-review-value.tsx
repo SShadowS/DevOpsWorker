@@ -103,10 +103,15 @@ export function describeJudgedCoverage(o: ReviewValueOutcome): string {
   // never will be. Each clause is omitted at zero rather than rendered as
   // "0 awaiting a diff", which reads as a category that exists and is empty
   // when it is simply not the reason anything here is unjudged.
+  // Entailment: the "no inline thread" CAUSE is only established when the gap
+  // reconciles against the file-less count. When it does not, the traceability
+  // note two lines above says in terms that the gap is not understood — and
+  // this line was asserting a cause for it anyway, in the same breath.
+  const untraceableReason = o.traceability.reconciled ? 'no inline thread' : 'reason not established — see the caveat above';
   const parts: string[] = [];
   if (o.awaitingDiff > 0) parts.push(`${o.awaitingDiff} awaiting a diff to judge against`);
   if (o.traceability.untraceable > 0) {
-    parts.push(`${o.traceability.untraceable} that can never be judged (no inline thread)`);
+    parts.push(`${o.traceability.untraceable} that can never be judged (${untraceableReason})`);
   }
   // With ONE reason the count is not worth stating twice — "28 carry no
   // verdict: 28 awaiting a diff" says the same number either side of a colon.
@@ -118,10 +123,14 @@ export function describeJudgedCoverage(o: ReviewValueOutcome): string {
     // negation moves. `agree(n, 'it has', 'none of them has') + ' an inline
     // thread'` rendered "it HAS an inline thread" at n=1, the exact opposite
     // of the fact, which is why these are written out rather than assembled.
-    return o.awaitingDiff > 0
-      ? `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict, awaiting a diff to judge against.`
-      : `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict and never can: ` +
-        (n === 1 ? 'it has no inline thread.' : 'none of them has an inline thread.');
+    if (o.awaitingDiff > 0) {
+      return `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict, awaiting a diff to judge against.`;
+    }
+    if (!o.traceability.reconciled) {
+      return `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict and never can, for a reason this card has not established (see the caveat above).`;
+    }
+    return `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict and never can: ` +
+      (n === 1 ? 'it has no inline thread.' : 'none of them has an inline thread.');
   }
   // Both parts non-empty here, so `n` is at least 2 and the plural is safe —
   // asserted by a test rather than left to this comment.
@@ -213,7 +222,14 @@ export function describeDisputed(d: ReviewValueDisputed): ScorecardLine {
   return {
     label: 'Disputed as factually wrong',
     value: `${d.count}`,
-    detail: `A count, never a rate — n is small enough that a percentage would overstate what it can support. Measured over ${countOf(d.saidRecorded, 'finding')} carrying a said label.`,
+    // Entailment: this used to assert "n is small enough that a percentage
+    // would overstate what it can support" — a claim about the size of a
+    // population that does not exist yet, and one that becomes false as soon
+    // as `said` is populated at any scale. Reporting it as a count is a
+    // deliberate policy (the spec: "must show the count, never a rate"), so
+    // the sentence states the policy and the denominator, and claims nothing
+    // about how big n happens to be.
+    detail: `Reported as a count, not a rate, over the ${countOf(d.saidRecorded, 'finding')} carrying a said label.`,
     caveat: null,
     status: 'neutral',
   };
@@ -227,6 +243,23 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
     s.numeratorState === 'floor'
       ? ` ${s.reviewsMissingCost} of ${countOf(s.reviewCount, 'review')} ${agree(s.reviewsMissingCost, 'carries', 'carry')} no recorded cost, so this total is a FLOOR, not a complete sum.`
       : '';
+
+  const noCostRecorded = s.reviewCount > 0 && s.reviewsMissingCost === s.reviewCount;
+
+  if (noCostRecorded) {
+    // Distinct from "nothing acted on": here there IS a denominator, but no
+    // numerator was ever recorded. "$0.00" would read as a measured zero.
+    return {
+      label: 'Total spend this window',
+      value: 'not recorded',
+      detail:
+        `None of the ${countOf(s.reviewCount, 'review')} on the PRs these findings came from carries a recorded ` +
+        'cost, so there is no spend to report and no per-item figure to derive from it. This is missing data, not a ' +
+        'measured zero.',
+      caveat: null,
+      status: 'attention',
+    };
+  }
 
   if (s.costPerAddressed == null) {
     // No per-item figure exists here, so the per-item caveat must not render.
@@ -280,16 +313,19 @@ export function describeVerdictCaption(o: ReviewValueOutcome): string {
   const scope =
     `Shares are over the ${countOf(o.judged, 'JUDGED finding')}, not over all ${o.findingsRaised} raised.`;
   if (o.judged === 0) return scope;
-  const split = o.judged - o.unanimous;
-  if (split === 0) {
-    return `${scope} Every judged row had all three ballots agree.`;
-  }
-  if (o.unanimous === 0) {
-    return `${scope} No judged row had all three ballots agree; every one reached only a majority.`;
-  }
+  // `unanimous` counts ONE value of `did_confidence`, whose domain also holds
+  // `majority`, `split`, `single-vote` and `none`. So it licenses no claim
+  // about the remainder — "the rest reached only a majority" asserted
+  // something this number cannot support, two lines under a verdict table
+  // that can read `SPLIT 1 100.0%`, which is the very reading `DID_LABELS`
+  // keeps a zero `SPLIT` row to prevent. The remainder is therefore described
+  // only as NOT unanimous; the table above carries what they actually were.
+  const notUnanimous = o.judged - o.unanimous;
+  if (notUnanimous === 0) return `${scope} Every judged row had all three ballots agree.`;
+  if (o.unanimous === 0) return `${scope} No judged row had all three ballots agree.`;
   return (
     `${scope} ${o.unanimous} of the ${countOf(o.judged, 'judged row')} had all three ballots agree; ` +
-    `the other ${split} reached only a majority.`
+    `the other ${notUnanimous} did not.`
   );
 }
 
@@ -298,28 +334,47 @@ export function describeVerdictCaption(o: ReviewValueOutcome): string {
  *  review landed after the PR had already settled, which is not a slow lead
  *  time, it is a different event. */
 export function describeLeadTime(l: ReviewValueLeadTime): string {
-  const med = l.medianMinsBeforeSettle == null ? 'n/a' : `${Math.round(l.medianMinsBeforeSettle)} min`;
+  const b = l.beforeSettleCount;
   const a = l.afterSettleCount;
-  const b0 = l.beforeSettleCount === 0;
-  // "excluded from that median" needs a median to be excluded from. With no
-  // before-settle findings there is none, and the sentence pointed at
+  const u = l.unrecordedCount;
+  const known = b + a;
+
+  // Everything below is scoped to findings whose lead time is RECORDED.
+  // `beforeSettleCount === 0` establishes only that none of those was raised
+  // before its PR settled — it says nothing about the `u` findings whose lead
+  // time is null (`prSettledAt` null, or the column simply unset). An earlier
+  // version promoted it to "No finding in this window was raised before its PR
+  // settled", a universal claim the very next clause then contradicted by
+  // admitting the code does not know for some of them.
+  if (known === 0) {
+    return u === 0
+      ? 'No findings in this window, so there is no lead time to report.'
+      : `No finding in this window has a lead time recorded, so there is none to report — ` +
+        `${countOf(u, 'finding')} ${agree(u, 'is', 'are')} missing one.`;
+  }
+
+  const med = l.medianMinsBeforeSettle == null ? 'n/a' : `${Math.round(l.medianMinsBeforeSettle)} min`;
+  const head =
+    b === 0
+      ? 'No finding with a recorded lead time was raised before its PR settled, so there is no median to report.'
+      : `Median ${med} from finding posted to PR settled, over the ${countOf(b, 'finding')} raised before the PR settled.`;
+
+  // "excluded from the median above" needs a median to be excluded from; with
+  // no before-settle findings there is none, and the clause pointed at
   // something the previous sentence had just said does not exist.
   const after =
     a === 0
       ? ''
       : ` ${countOf(a, 'finding')} ${agree(a, 'was', 'were')} raised AFTER the PR settled (a cherry-pick or ` +
         `post-merge review); ${agree(a, 'it has', 'they have')} no lead time to measure` +
-        (b0 ? '.' : `, and ${agree(a, 'is', 'are')} excluded from the median above rather than averaged into it.`);
-  const u = l.unrecordedCount;
-  const unrecorded = u === 0 ? '' : ` ${countOf(u, 'finding')} ${agree(u, 'has', 'have')} no lead time recorded.`;
-  const b = l.beforeSettleCount;
-  // The median's own population can be zero (every finding raised after the PR
-  // settled), in which case `med` is already 'n/a' and "over the 0 findings"
-  // would be a denominator for a figure that does not exist.
-  const head =
-    b === 0
-      ? `No finding in this window was raised before its PR settled, so there is no lead time to report.`
-      : `Median ${med} from finding posted to PR settled, over the ${countOf(b, 'finding')} raised before the PR settled.`;
+        (b === 0 ? '.' : `, and ${agree(a, 'is', 'are')} excluded from the median above rather than averaged into it.`);
+
+  const unrecorded =
+    u === 0
+      ? ''
+      : ` ${countOf(u, 'finding')} ${agree(u, 'has', 'have')} no lead time recorded at all, and ` +
+        `${agree(u, 'is', 'are')} in neither count above.`;
+
   return `${head}${after}${unrecorded}`;
 }
 

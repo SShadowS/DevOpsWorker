@@ -1557,8 +1557,14 @@ export interface ReviewValueOutcome {
   addressedRateOfRaised: number | null;
   /** Counts for every `DID_LABELS` value plus any unrecognised label seen. */
   didBreakdown: Record<string, number>;
-  /** Judged rows whose 3 ballots agreed. The rest reached only a majority (a
-   *  2-1), which is exactly the case `did_votes` exists to keep visible. */
+  /** Judged rows whose ballots all agreed — i.e. `did_confidence` is exactly
+   *  `'unanimous'`. It licenses NO claim about the remainder: that column's
+   *  domain also includes `'majority'`, `'split'`, `'single-vote'` and
+   *  `'none'`, so `judged - unanimous` is "not unanimous" and nothing more
+   *  specific. This doc comment used to say "the rest reached only a
+   *  majority", which is the exact claim `describeVerdictCaption` was
+   *  corrected for making — `did_votes` and the verdict table are where a 2-1
+   *  or a split is actually visible. */
   unanimous: number;
   /** `did = 'ADDRESSED' AND said_evidence = 'none'` — the code changed and
    *  nobody said a word. Does not read `said` (unpopulated), so this is
@@ -1764,7 +1770,15 @@ export function computeReviewValue(
     },
     spend: {
       ...spend,
-      costPerAddressed: addressed > 0 ? spend.totalCostUsd / addressed : null,
+      // Null when the numerator is entirely UNRECORDED, not merely zero.
+      // Dividing an unknown sum yields "$0.00 per acted-on", which asserts the
+      // reviews were free — the same error as reporting an unmeasured dispute
+      // count as 0. A genuine zero (reviews that really cost nothing) is not
+      // distinguishable here, and the safe reading is the one that claims less.
+      costPerAddressed:
+        addressed > 0 && !(spend.reviewCount > 0 && spend.reviewsMissingCost === spend.reviewCount)
+          ? spend.totalCostUsd / addressed
+          : null,
       numeratorState,
       denominatorState,
       // Derived from the two states above, never hand-written per case — an
