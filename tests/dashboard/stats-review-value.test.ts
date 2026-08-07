@@ -499,10 +499,61 @@ describe('computeReviewValue — raised vs traced', () => {
     const explained = computeReviewValue(rows(), spend(), { readBandRaised: 5, noFileAnchor: 2 });
     expect(explained.traceability.reconciled).toBe(true);
     expect(explained.traceabilityNote).toContain('fully accounted for');
+  });
 
-    const unexplained = computeReviewValue(rows(), spend(), { readBandRaised: 5, noFileAnchor: 1 });
-    expect(unexplained.traceability.reconciled).toBe(false);
-    expect(unexplained.traceabilityNote).toContain('not understood');
+  // -------------------------------------------------------------------------
+  // The unreconciled branch. Not reachable from live data once the raised
+  // query is windowed per finding (raised - traced == noFileAnchor at every
+  // window), but it is the guard that fires if that ever drifts — so its
+  // wording has to hold on its own. Every clause here is branched, INCLUDING
+  // the missing-file-anchor cause: stating the cause and then "0 of them are
+  // explained by a missing file anchor" was the same self-contradiction shape
+  // as the spend note's "exact / but a floor".
+  // -------------------------------------------------------------------------
+  describe('unreconciled gap', () => {
+    test('a partly-explained gap names both parts and never contradicts itself', () => {
+      const o = computeReviewValue(rows(), spend(), { readBandRaised: 6, noFileAnchor: 1 });
+      expect(o.traceability.untraceable).toBe(3);
+      expect(o.traceability.reconciled).toBe(false);
+      expect(o.traceabilityNote).toContain('1 of them is explained by having no file anchor');
+      expect(o.traceabilityNote).toContain('remaining 2 are not explained');
+      expect(o.traceabilityNote).not.toContain('fully accounted for');
+    });
+
+    test('a wholly-unexplained gap does NOT state the file-anchor cause it just denied', () => {
+      const o = computeReviewValue(rows(), spend(), { readBandRaised: 6, noFileAnchor: 0 });
+      expect(o.traceability.reconciled).toBe(false);
+      expect(o.traceabilityNote).toContain('None of that gap is explained by a missing file anchor');
+      // The cause sentence must not also appear — that was the contradiction.
+      expect(o.traceabilityNote).not.toContain('are explained by having no file anchor');
+      expect(o.traceabilityNote).not.toContain('0 of them');
+    });
+
+    test('counts cannot invert — "N of them" can never exceed the gap it refers to', () => {
+      const o = computeReviewValue(rows(), spend(), { readBandRaised: 6, noFileAnchor: 5 });
+      expect(o.traceability.untraceable).toBe(3);
+      // Never "5 of them" where "them" is 3.
+      expect(o.traceabilityNote).not.toContain('5 of them');
+      // The inversion is reported rather than silently clamped...
+      expect(o.traceabilityNote).toContain('cannot happen');
+      // ...and it must NOT also claim the gap is explained. Saying "fully
+      // accounted for" and "this cannot happen" together is the same
+      // self-contradiction one level up.
+      expect(o.traceabilityNote).not.toContain('fully accounted for');
+    });
+
+    test('the singular case reads as English, not "1 of them are"', () => {
+      const o = computeReviewValue(rows(), spend(), { readBandRaised: 6, noFileAnchor: 1 });
+      expect(o.traceabilityNote).toContain('1 of them is explained');
+      expect(o.traceabilityNote).not.toContain('1 of them are');
+    });
+
+    test('no gap but file-less findings traced anyway is reported, not silently called clean', () => {
+      const o = computeReviewValue(rows(), spend(), { readBandRaised: 3, noFileAnchor: 2 });
+      expect(o.traceability.untraceable).toBe(0);
+      expect(o.traceabilityNote).toContain('counting differently');
+      expect(o.traceabilityNote).not.toContain('every one of them is traceable');
+    });
   });
 
   test('never renders a negative gap when the two sources disagree the other way', () => {
@@ -576,7 +627,7 @@ describe('describeJudgedCoverage', () => {
     const text = describeJudgedCoverage(compute(mixedWindow(), spend()));
     expect(text).toContain('8/20');
     expect(text).toContain('40.0%');
-    expect(text).toContain('12 awaiting a diff to judge against');
+    expect(text).toContain('12 carry no verdict, all awaiting a diff to judge against');
   });
 
   test('separates "not yet" from "never" when some findings have no thread', () => {
@@ -588,6 +639,23 @@ describe('describeJudgedCoverage', () => {
     const text = describeJudgedCoverage(o);
     expect(text).toContain('1 awaiting a diff to judge against');
     expect(text).toContain('3 that can never be judged (no inline thread)');
+  });
+
+  test('with a single reason the count is stated once, not on both sides of a colon', () => {
+    const o = compute([finding({ did: 'ADDRESSED' }), finding({ did: null }), finding({ did: null })], spend());
+    const text = describeJudgedCoverage(o);
+    expect(o.unjudgeable).toBe(2);
+    expect(text).toContain('2 carry no verdict, all awaiting a diff to judge against');
+    expect(text).not.toContain('2 carry no verdict: 2 awaiting');
+  });
+
+  test('a zero clause is omitted, not rendered as "0 awaiting a diff"', () => {
+    // Every traced row judged; the only unjudged findings are untraceable.
+    const o = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 5, noFileAnchor: 4 });
+    const text = describeJudgedCoverage(o);
+    expect(o.awaitingDiff).toBe(0);
+    expect(text).not.toContain('0 awaiting');
+    expect(text).toContain('4 carry no verdict and never can: none of them has an inline thread');
   });
 
   test('says so plainly when everything raised has a verdict', () => {
@@ -671,11 +739,15 @@ describe('describeSpend', () => {
     expect(line.detail).toContain('1 of 65');
   });
 
-  test('the per-item branch discloses the floor in the SAME paragraph as its exactness claim, never contradicting it', () => {
+  test('the per-item branch states the missing-cost fact ONCE, in the caveat, not also in the detail', () => {
     const o = compute(mixedWindow(), spend({ totalCostUsd: 200, reviewCount: 65, reviewsMissingCost: 1 }));
     const line = describeSpend(o.spend, o.addressed, o);
-    expect(line.detail).toContain('FLOOR');
+    expect(line.caveat).toContain('FLOOR');
     expect(line.caveat).not.toContain('The numerator is exact');
+    // Said once, not twice: the detail no longer repeats it.
+    expect(line.detail).not.toContain('FLOOR');
+    const occurrences = (`${line.detail} ${line.caveat}`.match(/carry no recorded cost/g) ?? []).length;
+    expect(occurrences).toBe(1);
   });
 });
 
@@ -686,6 +758,16 @@ describe('describeEngagement / describeSilentlyFixed / describeLeadTime', () => 
     const denominator = o.engagement.engaged + o.engagement.silent;
     expect(line.value).toBe(`8 of ${denominator} with a readable signal`);
     expect(line.detail).toContain(`${denominator} finding(s) where engagement could be read`);
+  });
+
+  test('the contrast clause is OMITTED when the denominator IS all findings raised', () => {
+    // The live 30d/test shape: 2 raised, 2 traced, both with a signal. Saying
+    // "that is not all 2 raised" there is simply false.
+    const o = compute([finding({ saidEvidence: 'thread-reply' }), finding({ saidEvidence: 'none' })], spend());
+    const line = describeEngagement(o.engagement, o);
+    expect(o.engagement.engaged + o.engagement.silent).toBe(o.findingsRaised);
+    expect(line.detail).not.toContain('not all');
+    expect(line.detail).not.toContain('raised:');
   });
 
   test('the headline denominator is NOT findingsRaised when the two differ', () => {

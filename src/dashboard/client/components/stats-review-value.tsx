@@ -95,10 +95,22 @@ export function describeJudgedCoverage(o: ReviewValueOutcome): string {
   if (o.unjudgeable === 0) return `${head} — every finding raised in this window has a verdict.`;
   // "Not yet" and "never" are different facts and are never summed into one
   // number here: `awaitingDiff` will eventually be judged, `untraceable`
-  // never will be.
-  const parts = [`${o.awaitingDiff} awaiting a diff to judge against`];
+  // never will be. Each clause is omitted at zero rather than rendered as
+  // "0 awaiting a diff", which reads as a category that exists and is empty
+  // when it is simply not the reason anything here is unjudged.
+  const parts: string[] = [];
+  if (o.awaitingDiff > 0) parts.push(`${o.awaitingDiff} awaiting a diff to judge against`);
   if (o.traceability.untraceable > 0) {
     parts.push(`${o.traceability.untraceable} that can never be judged (no inline thread)`);
+  }
+  // With ONE reason the count is not worth stating twice — "28 carry no
+  // verdict: 28 awaiting a diff" says the same number either side of a colon.
+  // Each single-reason case gets its own sentence rather than one template
+  // with the reason slotted in: "all that can never be judged" is not English.
+  if (parts.length === 1) {
+    return o.awaitingDiff > 0
+      ? `${head} — ${o.unjudgeable} carry no verdict, all awaiting a diff to judge against.`
+      : `${head} — ${o.unjudgeable} carry no verdict and never can: none of them has an inline thread.`;
   }
   return `${head} — ${o.unjudgeable} carry no verdict: ${parts.join(', ')}.`;
 }
@@ -136,12 +148,19 @@ export function describeSilentlyFixed(o: ReviewValueOutcome): ScorecardLine {
  *  is NOT in that denominator is named separately. */
 export function describeEngagement(e: ReviewValueEngagement, o: ReviewValueOutcome): ScorecardLine {
   const denominator = e.engaged + e.silent;
+  // The contrast clause is CONDITIONAL. Unbranched, it rendered "That is not
+  // all 2 raised" on a window where it was exactly all 2 raised — the same
+  // unbranched-clause-on-a-branching-figure shape as the spend caveat this
+  // round already fixed, introduced by the fix for the denominator mismatch.
+  const contrast =
+    denominator < o.findingsRaised
+      ? ` That is not all ${o.findingsRaised} raised: engagement is read off a finding's own thread.`
+      : '';
   const detail =
     e.engagedRate == null
       ? 'No finding in this window carries an engagement signal either way.'
       : `${e.engaged} drew a written response (thread reply or PR discussion), ${e.silent} drew none — ` +
-        `${formatPct(e.engagedRate)} of the ${denominator} finding(s) where engagement could be read. ` +
-        `That is not all ${o.findingsRaised} raised: engagement is read off a finding's own thread.`;
+        `${formatPct(e.engagedRate)} of the ${denominator} finding(s) where engagement could be read.${contrast}`;
   const missing: string[] = [];
   if (e.unrecorded > 0) {
     missing.push(`${e.unrecorded} traced finding(s) carry no engagement signal this code classifies — in neither bucket, not folded into "no reply"`);
@@ -212,9 +231,13 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
     // is a reader forgetting what it was divided by.
     label: 'Cost per confirmed acted-on finding',
     value: `${formatCost(s.costPerAddressed)} per acted-on`,
+    // No `floorClause` here: on this branch the caveat below states the same
+    // fact with its counts, and stating it in both put the missing-cost point
+    // three times inside ~130 words. The no-per-item branch above keeps it,
+    // because there the caveat is null and this is the only place it is said.
     detail:
       `${formatCost(s.totalCostUsd)} across ${s.reviewCount} review(s) → ${formatCost(s.costPerAddressed)} ` +
-      `per confirmed acted-on finding (${formatCost(s.totalCostUsd)} ÷ ${addressed}).${floorClause}`,
+      `per confirmed acted-on finding (${formatCost(s.totalCostUsd)} ÷ ${addressed}).`,
     // Coverage restated INSIDE the caveat, not only beside the acted-on line:
     // this is the number a reader is most likely to quote out of context, and
     // whether the denominator can still move is the whole question.
@@ -315,11 +338,18 @@ function RaisedAndActedOnSection({ o }: { o: ReviewValueOutcome }) {
         <div class="review-value-figure__label">Read-band findings raised</div>
         <p class="review-value-section__summary">{o.scopeNote}</p>
         {/* The spec's fourth stated limit, rendered rather than buried — and
-            with its measured size, not a rule of thumb. */}
-        <p class="review-value-section__note">
-          <strong class="review-value-tag review-value-tag--caveat">Known instrument caveat: </strong>
-          {o.traceabilityNote}
-        </p>
+            with its measured size, not a rule of thumb. The caveat LABEL only
+            appears when there is actually a caveat: with no gap the note says
+            everything is traceable, and labelling that "Known instrument
+            caveat" announced a limitation while denying one. */}
+        {o.traceability.untraceable > 0 ? (
+          <p class="review-value-section__note">
+            <strong class="review-value-tag review-value-tag--caveat">Known instrument caveat: </strong>
+            {o.traceabilityNote}
+          </p>
+        ) : (
+          <p class="review-value-section__summary">{o.traceabilityNote}</p>
+        )}
       </div>
       <ScorecardFigure line={addressed} />
       <p class="review-value-section__summary">Coverage: {describeJudgedCoverage(o)}</p>
@@ -364,12 +394,19 @@ function ResponseSection({ o }: { o: ReviewValueOutcome }) {
 }
 
 function SpendSection({ o }: { o: ReviewValueOutcome }) {
-  // The missing-cost disclosure now lives INSIDE describeSpend's `detail`, on
-  // both branches. It used to be a separate paragraph here, which put "the
-  // numerator is exact" (in the caveat) two lines above "the total above is a
-  // floor" (here) — a direct contradiction, both live at the same time.
+  // The missing-cost disclosure now lives INSIDE describeSpend's `detail`. It
+  // used to be a separate paragraph here, which put "the numerator is exact"
+  // (in the caveat) two lines above "the total above is a floor" (here) — a
+  // direct contradiction, both live at the same time.
+  //
+  // Status is DERIVED, not hardcoded 'attention'. The attention treatment is
+  // this panel's mark for "something here is unsettled"; a window with a
+  // complete cost sum and full judged coverage has nothing unsettled, and
+  // drawing the accent border round a plain total there spent the signal on
+  // the one case that does not need it.
+  const unsettled = o.spend.numeratorState === 'floor' || o.spend.denominatorState === 'will-grow';
   return (
-    <ReviewValueSection title="Spend" status="attention">
+    <ReviewValueSection title="Spend" status={unsettled ? 'attention' : 'neutral'}>
       <ScorecardFigure line={describeSpend(o.spend, o.addressed, o)} />
     </ReviewValueSection>
   );

@@ -1487,7 +1487,7 @@ function buildSpendNote(numerator: NumeratorState, denominator: DenominatorState
         : 'The denominator is settled — every finding here has been judged — so the only unsettled input is the missing cost above, which can only push this figure UP. It is a lower bound, not an upper one.'
       : numerator === 'exact'
         ? 'The denominator is not settled: only judged rows can contribute to `addressed`, so it grows as classification coverage rises and this figure can only FALL from where it stands at the coverage stated beside it. Treat it as an upper bound at the current coverage.'
-        : 'Both inputs are unsettled and they move this figure in OPPOSITE directions — backfilling the missing cost raises it, judging more findings lowers it. It is neither an upper nor a lower bound; it is a reading at the current coverage and cost completeness, and nothing more.';
+        : 'Both inputs are unsettled and they move this figure in OPPOSITE directions — the missing cost above pushes it up, judging more findings pushes it down. It is neither an upper nor a lower bound; it is a reading at the current coverage and cost completeness, and nothing more.';
 
   return (
     `${numeratorClause} ${movementClause} It is also NOT comparable with the Cost panel's "cost per read-band item": ` +
@@ -1570,6 +1570,62 @@ export interface ReviewValueOutcome {
   traceabilityNote: string;
   reproducibilityNote: string;
   scopeNote: string;
+}
+
+/**
+ * The gap between raised and traced, and how much of it is understood.
+ *
+ * Every clause here is branched, including the CAUSE. An earlier version
+ * stated the missing-file-anchor cause unconditionally and branched only the
+ * trailing clause, so an unexplained gap rendered the cause and then "Only 0
+ * of them are explained by a missing file anchor" — the same self-contradiction
+ * shape as the spend note's "exact / but a floor".
+ *
+ * `explained` is clamped to the gap so the counts cannot invert: with
+ * `noFileAnchor` above `untraceable` the old text printed "Only 5 of them"
+ * where "them" was 3. That inversion is itself a signal the two sources are
+ * counting differently, so it gets said rather than clamped away silently.
+ */
+function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileAnchor: number): string {
+  if (untraceable === 0) {
+    return noFileAnchor === 0
+      ? 'Every read-band finding raised in this window has an inline thread, so every one of them is traceable.'
+      : `Every read-band finding raised in this window has a verdict, yet ${noFileAnchor} of them were recorded ` +
+        'without a file anchor and should not have been traceable at all. The two sources are counting ' +
+        'differently — reconcile them before quoting this section.';
+  }
+
+  const explained = Math.min(noFileAnchor, untraceable);
+  const head =
+    `${untraceable} of ${raisedCount} read-band finding(s) raised in this window have NO verdict and can never ` +
+    'be given one. They are counted in "raised" and in nothing else.';
+
+  // MORE file-less findings than gap means some file-less finding was traced
+  // anyway, which the anchoring rule says is impossible. That is a
+  // contradiction, not a fully-explained gap, so it must NOT reach the
+  // "fully accounted for" wording — saying that and then "this should not
+  // happen" in the same breath is the self-contradiction this function exists
+  // to avoid, just one level up.
+  if (noFileAnchor > untraceable) {
+    return (
+      `${head} More findings raised here carry no file anchor (${noFileAnchor}) than the gap itself (${untraceable}), ` +
+      'so at least one file-less finding was traced anyway — which the anchoring rule says cannot happen. These two ' +
+      'counts do not describe the same population; reconcile them before quoting this section.'
+    );
+  }
+
+  const isAre = explained === 1 ? 'is' : 'are';
+  const cause =
+    explained === 0
+      ? ' None of that gap is explained by a missing file anchor, which is the only cause this card knows about — ' +
+        'the two sources are counting differently, and the gap should be reconciled before this line is quoted.'
+      : explained === untraceable
+        ? ' The gap is fully accounted for: a thread is anchored to a file, and a PR-level finding has no file to anchor to.'
+        : ` ${explained} of them ${isAre} explained by having no file anchor (a thread is anchored to a file, and a ` +
+          `PR-level finding has no file to anchor to). The remaining ${untraceable - explained} are not explained, ` +
+          'and should be reconciled before this line is quoted.';
+
+  return head + cause;
 }
 
 function median(sorted: number[]): number | null {
@@ -1703,16 +1759,7 @@ export function computeReviewValue(
       // falsified while it was being rendered.
       note: buildSpendNote(numeratorState, denominatorState, spend.reviewsMissingCost, spend.reviewCount),
     },
-    traceabilityNote:
-      untraceable === 0
-        ? 'Every read-band finding raised in this window has an inline thread, so every one of them is traceable.'
-        : `${untraceable} of ${findingsRaised} read-band finding(s) raised in this window have NO inline thread and ` +
-          'can never be given a verdict: a thread is anchored to a file, and a PR-level finding has no file to ' +
-          'anchor to. They are counted in "raised" and in nothing else. ' +
-          (untraceable === raised.noFileAnchor
-            ? 'The gap is fully accounted for by findings with no file anchor.'
-            : `Only ${raised.noFileAnchor} of them are explained by a missing file anchor — the rest of the gap is ` +
-              'not understood, and the two sources should be reconciled before this line is quoted.'),
+    traceabilityNote: buildTraceabilityNote(findingsRaised, untraceable, raised.noFileAnchor),
     reproducibilityNote:
       'Row-level verdicts are not reproducible: a single ballot flipped on 33% of byte-identical re-runs, which is ' +
       'why each finding is judged by 3 ballots and why the verdict collapses to three values. The aggregates on ' +
@@ -1773,25 +1820,39 @@ export async function getReviewValueStats(sql: postgres.Sql, window: StatsWindow
   // only holds findings the sweep could trace, and tracing needs an inline
   // thread, which needs a file to anchor to.
   //
-  // The two normalisations below reproduce `findingKey` (src/sdk/ado/finding-key.ts)
-  // exactly — backslashes to forward slashes (plain `replace`, NOT
-  // `regexp_replace`: a lone backslash is an invalid regex escape in Postgres,
-  // and `findingKey` does a plain global string replace anyway), leading
-  // slashes stripped,
-  // title lowercased with every non-alphanumeric run collapsed to a single
-  // space — so "distinct" here means the same thing it means to the code that
-  // opens the threads. Verified against the live table: the distinct count
-  // restricted to findings WITH a file equals the `finding_outcomes` row
-  // count exactly. Hashing is unnecessary; the normalised pair IS the
-  // identity, and `findingKey` only hashes it to fit in a comment marker.
+  // WINDOWED PER FINDING, not per PR. The window predicate is on each
+  // identity's OWN `min(created_at)` — the first review that carried it —
+  // which is the same quantity `finding_outcomes.first_raised_at` holds
+  // (verified over the live table: 135/135 rows match the earliest carrying
+  // review's `created_at` to the second). Scoping the window on the PR
+  // instead, via the EXISTS alone, made this "raised on ANY review ever, of a
+  // PR that happened to have one finding first-raised in the window" — a
+  // different and larger population than `traced`, which every rate over
+  // "raised" then inherited. The EXISTS is still here, but it now only means
+  // "this PR has been swept at all", which is the scope the card claims.
+  //
+  // The normalisations reproduce `findingKey` (src/sdk/ado/finding-key.ts):
+  // backslashes to forward slashes, leading slashes stripped, title lowercased
+  // with every non-alphanumeric run collapsed to a single space. Note `'\\'`,
+  // not `'\'` — inside a TS template literal `\'` is an escape producing a
+  // bare quote, which silently made this `replace(..., '', '/')`, a no-op
+  // Postgres accepts without complaint. Plain `replace`, not `regexp_replace`:
+  // a lone backslash is an invalid regex escape, and `findingKey` does a plain
+  // string replace anyway.
+  //
+  // Verified against the REAL `findingKey` (not a count-equality proxy — two
+  // normalisations can agree on cardinality while partitioning differently):
+  // computing `findingKey` over `findings_list` and diffing the resulting key
+  // set against `finding_outcomes.finding_key` gives 0 in each direction.
   const [raised] = await sql<Array<{ n: string; no_file: string }>>`
     WITH read_band AS (
-      SELECT DISTINCT
+      SELECT
         r.pr_id,
         r.repo_key,
-        btrim(regexp_replace(replace(btrim(f->>'file'), '\', '/'), '^/+', '')) AS norm_file,
+        btrim(regexp_replace(replace(btrim(f->>'file'), '\\', '/'), '^/+', '')) AS norm_file,
         btrim(regexp_replace(lower(f->>'title'), '[^a-z0-9]+', ' ', 'g')) AS norm_title,
-        (f->>'file' IS NULL OR btrim(f->>'file') = '') AS no_file
+        (f->>'file' IS NULL OR btrim(f->>'file') = '') AS no_file,
+        r.created_at
       FROM pr_reviews r
       CROSS JOIN LATERAL jsonb_array_elements(r.findings_list) AS f
       WHERE r.findings_list IS NOT NULL
@@ -1800,12 +1861,19 @@ export async function getReviewValueStats(sql: postgres.Sql, window: StatsWindow
         AND EXISTS (
           SELECT 1 FROM finding_outcomes fo
           WHERE fo.pr_id = r.pr_id AND fo.repo_key = r.repo_key
-            AND fo.first_raised_at > now() - (${days}::int * interval '1 day')
         )
+    ),
+    identified AS (
+      SELECT
+        bool_or(no_file) AS no_file,
+        min(created_at) AS first_raised_at
+      FROM read_band
+      GROUP BY pr_id, repo_key, norm_file, norm_title
     )
     SELECT count(*)::text AS n,
       count(*) FILTER (WHERE no_file)::text AS no_file
-    FROM read_band
+    FROM identified
+    WHERE first_raised_at > now() - (${days}::int * interval '1 day')
   `;
 
   // Spend over the REVIEWS that produced these findings, joined on
