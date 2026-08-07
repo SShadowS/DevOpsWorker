@@ -1444,7 +1444,18 @@ export interface ReviewValueDisputed {
    *  remainder — `count - unjudged` is "has a verdict", and which verdict is
    *  the verdict table's business, not this line's. */
   unjudged: number | null;
-  reason: string;
+  /** Why this window reads not-measured — and null, NOT a string, once it is
+   *  measured. Same contract as `count` and `unjudged`, for a sharper reason
+   *  than symmetry: every clause in it is scoped to what `saidRecorded === 0`
+   *  establishes, so on a measured payload it is not merely unused, it is
+   *  FALSE. It shipped as a plain `string` for one round and every live
+   *  payload carried "No finding in this window carries a `said` label" beside
+   *  a `saidRecorded` of 72. The card never rendered it — `describeDisputed`
+   *  returns on the measured branch first — but a consumer reading the JSON
+   *  had a self-contradiction inside one object, and "it happens not to be
+   *  read" is not a contract. Putting the not-measured-only scope in the TYPE
+   *  is. */
+  reason: string | null;
 }
 
 /** Every count here is over findings whose `lead_time_mins` is RECORDED. That
@@ -1812,19 +1823,29 @@ export function computeReviewValue(
       count: saidRecorded > 0 ? disputed.length : null,
       saidRecorded,
       unjudged: saidRecorded > 0 ? disputed.filter((f) => f.did == null).length : null,
-      // Rendered ONLY on the not-measured branch, so every clause is scoped to
-      // what `saidRecorded === 0` establishes: that no finding here carries a
-      // label. It must not say WHY beyond listing the possibilities — the
-      // three causes below are indistinguishable from this table, and naming
-      // one would be the same unestablished-cause claim the coverage line was
-      // corrected for. It also must not say the said phase is unbuilt: it is
-      // built, it has run, and this window simply has nothing labelled.
-      reason:
+      // Null once measured — the clauses below are scoped to `saidRecorded ===
+      // 0` and are false on any other payload, so the scope is in the type
+      // rather than left to the card returning before it reads this.
+      //
+      // Every clause is scoped to what `saidRecorded === 0` establishes: that
+      // no finding here carries a label. It must not say WHY beyond listing
+      // the possibilities, or it makes the same unestablished-cause claim the
+      // coverage line was corrected for. It must not say the said phase is
+      // unbuilt: it is built and it has run. And it must not say THE TABLE
+      // cannot separate the three states — the table can, via the columns two
+      // commits before this one added for exactly that; what cannot is this
+      // computation, which selects `f.said` alone. That distinction is the
+      // whole subject of the sentence, so getting it backwards was worse here
+      // than it would be anywhere else on the card.
+      reason: saidRecorded > 0 ? null :
         'No finding in this window carries a `said` label, so there is nothing to count. Three different states ' +
-        'store the same null and this table cannot tell them apart: the outcome sweep has not classified these ' +
-        'findings for `said` yet, or nobody wrote anything for it to read (a said ballot is only spent on a finding ' +
-        'with a thread reply or PR discussion behind it), or the ballots tied. Reported as not measured rather than ' +
-        'as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+        'store the same null and THIS CARD cannot tell them apart, because it reads only `said`: the outcome sweep ' +
+        'has not classified these findings for `said` yet, or nobody wrote anything for it to read (a said ballot ' +
+        'is only spent on a finding with a thread reply or PR discussion behind it), or the ballots tied. The TABLE ' +
+        'can separate them — `said_confidence` is null when no ballot was cast and `split` on a tie, and ' +
+        '`said_evidence` says whether there was anything to read — so this is a limit of the question asked here, ' +
+        'not of what was recorded. Reported as not measured rather than as zero: a zero would assert nobody ' +
+        'disputed a finding, which nothing here checked.',
     },
     leadTime: {
       beforeSettleCount: beforeSettle.length,

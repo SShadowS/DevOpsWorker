@@ -230,7 +230,13 @@ export function describeDisputed(d: ReviewValueDisputed, o: ReviewValueOutcome):
     return {
       label: 'Disputed as factually wrong',
       value: 'not yet measured',
-      detail: d.reason,
+      // Non-null exactly here, by the same construction that makes `count` and
+      // `unjudged` non-null on the other branch — `reason` is null once
+      // measured, because its clauses are only true while nothing is. Passed
+      // through verbatim, never restated: this is the one place the sentence
+      // exists, and a test pins the pass-through so a literal cannot be
+      // substituted for it unnoticed.
+      detail: d.reason!,
       caveat: null,
       status: 'attention',
     };

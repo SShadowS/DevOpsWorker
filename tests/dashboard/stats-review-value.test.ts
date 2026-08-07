@@ -287,7 +287,22 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     expect(o.disputedAsWrong.unjudged).toBeNull();
     expect(o.disputedAsWrong.unjudged).not.toBe(0);
     expect(o.disputedAsWrong.saidRecorded).toBe(0);
-    expect(o.disputedAsWrong.reason.length).toBeGreaterThan(0);
+    expect(o.disputedAsWrong.reason!.length).toBeGreaterThan(0);
+  });
+
+  // The reason's clauses are true only while `saidRecorded === 0`, so on a
+  // measured payload it is not unused — it is FALSE. It shipped as a plain
+  // `string` for one round and every live payload served "No finding in this
+  // window carries a `said` label" beside a `saidRecorded` of 72. The card
+  // never rendered it, which is exactly why the type has to carry the scope:
+  // "nothing reads it" is not a contract.
+  test('the reason is NULL once measured — it is not merely unread there, it is false', () => {
+    const measured = compute([finding({ said: 'fixed' })], spend());
+    expect(measured.disputedAsWrong.measured).toBe(true);
+    expect(measured.disputedAsWrong.reason).toBeNull();
+    // ...and present exactly where it is true.
+    const notMeasured = compute(mixedWindow(), spend());
+    expect(notMeasured.disputedAsWrong.reason).not.toBeNull();
   });
 
   // ENTAILMENT. The reason is rendered only when `saidRecorded === 0`, and that
@@ -296,14 +311,30 @@ describe('computeReviewValue — disputed as factually wrong', () => {
   // that happened to be true, and stayed on the payload after the sweep ran and
   // populated 72 of 135 live rows.
   test('the not-measured reason does not claim the said phase is unbuilt', () => {
-    const reason = compute(mixedWindow(), spend()).disputedAsWrong.reason;
+    const reason = compute(mixedWindow(), spend()).disputedAsWrong.reason!;
     expect(reason).not.toContain('has not been built');
     expect(reason).not.toContain('deliberately leaves null');
     // It says what the condition DOES establish, and lists the causes it
     // cannot distinguish rather than picking one.
     expect(reason).toContain('No finding in this window carries a `said` label');
-    expect(reason).toContain('cannot tell them apart');
     expect(reason).toContain('not measured rather than as zero');
+  });
+
+  // ENTAILMENT, and the subtler one: WHOSE limitation is it? `saidRecorded ===
+  // 0` establishes what THIS COMPUTATION saw — it selects `f.said` alone — not
+  // what the table can resolve. The table separates all three states: the
+  // columns added two commits before this one exist for precisely that, and the
+  // sweep's own upsert guard depends on the discrimination. Saying "this table
+  // cannot tell them apart" got that backwards, in the one sentence whose whole
+  // subject is what a null means.
+  test('the reason blames the CARD for the ambiguity, not the table that can resolve it', () => {
+    const reason = compute(mixedWindow(), spend()).disputedAsWrong.reason!;
+    expect(reason).toContain('THIS CARD cannot tell them apart, because it reads only `said`');
+    expect(reason).not.toContain('this table cannot tell them apart');
+    // ...and it names the columns that DO separate them, so the claim is
+    // checkable rather than an assurance.
+    expect(reason).toContain('`said_confidence` is null when no ballot was cast and `split` on a tie');
+    expect(reason).toContain('a limit of the question asked here, not of what was recorded');
   });
 
   test('starts measuring on its own once `said` is populated — no code change needed', () => {
@@ -760,6 +791,15 @@ describe('describeDisputed', () => {
     const line = describeDisputed(o.disputedAsWrong, o);
     expect(line.value).toBe('not yet measured');
     expect(line.value).not.toBe('0');
+    // The SERVER's sentence, passed through verbatim — not `length > 0`, which
+    // a hardcoded literal satisfies just as well. This branch renders in no
+    // live window, so a break in the wiring would ship silently and
+    // permanently, and it would defeat the stated property that the reason
+    // lives in one place and cannot drift.
+    // Checked non-null first, or `toBe` would pass on two empty strings and
+    // the pass-through would be pinned against nothing.
+    expect(o.disputedAsWrong.reason).not.toBeNull();
+    expect(line.detail).toBe(o.disputedAsWrong.reason!);
     expect(line.detail.length).toBeGreaterThan(0);
     // 'attention' is asserted here only because `ScorecardFigure` now RENDERS
     // it as a modifier class — pinned by the structural test below. It was
@@ -781,9 +821,10 @@ describe('describeDisputed', () => {
   });
 
   // -------------------------------------------------------------------------
-  // THE DENOMINATOR. `2 of 72` and `2 of 135` are different claims and the
-  // headline figure at the top of the card is the raised total, so a bare "2"
-  // invites the second reading. Every assertion below is about which
+  // THE DENOMINATOR. `2 of 72` and `2 of 139` are different claims and the
+  // headline figure at the top of the card is the raised total (139 — 135 is
+  // the TRACED count, one line lower), so a bare "2" invites the second
+  // reading. Every assertion below is about which
   // population the figure is over.
   // -------------------------------------------------------------------------
 
