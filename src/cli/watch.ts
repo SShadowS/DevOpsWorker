@@ -41,6 +41,8 @@ import {
 } from './watch/container-dispatcher.ts';
 import { ensurePat, reprovisionEnv } from './watch/env-actions.ts';
 import { processActionFiles } from './watch/action-processor.ts';
+import { startScheduled, stopScheduled } from './watch/scheduler.ts';
+import { loadManifest } from '../overlay/loader.ts';
 
 // Re-exported for existing consumers/tests that import these from watch.ts.
 export { colorForWI, releaseColor, _resetColorState, getPrReviewContainerEnv };
@@ -526,6 +528,7 @@ export async function watch(args: string[]): Promise<void> {
     signal.aborted = true;
     clearInterval(heartbeatInterval);
     clearInterval(janitorInterval);
+    stopScheduled(scheduledHandles);
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
@@ -580,6 +583,12 @@ export async function watch(args: string[]): Promise<void> {
       if (recovered > 0) log(`Janitor recovered ${recovered} stale action(s)`);
     } catch { /* non-critical */ }
   }, 60_000);
+
+  // Overlay-supplied background tasks (OverlayManifest.scheduled). The core owns
+  // the scheduler; the overlay owns the work. `loadManifest()` is memoised and
+  // already warm (src/cli/index.ts awaits it at startup), and yields `{}` with no
+  // overlay installed — in which case nothing is registered and nothing is logged.
+  const scheduledHandles = startScheduled((await loadManifest()).scheduled);
 
   // Recover orphaned sessions — launch into pool concurrently
   const orphaned = await findOrphanedSessions(stateStore, pollingConfig);

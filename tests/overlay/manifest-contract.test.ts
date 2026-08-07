@@ -1,4 +1,5 @@
 import { describe, test, expect, afterEach } from 'bun:test';
+import { startScheduled, stopScheduled } from '../../src/cli/watch/scheduler.ts';
 import type { z } from 'zod';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,7 +26,7 @@ import { loadManifest, resetManifestCache } from '../../src/overlay/loader.ts';
 // Every declared field of OverlayManifest, listed once. Kept in sync with the
 // interface by the two-way exhaustiveness checks below.
 const MANIFEST_KEYS = [
-  'repos', 'companions', 'mcpServers', 'agents', 'ado', 'pipeline', 'envProvider',
+  'repos', 'companions', 'mcpServers', 'agents', 'ado', 'pipeline', 'envProvider', 'scheduled',
 ] as const;
 type DeclaredKey = typeof MANIFEST_KEYS[number];
 
@@ -62,6 +63,7 @@ const fullManifest: OverlayManifest = {
     shareEnv: async (_id, _email, _stage) => {},
     reprovision: async (_wi, state, _cfg, _store) => state,
   }),
+  scheduled: [{ name: 'example-task', everyMinutes: 60, runAtStart: false, run: async () => {} }],
 };
 
 describe('OverlayManifest contract (drift guard)', () => {
@@ -157,6 +159,52 @@ describe('extension points: advertised fields have EFFECT (drift guard)', () => 
       // Would fail if `loadConfig` stopped reading `getCachedManifest()?.ado`,
       // or if the manifest were no longer wired into `resolveAdoField`.
       expect(config.azureDevOps.organization).toBe('contract-guard-org');
+    });
+  });
+
+  describe('a populated manifest.scheduled entry reaches the real scheduler', () => {
+    let dir: string | undefined;
+
+    afterEach(() => {
+      resetManifestCache();
+      delete (globalThis as Record<string, unknown>)['__contractGuardTaskRuns'];
+      if (dir) {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
+    });
+
+    test('flows through loadManifest -> startScheduled and the task actually runs', async () => {
+      dir = mkdtempSync(join(tmpdir(), 'manifest-contract-scheduled-test-'));
+      writeFileSync(
+        join(dir, 'manifest.ts'),
+        `const g = globalThis;
+         export default {
+           scheduled: [{
+             name: 'contract-guard-task',
+             everyMinutes: 0.001,
+             runAtStart: true,
+             run: async () => { g.__contractGuardTaskRuns = (g.__contractGuardTaskRuns ?? 0) + 1; },
+           }],
+         };`,
+      );
+
+      // Exactly the composition src/cli/watch.ts performs at startup. If the
+      // watcher ever stops passing `manifest.scheduled` to `startScheduled`,
+      // this pairing is what documents the contract it broke.
+      await loadManifest({ dir, force: true });
+      const handles = startScheduled((await loadManifest()).scheduled, { log: () => {} });
+
+      try {
+        expect(handles.map((h) => h.name)).toEqual(['contract-guard-task']);
+        await new Promise((r) => setTimeout(r, 10));
+        expect((globalThis as Record<string, unknown>)['__contractGuardTaskRuns']).toBe(1);
+      } finally {
+        stopScheduled(handles);
+      }
     });
   });
 });

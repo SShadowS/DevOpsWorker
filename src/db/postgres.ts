@@ -140,6 +140,55 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS image_sha TEXT;
 -- here genuinely means production, so a nullable column would invent a third
 -- state the UI would have to explain.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS finding_outcomes (
+  pr_id           INTEGER NOT NULL,
+  finding_key     TEXT    NOT NULL,
+  repo_key        TEXT    NOT NULL,
+  severity        TEXT    NOT NULL,
+  title           TEXT    NOT NULL,
+  file            TEXT,
+  first_raised_at TIMESTAMPTZ NOT NULL,
+  pr_settled_at   TIMESTAMPTZ,
+  lead_time_mins  INTEGER,
+  said            TEXT,
+  said_quote      TEXT,
+  said_evidence   TEXT,
+  did             TEXT,
+  did_confidence  TEXT,
+  did_votes       JSONB,
+  files_read      JSONB,
+  model_verified  BOOLEAN,
+  batch_id        TEXT,
+  computed_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (pr_id, finding_key)
+);
+CREATE INDEX IF NOT EXISTS idx_finding_outcomes_computed ON finding_outcomes (computed_at DESC);
+
+CREATE TABLE IF NOT EXISTS finding_outcome_sweeps (
+  id          SERIAL PRIMARY KEY,
+  batch_id    TEXT,
+  swept_upto  TIMESTAMPTZ NOT NULL,
+  status      TEXT NOT NULL,
+  -- The model the batch was SUBMITTED with. Persisted because a resumed run
+  -- grades results against the model it expected, and the resuming process may
+  -- be a different invocation with different flags: without this, resuming a
+  -- --model X batch without repeating that flag compares every result against
+  -- the default and marks the whole sweep model_verified = false. A false alarm
+  -- on the one signal that catches a real model substitution is worse than no
+  -- signal. Null on rows written before this column existed -> caller falls
+  -- back to the model it was invoked with.
+  model       TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS model TEXT;
+-- How many requests the batch for this row was submitted with. Written BEFORE
+-- the batch is created, and it is what lets a crash between the row and the
+-- provider's acknowledgement be reconciled afterwards: a row whose batch id was
+-- never recorded can be matched against the provider's batch list by creation
+-- time AND request count, rather than guessed at. Null on rows written before
+-- this column existed. See the sweep's 'submitting' status.
+ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS request_count INTEGER;
 `;
 
 /**

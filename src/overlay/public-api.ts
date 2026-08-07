@@ -18,6 +18,7 @@ export type {
   PipelineBuildContext,
   AdoDefaults,
   AgentConfigOverride,
+  ScheduledTask,
 } from './types.ts';
 export type { PipelineEdit } from './stage-edit.ts';
 

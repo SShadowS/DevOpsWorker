@@ -10,11 +10,11 @@
   "scripts": {
     "pipeline": "bun run src/cli/index.ts",
     "analyze-docs": "bun run scripts/analyze-doc-styles.ts",
-    "test": "bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/agents tests/scripts tests/db/pg-pr-review-store-mapper.test.ts",
-    "test:unit": "bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/scripts tests/db/pg-pr-review-store-mapper.test.ts",
+    "test": "bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/agents tests/scripts tests/db/pg-pr-review-store-mapper.test.ts tests/db/finding-outcome-mapper.test.ts",
+    "test:unit": "bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/scripts tests/db/pg-pr-review-store-mapper.test.ts tests/db/finding-outcome-mapper.test.ts",
     "test:integration": "bun test --preload ./tests/setup.ts tests/integration",
     "test:all": "bun test --preload ./tests/setup.ts",
-    "test:container": "docker run --rm --entrypoint bash -v \"$(cygpath -m \"$PWD\" 2>/dev/null || pwd):/wc\" devopsworker:latest -c 'cd /wc && bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/agents tests/scripts tests/db/pg-pr-review-store-mapper.test.ts'",
+    "test:container": "docker run --rm --entrypoint bash -v \"$(cygpath -m \"$PWD\" 2>/dev/null || pwd):/wc\" devopsworker:latest -c 'cd /wc && bun test --preload ./tests/setup.ts tests/sdk tests/pipeline tests/cli tests/config tests/overlay tests/webhook-server tests/formatters tests/dashboard tests/agents tests/scripts tests/db/pg-pr-review-store-mapper.test.ts tests/db/finding-outcome-mapper.test.ts'",
     "typecheck": "tsc --noEmit",
     "dashboard": "bun run src/cli/index.ts dashboard",
     "dashboard:build": "bun src/dashboard/build.ts",
@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",
+    "@anthropic-ai/sdk": "^0.115.0",
     "@preact/signals": "^2.9.3",
     "@sshadows/tree-sitter-al": "^3.0.1",
     "postgres": "^3.4.9",

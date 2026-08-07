@@ -29,6 +29,7 @@ import type {
   AgentConfig,
   McpServerConfig,
   AgentConfigOverride,
+  ScheduledTask,
   RepoConfig,
   RepoRegistry,
   CompanionDef,
