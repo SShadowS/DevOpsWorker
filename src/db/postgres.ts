@@ -186,6 +186,21 @@ ALTER TABLE finding_outcomes ADD COLUMN IF NOT EXISTS said_confidence TEXT;
 -- table, and re-tallying them reproduces said and said_confidence exactly, so a
 -- later coarser axis can be measured with no new spend.
 ALTER TABLE finding_outcomes ADD COLUMN IF NOT EXISTS said_votes JSONB;
+-- The batch that produced the said verdict, and whether the model that answered
+-- it was the one asked for. Separate columns from batch_id / model_verified,
+-- which describe the DID verdict, because the two verdicts are reached by
+-- different batches on different nights: the said question needs a human to
+-- have written something, the did question needs code to have been pushed.
+--
+-- One shared pair cannot describe both, and sharing does not fail silently in
+-- the harmless direction -- it MISATTRIBUTES. A said-only run leaves the did
+-- group's guard preserving the old batch_id, so a said verdict lands beside the
+-- id of a batch that produced no said ballot, and anyone asking which batch
+-- produced it gets a confident wrong answer. model_verified is worse: a said-only
+-- run whose model check FAILED would read back as verified, because the earlier
+-- true survives, and that column exists precisely to catch a model substitution.
+ALTER TABLE finding_outcomes ADD COLUMN IF NOT EXISTS said_batch_id TEXT;
+ALTER TABLE finding_outcomes ADD COLUMN IF NOT EXISTS said_model_verified BOOLEAN;
 
 CREATE TABLE IF NOT EXISTS finding_outcome_sweeps (
   id          SERIAL PRIMARY KEY,

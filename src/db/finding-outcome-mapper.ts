@@ -41,6 +41,17 @@ export interface FindingOutcome {
    *  tally folds into `unclear`. Storing the graded form (not the tally's votes) is
    *  what keeps the caught-fabrication rate measurable from the table. */
   saidVotes: string[] | null;
+  /** The batch that produced the said verdict. Distinct from `batchId`, which
+   *  describes the `did` verdict: the two are reached by different batches on
+   *  different nights, and one shared column would not merely lose provenance but
+   *  MISattribute it — a said verdict sitting beside the id of a batch that asked
+   *  no said question. */
+  saidBatchId: string | null;
+  /** False when the said ballots came back from a model other than the one asked
+   *  for. Separate from `modelVerified` for the same reason as `saidBatchId`, and
+   *  the stakes are higher: a shared column lets an earlier `true` survive a said
+   *  run whose model check failed, on the one column that exists to catch that. */
+  saidModelVerified: boolean | null;
   did: DidLabel | null;
   didConfidence: string | null;
   /** Every ballot, not just the winner — a 2-1 split must stay visible to a reader. */
@@ -79,6 +90,8 @@ export function rowToFindingOutcome(row: Record<string, unknown>): FindingOutcom
     saidEvidence: str(row['said_evidence']),
     saidConfidence: str(row['said_confidence']),
     saidVotes: arr(row['said_votes']),
+    saidBatchId: str(row['said_batch_id']),
+    saidModelVerified: row['said_model_verified'] == null ? null : Boolean(row['said_model_verified']),
     did: str(row['did']) as DidLabel | null,
     didConfidence: str(row['did_confidence']),
     didVotes: arr(row['did_votes']),

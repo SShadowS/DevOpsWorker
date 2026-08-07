@@ -7,7 +7,8 @@ const baseRow = {
   first_raised_at: '2026-07-30T08:05:00Z', pr_settled_at: '2026-07-31T14:03:00Z',
   lead_time_mins: 1918, said: 'fixed', said_quote: 'Aligned both paths',
   said_evidence: 'pr-discussion', said_confidence: 'unanimous',
-  said_votes: ['fixed', 'fixed', 'fixed'], did: 'ADDRESSED', did_confidence: 'unanimous',
+  said_votes: ['fixed', 'fixed', 'fixed'], said_batch_id: 'msgbatch_01said',
+  said_model_verified: true, did: 'ADDRESSED', did_confidence: 'unanimous',
   did_votes: ['ADDRESSED', 'ADDRESSED', 'ADDRESSED'], files_read: ['app/foo.al'],
   model_verified: true, batch_id: 'msgbatch_01abc',
 };
@@ -26,6 +27,27 @@ describe('rowToFindingOutcome', () => {
     expect(o.didConfidence).toBe('unanimous');
     expect(o.modelVerified).toBe(true);
     expect(o.batchId).toBe('msgbatch_01abc');
+  });
+
+  /**
+   * The two verdicts are reached by different batches on different nights, so their provenance
+   * cannot share a column. A shared one does not lose the answer, it MISattributes it: the said
+   * verdict reads as having come from the did batch, which asked no said question.
+   */
+  test('each verdict carries its own batch and its own model attestation', () => {
+    const o = rowToFindingOutcome(baseRow);
+    expect(o.batchId).toBe('msgbatch_01abc');
+    expect(o.saidBatchId).toBe('msgbatch_01said');
+    expect(o.batchId).not.toBe(o.saidBatchId);
+    expect(o.modelVerified).toBe(true);
+    expect(o.saidModelVerified).toBe(true);
+  });
+
+  /** A failed model check on ONE side must not be readable as a pass on the other. */
+  test('a failed said model check reads false while the did attestation stands', () => {
+    const o = rowToFindingOutcome({ ...baseRow, said_model_verified: false, model_verified: true });
+    expect(o.saidModelVerified).toBe(false);
+    expect(o.modelVerified).toBe(true);
   });
 
   test('preserves every ballot so a 2-1 split stays visible', () => {
@@ -71,7 +93,7 @@ describe('rowToFindingOutcome', () => {
     const o = rowToFindingOutcome({
       ...baseRow, file: null, pr_settled_at: null, lead_time_mins: null,
       said: null, said_quote: null, said_evidence: null, said_confidence: null,
-      said_votes: null, did: null,
+      said_votes: null, said_batch_id: null, said_model_verified: null, did: null,
       did_confidence: null, did_votes: null, files_read: null,
       model_verified: null, batch_id: null,
     });
@@ -80,6 +102,8 @@ describe('rowToFindingOutcome', () => {
     expect(o.didVotes).toBeNull();
     expect(o.saidConfidence).toBeNull();
     expect(o.saidVotes).toBeNull();
+    expect(o.saidBatchId).toBeNull();
+    expect(o.saidModelVerified).toBeNull();
     expect(o.modelVerified).toBeNull();
   });
 
