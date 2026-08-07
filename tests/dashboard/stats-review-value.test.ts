@@ -1146,6 +1146,63 @@ describe('no clause points at a figure that does not exist', () => {
     expect(line.detail).toContain('Reported as a count, not a rate');
   });
 
+  // -------------------------------------------------------------------------
+  // BRANCH ORDER. These three states satisfy TWO branch conditions at once, so
+  // which one fires is decided by sequence rather than by the conditions
+  // themselves. Nothing in the types or the conditions stops a refactor
+  // reordering them, so each is pinned by the sentence only the correct order
+  // produces. Every one of these was verified to fail with the branches
+  // swapped before being committed.
+  // -------------------------------------------------------------------------
+
+  test('ORDER: all-costs-missing is tested BEFORE the null check, or missing data reads as no action', () => {
+    // Both null causes live at once: every review lacks a cost AND nothing is
+    // confirmed acted on. `costPerAddressed` is null either way, so the branch
+    // that fires is purely a matter of sequence.
+    const o = compute([finding({ did: 'not' })], spend({ totalCostUsd: 0, reviewCount: 4, reviewsMissingCost: 4 }));
+    expect(o.addressed).toBe(0);
+    expect(o.spend.costPerAddressed).toBeNull();
+    expect(o.spend.reviewsMissingCost).toBe(o.spend.reviewCount);
+
+    const line = describeSpend(o.spend, o.addressed, o);
+    // Correct order describes the MISSING DATA.
+    expect(line.value).toBe('not recorded');
+    expect(line.detail).toContain('missing data, not a measured zero');
+    // Swapped order would describe the ABSENCE OF ACTION and print a
+    // measured-looking total — a card whose whole purpose is not doing that.
+    expect(line.value).not.toBe('$0.00');
+    expect(line.detail).not.toContain('Nothing is confirmed acted on');
+  });
+
+  test('ORDER: awaiting-a-diff is tested BEFORE the unreconciled check, or a diff-wait reads as unexplainable', () => {
+    // untraceable === 0 with noFileAnchor > 0 makes `reconciled` false, while
+    // the only actual reason anything is unjudged is that it awaits a diff.
+    const o = computeReviewValue(
+      [finding({ did: 'ADDRESSED' }), finding({ did: null })],
+      spend(),
+      { readBandRaised: 2, noFileAnchor: 1 },
+    );
+    expect(o.traceability.untraceable).toBe(0);
+    expect(o.traceability.reconciled).toBe(false);
+    expect(o.awaitingDiff).toBe(1);
+
+    const text = describeJudgedCoverage(o);
+    expect(text).toContain('awaiting a diff to judge against');
+    expect(text).not.toContain('for a reason this card has not established');
+  });
+
+  test('ORDER: judged===0 is tested BEFORE the all-unanimous check, or zero rows read as unanimous', () => {
+    // judged === 0 also makes `judged - unanimous === 0`, so the
+    // all-unanimous branch would claim agreement across an empty set.
+    const o = compute([finding({ did: null }), finding({ did: null })], spend());
+    expect(o.judged).toBe(0);
+    expect(o.unanimous).toBe(0);
+
+    const caption = describeVerdictCaption(o);
+    expect(caption).toBe('Shares are over the 0 JUDGED findings, not over all 2 raised.');
+    expect(caption).not.toContain('Every judged row had all three ballots agree');
+  });
+
   test('the verdict caption does not describe an empty remainder', () => {
     const allUnanimous = compute([
       finding({ did: 'ADDRESSED', didConfidence: 'unanimous' }),

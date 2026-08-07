@@ -123,6 +123,11 @@ export function describeJudgedCoverage(o: ReviewValueOutcome): string {
     // negation moves. `agree(n, 'it has', 'none of them has') + ' an inline
     // thread'` rendered "it HAS an inline thread" at n=1, the exact opposite
     // of the fact, which is why these are written out rather than assembled.
+    // ORDER IS LOAD-BEARING: `untraceable === 0` with `noFileAnchor > 0`
+    // makes `reconciled` false while the only real reason anything is
+    // unjudged is that it awaits a diff. Testing the unreconciled case first
+    // would call a plain diff-wait unexplainable. Pinned by "ORDER:
+    // awaiting-a-diff is tested BEFORE the unreconciled check".
     if (o.awaitingDiff > 0) {
       return `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict, awaiting a diff to judge against.`;
     }
@@ -246,6 +251,12 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
 
   const noCostRecorded = s.reviewCount > 0 && s.reviewsMissingCost === s.reviewCount;
 
+  // ORDER IS LOAD-BEARING: this must be tested BEFORE `costPerAddressed ==
+  // null`. Both conditions hold at once when every review lacks a cost AND
+  // nothing is acted on, and the null check would then describe missing data
+  // as an absence of action, under a measured-looking "$0.00". Pinned by
+  // "ORDER: all-costs-missing is tested BEFORE the null check" — verified to
+  // fail with the two blocks swapped, not merely written.
   if (noCostRecorded) {
     // Distinct from "nothing acted on": here there IS a denominator, but no
     // numerator was ever recorded. "$0.00" would read as a measured zero.
@@ -316,6 +327,10 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
 export function describeVerdictCaption(o: ReviewValueOutcome): string {
   const scope =
     `Shares are over the ${countOf(o.judged, 'JUDGED finding')}, not over all ${o.findingsRaised} raised.`;
+  // ORDER IS LOAD-BEARING: judged === 0 also makes `judged - unanimous === 0`,
+  // so the all-unanimous branch below would claim agreement across an empty
+  // set. Pinned by "ORDER: judged===0 is tested BEFORE the all-unanimous
+  // check".
   if (o.judged === 0) return scope;
   // `unanimous` counts ONE value of `did_confidence`, whose domain also holds
   // `majority`, `split`, `single-vote` and `none`. So it licenses no claim
