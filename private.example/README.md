@@ -31,6 +31,7 @@ providers) see [`docs/extending.md`](../docs/extending.md).
 | Agent overrides | `manifest.agents[name].model` | OVERRIDE by agent name |
 | Pipeline stages | `manifest.pipeline(ctx)` | declarative name-anchored edits |
 | Env backend | `manifest.envProvider(ctx)` | provides BC env lifecycle |
+| Background tasks | `manifest.scheduled[]` | ADD (watcher runs each on its interval) |
 | Agent CLAUDE.md additions | `agents/<name>/CLAUDE.append.md` | APPEND to base |
 | Agent rules/skills | `agents/<name>/.claude/{rules,skills}/` | ADD (dir merge) |
 | Prompt fragment override | `prompts/<fragment>.md` | OVERRIDE `src/prompts/<fragment>.md` |

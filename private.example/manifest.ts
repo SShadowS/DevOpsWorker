@@ -42,6 +42,21 @@ const manifest: OverlayManifest = {
   //   shareEnv:   (envId, email, stage) => myCli.share(envId, email),
   //   reprovision: (workItemId, state, cfg, store) => myReprovision(workItemId, state, cfg, store),
   // }),
+
+  // Periodic background tasks the watcher runs on an interval. The core supplies
+  // the scheduler (re-entrancy guard, error containment, shutdown); you supply the
+  // work. A task that throws is logged by name and never takes the watcher down,
+  // and a run that outlives its interval is never given a second concurrent copy.
+  // Set `runAtStart` when the cadence is longer than the watcher stays up.
+  // scheduled: [
+  //   {
+  //     name: 'my-nightly-job',
+  //     everyMinutes: 360,
+  //     runAtStart: true,
+  //     // Imported lazily so the job's dependencies do not load on every CLI command.
+  //     run: async () => { await (await import('./scripts/my-job.ts')).myJob(); },
+  //   },
+  // ],
 };
 
 export default manifest;
