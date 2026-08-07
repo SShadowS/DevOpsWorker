@@ -12,7 +12,7 @@ import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
 import type { ILogSink } from '../pipeline/log-sink.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import { LogPoller } from './log-poller.ts';
-import { parseWindow, parsePopulation, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getDriftStats } from './stats.ts';
+import { parseWindow, parsePopulation, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getReviewValueStats, getDriftStats } from './stats.ts';
 import { buildConfigReport } from './config-report.ts';
 
 // ---------------------------------------------------------------------------
@@ -437,6 +437,17 @@ export function startDashboard(options: DashboardOptions): void {
         const window = parseWindow(url.searchParams.get('window'));
         const population = parsePopulation(url.searchParams.get('population'));
         return Response.json(await getOperationalStats(sql, window, population));
+      }
+
+      // The one endpoint on this tab that does not read `pr_reviews` as its
+      // subject: it reads `finding_outcomes` (one row per read-band finding on
+      // a SETTLED PR) and joins back to `pr_reviews` only for spend. Its
+      // `sampleSize` is therefore a finding count, not a review count — see
+      // getReviewValueStats in stats.ts.
+      if (path === '/api/stats/review-value' && req.method === 'GET') {
+        const window = parseWindow(url.searchParams.get('window'));
+        const population = parsePopulation(url.searchParams.get('population'));
+        return Response.json(await getReviewValueStats(sql, window, population));
       }
 
       // Build provenance comparison — see src/dashboard/stats.ts for why HEAD

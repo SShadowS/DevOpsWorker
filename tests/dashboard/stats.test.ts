@@ -1115,8 +1115,13 @@ describe('stats.ts SQL shape', () => {
     // 3 (cost: percentiles/rows/repoRows) + 1 (quality: rows) + 2 (integrity:
     // rows/dispatchPercentiles) + 5 (operational: durationTurns/dailyRows/
     // toolRows/repoRows/errorRows) + 1 (countInWindowForPopulation, the
-    // shared totalN/otherPopulationCount helper) = 12.
-    expect(queries.length).toBe(12);
+    // shared totalN/otherPopulationCount helper) + 3 (review-value: the
+    // `EXISTS (... FROM pr_reviews ...)` population predicate on each of the
+    // findings and other-population queries, plus the spend query itself —
+    // that endpoint's SUBJECT is finding_outcomes, but it still reaches
+    // pr_reviews for both population scoping and cost, and each of those
+    // reaches is exactly what this guard exists to police) = 15.
+    expect(queries.length).toBe(15);
     const missing = queries.filter((q) => !q.includes('is_test'));
     expect(missing).toEqual([]); // a non-empty array here names the unguarded query verbatim
   });

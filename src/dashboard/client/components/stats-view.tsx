@@ -9,6 +9,7 @@ import { StatsRibbon } from './stats-ribbon.tsx';
 import { StatsIntegrityPanel } from './stats-integrity.tsx';
 import { ConfigPanel } from './stats-config.tsx';
 import { CostQualityPanel } from './stats-costquality.tsx';
+import { ReviewValuePanel } from './stats-review-value.tsx';
 import { OperationalPanel } from './stats-operational.tsx';
 
 // ---------------------------------------------------------------------------
@@ -71,11 +72,19 @@ export function describePopulationExclusion(population: Population, otherCount: 
 
 /**
  * Picks the population/otherCount reading the shared disclosure banner
- * shows. All four population-aware endpoints report an IDENTICAL count for
+ * shows. Those four population-aware endpoints report an IDENTICAL count for
  * a given window+population (see the module doc comment above), so any one
  * of them that has settled to `'ready'` is authoritative — this just takes
  * the first one, in a fixed order, rather than requiring all four to agree
- * before showing anything. `null` means none of the four has resolved yet
+ * before showing anything.
+ *
+ * `/api/stats/review-value` is population-aware too but must NEVER be passed
+ * here: its `otherPopulationCount` counts `finding_outcomes` ROWS, not
+ * `pr_reviews` rows, so it is a different quantity that happens to share a
+ * field name. Feeding it in would make this banner report a finding count as
+ * a review count depending purely on which fetch resolved first.
+ *
+ * `null` means none of the four has resolved yet
  * (still loading, or all failed) — the caller renders nothing rather than a
  * stale or guessed number. Pure — exported for unit testing.
  */
@@ -172,6 +181,13 @@ export function StatsView() {
       <ConfigPanel />
 
       <CostQualityPanel />
+
+      {/* Directly after Cost & Quality, which reports what reviews COST and
+          PRODUCE. This is the only slot that reports whether any of it
+          MATTERED, and it reads a different table (`finding_outcomes`) — so it
+          sits beside the cost figures it qualifies, not at the end of the
+          page under operational throughput. */}
+      <ReviewValuePanel />
 
       <OperationalPanel />
     </div>

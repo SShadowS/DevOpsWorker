@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals';
-import type { StatsWindow, CostStats, QualityStats, IntegrityStats, OperationalStats, DriftStats, Population } from '../stats.ts';
+import type { StatsWindow, CostStats, QualityStats, IntegrityStats, OperationalStats, ReviewValueStats, DriftStats, Population } from '../stats.ts';
 import type { ConfigReport } from '../config-report.ts';
 
 export type { StatsWindow, Population };
@@ -66,6 +66,11 @@ export const costStats = signal<FetchState<CostStats>>({ status: 'loading' });
 export const qualityStats = signal<FetchState<QualityStats>>({ status: 'loading' });
 export const integrityStats = signal<FetchState<IntegrityStats>>({ status: 'loading' });
 export const operationalStats = signal<FetchState<OperationalStats>>({ status: 'loading' });
+/** Review value — the one windowed signal whose `sampleSize` counts FINDINGS
+ *  (`finding_outcomes` rows), not `pr_reviews` rows. `classifyWindowedResponse`
+ *  still applies unchanged: a window with plenty of reviews but no classified
+ *  findings genuinely has nothing to show, and 'empty' is the right reading. */
+export const reviewValueStats = signal<FetchState<ReviewValueStats>>({ status: 'loading' });
 export const driftStats = signal<FetchState<DriftStats>>({ status: 'loading' });
 /** Not windowed — `/api/config` reports resolved configuration, not a time-series stat. */
 export const configReport = signal<FetchState<ConfigReport>>({ status: 'loading' });
@@ -106,6 +111,7 @@ export async function loadStatsForWindow(window: StatsWindow): Promise<void> {
   qualityStats.value = { status: 'loading' };
   integrityStats.value = { status: 'loading' };
   operationalStats.value = { status: 'loading' };
+  reviewValueStats.value = { status: 'loading' };
   driftStats.value = { status: 'loading' };
   ribbonIntegrityStats.value = { status: 'loading' };
 
@@ -118,11 +124,12 @@ export async function loadStatsForWindow(window: StatsWindow): Promise<void> {
   // reusing it avoids an identical duplicate query on every load.
   const needsProdPinnedIntegrity = population !== 'prod';
 
-  const [cost, quality, integrity, operational, drift, ribbonIntegrity] = await Promise.all([
+  const [cost, quality, integrity, operational, reviewValue, drift, ribbonIntegrity] = await Promise.all([
     fetchJson<CostStats>(`/api/stats/cost${qs}`),
     fetchJson<QualityStats>(`/api/stats/quality${qs}`),
     fetchJson<IntegrityStats>(`/api/stats/integrity${qs}`),
     fetchJson<OperationalStats>(`/api/stats/operational${qs}`),
+    fetchJson<ReviewValueStats>(`/api/stats/review-value${qs}`),
     fetchJson<DriftStats>(`/api/drift?window=${window}`),
     needsProdPinnedIntegrity
       ? fetchJson<IntegrityStats>(`/api/stats/integrity?window=${window}&population=prod`)
@@ -136,6 +143,7 @@ export async function loadStatsForWindow(window: StatsWindow): Promise<void> {
     integrity.ok ? classifyWindowedResponse(integrity.data) : { status: 'error', message: integrity.message };
   integrityStats.value = integrityResult;
   operationalStats.value = operational.ok ? classifyWindowedResponse(operational.data) : { status: 'error', message: operational.message };
+  reviewValueStats.value = reviewValue.ok ? classifyWindowedResponse(reviewValue.data) : { status: 'error', message: reviewValue.message };
   driftStats.value = drift.ok ? classifyDriftResponse(drift.data) : { status: 'error', message: drift.message };
   ribbonIntegrityStats.value = ribbonIntegrity == null
     ? integrityResult
@@ -153,14 +161,14 @@ export async function loadConfigReport(): Promise<void> {
 }
 
 /** Switch the shared window and refetch every windowed endpoint. No-op if
- *  already on that window (guards a redundant click re-triggering 5 fetches). */
+ *  already on that window (guards a redundant click re-triggering 6 fetches). */
 export function setStatsWindow(next: StatsWindow): void {
   if (statsWindow.value === next) return;
   statsWindow.value = next;
   void loadStatsForWindow(next);
 }
 
-/** Switch the shared population and refetch the four population-aware
+/** Switch the shared population and refetch the five population-aware
  *  endpoints — mirrors `setStatsWindow` exactly, including its no-op guard.
  *  Deliberately routed through the SAME `loadStatsForWindow` path the window
  *  signal already uses rather than a second fetch effect: switching

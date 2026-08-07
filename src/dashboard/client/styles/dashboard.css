@@ -2593,3 +2593,111 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   .operational-dl dt { font-weight: 600; }
   .operational-table { display: block; overflow-x: auto; }
 }
+
+/* ============================================================
+   Review value panel — the fifth slot. Own `.review-value-*`
+   namespace, with section/table/tag rules deliberately identical to
+   .cost-section/.quality-section/.integrity-section/.config-section/
+   .operational-section (one shell rule, now five names) so this slot
+   reads as part of the same system rather than a new one. Same
+   reasoning as the Operational block above; see design-constraints.md.
+
+   No chart. Every other slot's chart encodes a value whose POSITION
+   carries meaning (a share of a total, a point on a scale). The
+   numbers here are counts against denominators that are still moving
+   as classification coverage rises — a bar would give a provisional
+   ratio the visual authority of a settled one, which is the exact
+   misreading this card's prose spends its length preventing. Figures
+   and sentences only.
+
+   No --color-accent except on caveat/attention TAG TEXT, matching
+   every other panel on this tab.
+   ============================================================ */
+
+.review-value-panel__low-sample {
+  margin: 0 0 var(--space-sm) 0;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.review-value-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.review-value-section {
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-stage-pending);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+}
+.review-value-section--ok        { border-left-color: var(--color-stage-completed); }
+.review-value-section--attention {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-tertiary));
+}
+.review-value-section--neutral   { border-left-color: var(--color-stage-pending); }
+
+.review-value-section__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 4px 0;
+}
+
+.review-value-section__summary, .review-value-section__note {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.review-value-tag { font-weight: 600; }
+.review-value-tag--attention { color: var(--color-accent); }
+.review-value-tag--caveat    { color: var(--color-text-secondary); }
+
+/* A headline figure and its label. The value is deliberately NOT a large
+   display number: on this card the qualifying sentence underneath is
+   load-bearing, and a figure sized to be read from across the room
+   invites exactly the quote-the-number-alone reading the prose exists
+   to prevent. One step up from body text, no more. */
+.review-value-figure { margin-top: var(--space-sm); }
+.review-value-figure:first-child { margin-top: 0; }
+.review-value-figure__value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.review-value-figure__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--color-text-secondary);
+}
+
+.review-value-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+.review-value-table th {
+  text-align: left;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.review-value-table td { padding: 3px 8px 3px 0; color: var(--color-text-secondary); }
+.review-value-table__mono { font-family: var(--font-mono); color: var(--color-text-primary); }
+
+@media (max-width: 767px) {
+  .review-value-table { display: block; overflow-x: auto; }
+}

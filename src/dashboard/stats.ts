@@ -1313,6 +1313,362 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/stats/review-value
+//
+// "What did PR review actually buy us." Reads `finding_outcomes` — one row per
+// read-band (critical/major) finding on a PR that has SETTLED (ADO status
+// completed/abandoned), written by a batch job that classifies two independent
+// things per finding:
+//   - `said_evidence`/`said` — what the team SAID, from the finding's thread
+//     and the PR discussion.
+//   - `did` — what the branch DID, judged from the post-review diff by a
+//     3-ballot majority vote.
+// The two are separate columns on purpose (see src/db/finding-outcome-mapper.ts):
+// the classifier judging `did` never sees the discussion, so a finding that was
+// fixed with nobody replying is distinguishable from one that was argued about.
+//
+// Three properties of this data drive every shape below, and each is surfaced
+// on the card rather than left to a reader to infer:
+//
+//  1. NOT EVERY ROW IS JUDGED. `did` is null when there was no diff to judge
+//     against yet. Every rate over `did` therefore has TWO defensible
+//     denominators — judged rows, and all rows raised — that differ by a large
+//     factor. `ReviewValueOutcome` carries both, each with its own explicitly
+//     named denominator field, so neither can be rendered as "the" rate.
+//  2. ROW-LEVEL VERDICTS ARE NOT REPRODUCIBLE. The four-way per-ballot verdict
+//     reproduced 67% of the time on byte-identical input, which is why voting
+//     is 3 ballots and why `did` collapses to three values. Aggregates here are
+//     usable; a single row's verdict is not, and `reproducibilityNote` says so.
+//  3. `said` IS NOT POPULATED YET. The phase that fills it is not built, so
+//     anything keyed on `said` (notably "disputed as factually wrong") is
+//     reported as NOT MEASURED, never as zero — see `disputedAsWrong`.
+// ---------------------------------------------------------------------------
+
+/** One `finding_outcomes` row, reduced to the columns this computation reads.
+ *  Deliberately not `FindingOutcome` (src/db/finding-outcome-mapper.ts): this
+ *  function must stay callable from a unit test with a four-field literal
+ *  rather than a full row, matching every other pure shaper in this file. */
+export interface ReviewValueFindingRow {
+  did: string | null;
+  didConfidence: string | null;
+  said: string | null;
+  saidEvidence: string | null;
+  leadTimeMins: number | null;
+}
+
+/** The spend half, aggregated in SQL (the route) rather than here — this is
+ *  the one input the pure function cannot derive from finding rows, because
+ *  cost lives on `pr_reviews`, one level up from a finding. */
+export interface ReviewValueSpendInput {
+  totalCostUsd: number;
+  /** `pr_reviews` rows on the PRs these findings came from. Larger than the
+   *  PR count whenever a PR was reviewed more than once. */
+  reviewCount: number;
+  /** Of those rows, how many carry no `cost_usd` — their spend is missing
+   *  from `totalCostUsd` entirely, so the total is a floor. */
+  reviewsMissingCost: number;
+}
+
+/** `did` values, in the order the card lists them. `SPLIT` (ballots reached no
+ *  majority) is listed even at zero: its absence from a breakdown would read as
+ *  "splits cannot happen", which is not what a zero count means. */
+const DID_LABELS = ['ADDRESSED', 'not', 'UNKNOWN', 'SPLIT'] as const;
+
+/** `said_evidence` values that mean a human engaged with the finding in
+ *  writing. `'stale-signal'` is deliberately NOT here — it is an inference from
+ *  the thread going stale, not somebody saying something. */
+const ENGAGED_EVIDENCE = ['thread-reply', 'pr-discussion'] as const;
+
+export interface ReviewValueEngagement {
+  /** `said_evidence` in ('thread-reply','pr-discussion'). */
+  engaged: number;
+  /** `said_evidence = 'none'` — the finding was raised and nobody wrote back. */
+  silent: number;
+  /** Neither: null, or an evidence kind that is not an engagement signal
+   *  (`'stale-signal'`). Kept out of both buckets rather than folded into
+   *  `silent`, which would overstate silence. */
+  unrecorded: number;
+  /** engaged / (engaged + silent), 0..1. Null when neither was recorded. */
+  engagedRate: number | null;
+  /** Every `said_evidence` value seen, verbatim, including ones this code does
+   *  not classify — so a new evidence kind added upstream shows up rather than
+   *  silently disappearing into `unrecorded`. Null keys as `'(unrecorded)'`. */
+  breakdown: Record<string, number>;
+}
+
+export interface ReviewValueDisputed {
+  /** False while no row carries a `said` label at all. Derived from the data,
+   *  not hardcoded: the day the phase that fills `said` runs, this flips to
+   *  true and `count` starts reporting on its own. */
+  measured: boolean;
+  /** Null — NOT zero — while `measured` is false. A zero here would assert
+   *  "nobody disputed anything", a claim this data cannot support. */
+  count: number | null;
+  /** How many rows carry any `said` label, i.e. the population `count` would
+   *  be measured over. */
+  saidRecorded: number;
+  reason: string;
+}
+
+export interface ReviewValueLeadTime {
+  /** Findings posted BEFORE the PR settled — the only ones where a lead time
+   *  is a lead time. */
+  beforeSettleCount: number;
+  /** Negative `lead_time_mins`: the review landed after the PR had already
+   *  settled (a cherry-pick sanity review, or a post-merge review). Segmented
+   *  out rather than averaged in, where they would drag the figure toward zero
+   *  while describing something that is not a lead time at all. */
+  afterSettleCount: number;
+  /** Median over `beforeSettleCount` rows only. Median, not mean: the
+   *  distribution has a long right tail (a PR left open for days). */
+  medianMinsBeforeSettle: number | null;
+  unrecordedCount: number;
+}
+
+export interface ReviewValueSpend extends ReviewValueSpendInput {
+  /** totalCostUsd / addressed. Null when nothing is confirmed acted on.
+   *  Reported ALONGSIDE judged coverage and never as a settled figure — see
+   *  `note`. */
+  costPerAddressed: number | null;
+  note: string;
+}
+
+export interface ReviewValueOutcome {
+  /** count(*) — every read-band finding on a settled PR in this window. Exact. */
+  findingsRaised: number;
+  /** `did IS NOT NULL`: the classifier reached a verdict. Includes `UNKNOWN`
+   *  (it looked and could not tell), which is a judged row — distinct from a
+   *  row with no diff to judge at all. */
+  judged: number;
+  /** findingsRaised - judged. No diff to judge yet. */
+  unjudgeable: number;
+  /** judged / findingsRaised, 0..1. Null when nothing was raised. THE number
+   *  that must be rendered beside any rate over `judged`. */
+  judgedCoverage: number | null;
+  addressed: number;
+  /** addressed / judged — the rate the card leads with. Null when judged is 0
+   *  (never NaN, never a fake 0%). */
+  addressedRateOfJudged: number | null;
+  /** addressed / findingsRaised. A DIFFERENT, always-smaller number that is
+   *  equally true; both are carried so the card can print each with its own
+   *  denominator spelled out rather than picking one and hoping. */
+  addressedRateOfRaised: number | null;
+  /** Counts for every `DID_LABELS` value plus any unrecognised label seen. */
+  didBreakdown: Record<string, number>;
+  /** Judged rows whose 3 ballots agreed. The rest reached only a majority (a
+   *  2-1), which is exactly the case `did_votes` exists to keep visible. */
+  unanimous: number;
+  /** `did = 'ADDRESSED' AND said_evidence = 'none'` — the code changed and
+   *  nobody said a word. Does not read `said` (unpopulated), so this is
+   *  measurable today. */
+  silentlyFixed: number;
+  engagement: ReviewValueEngagement;
+  disputedAsWrong: ReviewValueDisputed;
+  leadTime: ReviewValueLeadTime;
+  spend: ReviewValueSpend;
+  reproducibilityNote: string;
+  scopeNote: string;
+}
+
+function median(sorted: number[]): number | null {
+  if (sorted.length === 0) return null;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/**
+ * Pure — no SQL, no `sql` handle, no clock. Takes the finding rows and the
+ * already-aggregated spend, returns everything the card renders.
+ *
+ * Every rate returns `null` rather than `NaN` or a stand-in `0` when its
+ * denominator is empty, matching `computeCostPerReadBandItem`/
+ * `computeReadBandCoverage`'s convention on this tab: `formatPct` renders a
+ * null as `'n/a'`, and "n/a" is a true statement where "0%" is a false one.
+ */
+export function computeReviewValue(
+  findings: ReviewValueFindingRow[],
+  spend: ReviewValueSpendInput,
+): ReviewValueOutcome {
+  const findingsRaised = findings.length;
+
+  const judgedRows = findings.filter((f) => f.did != null);
+  const judged = judgedRows.length;
+  const addressed = findings.filter((f) => f.did === 'ADDRESSED').length;
+
+  const didBreakdown: Record<string, number> = {};
+  for (const label of DID_LABELS) didBreakdown[label] = 0;
+  for (const f of judgedRows) didBreakdown[f.did!] = (didBreakdown[f.did!] ?? 0) + 1;
+
+  const unanimous = judgedRows.filter((f) => f.didConfidence === 'unanimous').length;
+  const silentlyFixed = findings.filter((f) => f.did === 'ADDRESSED' && f.saidEvidence === 'none').length;
+
+  // --- engagement ---
+  const evidenceBreakdown: Record<string, number> = {};
+  for (const f of findings) {
+    const key = f.saidEvidence ?? '(unrecorded)';
+    evidenceBreakdown[key] = (evidenceBreakdown[key] ?? 0) + 1;
+  }
+  const engaged = findings.filter((f) => f.saidEvidence != null && (ENGAGED_EVIDENCE as readonly string[]).includes(f.saidEvidence)).length;
+  const silent = findings.filter((f) => f.saidEvidence === 'none').length;
+  const engagementDenominator = engaged + silent;
+
+  // --- disputed (needs `said`, which nothing populates yet) ---
+  const saidRecorded = findings.filter((f) => f.said != null).length;
+
+  // --- lead time ---
+  const withLeadTime = findings.filter((f) => f.leadTimeMins != null);
+  const beforeSettle = withLeadTime.filter((f) => f.leadTimeMins! >= 0).map((f) => f.leadTimeMins!);
+  const afterSettle = withLeadTime.filter((f) => f.leadTimeMins! < 0);
+
+  return {
+    findingsRaised,
+    judged,
+    unjudgeable: findingsRaised - judged,
+    judgedCoverage: findingsRaised > 0 ? judged / findingsRaised : null,
+    addressed,
+    addressedRateOfJudged: judged > 0 ? addressed / judged : null,
+    addressedRateOfRaised: findingsRaised > 0 ? addressed / findingsRaised : null,
+    didBreakdown,
+    unanimous,
+    silentlyFixed,
+    engagement: {
+      engaged,
+      silent,
+      unrecorded: findingsRaised - engaged - silent,
+      engagedRate: engagementDenominator > 0 ? engaged / engagementDenominator : null,
+      breakdown: evidenceBreakdown,
+    },
+    disputedAsWrong: {
+      measured: saidRecorded > 0,
+      count: saidRecorded > 0 ? findings.filter((f) => f.said === 'rejected-wrong').length : null,
+      saidRecorded,
+      reason:
+        'Requires the `said` label (fixed / rejected-wrong / rejected-wontfix / deferred / ignored), which the ' +
+        'classifier that populates this table deliberately leaves null — reading a dispute out of a thread is a ' +
+        'separate classification from reading engagement out of it, and it has not been built. Reported as not ' +
+        'measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+    },
+    leadTime: {
+      beforeSettleCount: beforeSettle.length,
+      afterSettleCount: afterSettle.length,
+      medianMinsBeforeSettle: median([...beforeSettle].sort((a, b) => a - b)),
+      unrecordedCount: findingsRaised - withLeadTime.length,
+    },
+    spend: {
+      ...spend,
+      costPerAddressed: addressed > 0 ? spend.totalCostUsd / addressed : null,
+      // Deliberately states no MAGNITUDE for the unjudged share — an earlier
+      // wording asserted it was "large", which is a claim about the data that
+      // a window with full classification coverage (a small Test population,
+      // say) falsifies while the note is still being rendered. The actual
+      // coverage is printed immediately beside this note by the card; this
+      // text only has to say which DIRECTION it moves the figure.
+      note:
+        'The numerator is exact; the denominator is not settled. Only judged rows can contribute to `addressed`, ' +
+        'so the denominator grows as classification coverage rises and the per-item figure can only fall — never ' +
+        'rise — from where it stands at the coverage stated beside it. Treat it as an upper bound at the current ' +
+        'coverage, not a settled rate. It is also NOT comparable with the Cost panel\'s ' +
+        '"cost per read-band item": that divides by findings RAISED, this divides by findings CONFIRMED ACTED ON, ' +
+        'so the two are different measurements and the difference between them is not a trend. Spend counts every ' +
+        'review on these PRs, including re-reviews that raised none of the findings counted here.',
+    },
+    reproducibilityNote:
+      'Row-level verdicts are not reproducible: a single ballot flipped on 33% of byte-identical re-runs, which is ' +
+      'why each finding is judged by 3 ballots and why the verdict collapses to three values. The aggregates on ' +
+      'this card are usable; any individual finding\'s verdict is not.',
+    scopeNote:
+      'Read-band (critical/major) findings on PRs that have SETTLED — completed or abandoned. A finding on a ' +
+      'still-open PR is excluded entirely, never counted as ignored: the team may still act on it.',
+  };
+}
+
+export interface ReviewValueStats extends WindowMeta, PopulationMeta {
+  outcome: ReviewValueOutcome;
+}
+
+/**
+ * Windowed on `first_raised_at` — "findings RAISED in the last N days" — not on
+ * `computed_at` (when the batch job happened to classify them, which says
+ * nothing about the review) and not on `pr_settled_at` (which would make the
+ * window a property of the team's merge cadence).
+ *
+ * Population: `finding_outcomes` has no `is_test` column of its own, so a
+ * finding inherits the population of its PR's reviews. A PR reviewed in BOTH
+ * populations therefore appears under both — which is why `sampleSize` and
+ * `otherPopulationCount` need not sum to the table's window total.
+ */
+export async function getReviewValueStats(sql: postgres.Sql, window: StatsWindow, population: Population): Promise<ReviewValueStats> {
+  const days = getWindowDays(window);
+  const testFlag = isTestFlag(population);
+
+  const rows = await sql<Array<{
+    did: string | null;
+    did_confidence: string | null;
+    said: string | null;
+    said_evidence: string | null;
+    lead_time_mins: number | null;
+  }>>`
+    SELECT f.did, f.did_confidence, f.said, f.said_evidence, f.lead_time_mins
+    FROM finding_outcomes f
+    WHERE f.first_raised_at > now() - (${days}::int * interval '1 day')
+      AND EXISTS (
+        SELECT 1 FROM pr_reviews r
+        WHERE r.pr_id = f.pr_id AND r.repo_key = f.repo_key AND r.is_test = ${testFlag}
+      )
+  `;
+
+  const [other] = await sql<Array<{ n: string }>>`
+    SELECT count(*)::text AS n
+    FROM finding_outcomes f
+    WHERE f.first_raised_at > now() - (${days}::int * interval '1 day')
+      AND EXISTS (
+        SELECT 1 FROM pr_reviews r
+        WHERE r.pr_id = f.pr_id AND r.repo_key = f.repo_key AND r.is_test = ${!testFlag}
+      )
+  `;
+
+  // Spend over the REVIEWS that produced these findings, joined on
+  // (pr_id, repo_key) — pr_id alone is not unique across repos. `sum` skips
+  // nulls silently, so `missing_cost` is reported beside it rather than left
+  // to make the total quietly incomplete.
+  const [spend] = await sql<Array<{ total: number | null; n: string; missing: string }>>`
+    SELECT sum(r.cost_usd) AS total,
+      count(*)::text AS n,
+      count(*) FILTER (WHERE r.cost_usd IS NULL)::text AS missing
+    FROM pr_reviews r
+    WHERE r.is_test = ${testFlag}
+      AND EXISTS (
+        SELECT 1 FROM finding_outcomes f
+        WHERE f.pr_id = r.pr_id AND f.repo_key = r.repo_key
+          AND f.first_raised_at > now() - (${days}::int * interval '1 day')
+      )
+  `;
+
+  return {
+    // sampleSize is FINDINGS here, not pr_reviews rows as on the other four
+    // endpoints — this card's subject is the finding, and `classifyWindowedResponse`
+    // must route a window with reviews but no classified findings to 'empty'.
+    ...buildWindowMeta(window, rows.length),
+    population,
+    otherPopulationCount: Number(other?.n ?? 0),
+    outcome: computeReviewValue(
+      rows.map((r) => ({
+        did: r.did,
+        didConfidence: r.did_confidence,
+        said: r.said,
+        saidEvidence: r.said_evidence,
+        leadTimeMins: r.lead_time_mins == null ? null : Number(r.lead_time_mins),
+      })),
+      {
+        totalCostUsd: Number(spend?.total ?? 0),
+        reviewCount: Number(spend?.n ?? 0),
+        reviewsMissingCost: Number(spend?.missing ?? 0),
+      },
+    ),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/drift
 // ---------------------------------------------------------------------------
 
