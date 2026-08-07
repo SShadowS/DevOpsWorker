@@ -1426,9 +1426,15 @@ export interface ReviewValueDisputed {
   reason: string;
 }
 
+/** Every count here is over findings whose `lead_time_mins` is RECORDED. That
+ *  qualifier is load-bearing and easy to drop: `beforeSettleCount === 0` does
+ *  NOT mean no finding was raised before its PR settled, only that none of the
+ *  ones we can see was — the card said the stronger thing for a round, in a
+ *  sentence `unrecordedCount` then contradicted. */
 export interface ReviewValueLeadTime {
-  /** Findings posted BEFORE the PR settled — the only ones where a lead time
-   *  is a lead time. */
+  /** Findings with a RECORDED lead time of >= 0: posted before the PR settled.
+   *  The only ones where a lead time is a lead time. Says nothing about the
+   *  `unrecordedCount` findings, whose settle order is unknown. */
   beforeSettleCount: number;
   /** Negative `lead_time_mins`: the review landed after the PR had already
    *  settled (a cherry-pick sanity review, or a post-merge review). Segmented
@@ -1438,6 +1444,9 @@ export interface ReviewValueLeadTime {
   /** Median over `beforeSettleCount` rows only. Median, not mean: the
    *  distribution has a long right tail (a PR left open for days). */
   medianMinsBeforeSettle: number | null;
+  /** Traced findings with `lead_time_mins` null — `prSettledAt` was unknown
+   *  when the sweep ran, or the column predates it. In NEITHER count above,
+   *  and the reason those two cannot be read as a partition of the window. */
   unrecordedCount: number;
 }
 
@@ -1445,7 +1454,14 @@ export interface ReviewValueLeadTime {
  *  review on these PRs carries no recorded cost — backfilling it can only
  *  RAISE the numerator. A machine-checkable state rather than a phrase buried
  *  in prose, so a test can pin the claim instead of a substring of the
- *  sentence that expresses it. */
+ *  sentence that expresses it.
+ *
+ *  One degenerate case the NAME overstates: with zero reviews at all,
+ *  `reviewsMissingCost` is also zero, so this reads `'exact'` for a sum over
+ *  an empty set. `buildSpendNote` says "zero rather than exact" there rather
+ *  than letting the name speak. Unreachable in practice — the findings query
+ *  requires a review in the population — but the flag alone does not rule it
+ *  out, so a caller must not read `'exact'` as "a real cost was measured". */
 export type NumeratorState = 'exact' | 'floor';
 
 /** Can the DENOMINATOR still move? `'will-grow'` while any finding is
@@ -1457,9 +1473,15 @@ export type NumeratorState = 'exact' | 'floor';
 export type DenominatorState = 'will-grow' | 'settled';
 
 export interface ReviewValueSpend extends ReviewValueSpendInput {
-  /** totalCostUsd / addressed. Null when nothing is confirmed acted on.
-   *  Reported ALONGSIDE judged coverage and never as a settled figure unless
-   *  BOTH states below say it is one. */
+  /** totalCostUsd / addressed. Null for EITHER of two disjoint reasons, and a
+   *  caller must not assume it means the first: (a) nothing is confirmed acted
+   *  on, so there is no denominator; or (b) no review on these PRs carries a
+   *  recorded cost, so the numerator is unknown rather than zero — dividing it
+   *  would render a measured-looking `$0.00` and assert the reviews were free.
+   *  The card distinguishes the two before rendering (`describeSpend` tests
+   *  the cost case FIRST, or an all-missing-cost window would be described as
+   *  "nothing is confirmed acted on"). Reported ALONGSIDE judged coverage and
+   *  never as a settled figure unless BOTH states below say it is one. */
   costPerAddressed: number | null;
   numeratorState: NumeratorState;
   denominatorState: DenominatorState;
@@ -1516,10 +1538,15 @@ export interface ReviewValueTraceability {
   untraceable: number;
   /** untraceable / raised, 0..1. Null when nothing was raised. */
   untraceableRate: number | null;
-  /** True when `untraceable` is FULLY explained by findings carrying no file
-   *  anchor. False means the two sources disagree for some other reason and
-   *  the gap is not understood — said out loud rather than presented as if it
-   *  were. */
+  /** `untraceable === noFileAnchor` — the gap is exactly the file-less count.
+   *  False covers TWO different disagreements, not one: a gap larger than the
+   *  file-less count (some of it unexplained), and a file-less count larger
+   *  than the gap (some file-less finding was traced anyway, which the
+   *  anchoring rule says cannot happen). `buildTraceabilityNote` distinguishes
+   *  them; consumers that only branch on this boolean must not describe it as
+   *  "part of the gap is unexplained", which is only the first case. Either
+   *  way it is said out loud rather than presented as if the gap were
+   *  understood. */
   reconciled: boolean;
   /** The measured count of raised read-band findings with no file anchor. */
   noFileAnchor: number;
@@ -1551,9 +1578,11 @@ export interface ReviewValueOutcome {
   /** addressed / judged — the rate the card leads with. Null when judged is 0
    *  (never NaN, never a fake 0%). */
   addressedRateOfJudged: number | null;
-  /** addressed / findingsRaised. A DIFFERENT, always-smaller number that is
-   *  equally true; both are carried so the card can print each with its own
-   *  denominator spelled out rather than picking one and hoping. */
+  /** addressed / findingsRaised. A DIFFERENT number that is equally true, and
+   *  never LARGER than `addressedRateOfJudged` — but not always smaller
+   *  either: at full judged coverage the two are equal, which is live in the
+   *  Test population today. Both are carried so the card can print each with
+   *  its own denominator spelled out rather than picking one and hoping. */
   addressedRateOfRaised: number | null;
   /** Counts for every `DID_LABELS` value plus any unrecognised label seen. */
   didBreakdown: Record<string, number>;

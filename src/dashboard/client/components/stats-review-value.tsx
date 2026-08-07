@@ -304,11 +304,15 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
   };
 }
 
-/** Caption under the verdict table. Was inline JSX with two hardcoded
- *  plurals and an unconditional "the rest reached only a majority" — which
- *  describes an empty set whenever every judged row was unanimous, a state
- *  that is reachable and was live at 7d/prod. Pulled out so it is swept and
- *  tested like every other count-bearing string here. */
+/** Caption under the verdict table. Was inline JSX, and its "the rest reached
+ *  only a majority" was wrong for TWO independent reasons — recording both,
+ *  because fixing only the first still leaves a false sentence:
+ *   1. it describes an empty set whenever every judged row was unanimous; and
+ *   2. more seriously, the remainder is not majority AT ALL. `unanimous` is
+ *      one value of `did_confidence`, which also holds `majority`, `split`,
+ *      `single-vote` and `none` — so no count of unanimous rows licenses any
+ *      statement about what the others were.
+ *  Pulled out of JSX so it is swept and tested like every other string here. */
 export function describeVerdictCaption(o: ReviewValueOutcome): string {
   const scope =
     `Shares are over the ${countOf(o.judged, 'JUDGED finding')}, not over all ${o.findingsRaised} raised.`;
@@ -332,7 +336,13 @@ export function describeVerdictCaption(o: ReviewValueOutcome): string {
 /** Optional and small, per the brief. The two populations are reported
  *  SEPARATELY and never averaged together: a negative lead time means the
  *  review landed after the PR had already settled, which is not a slow lead
- *  time, it is a different event. */
+ *  time, it is a different event.
+ *
+ *  There is a THIRD population, and every sentence below is scoped around it:
+ *  findings whose lead time is not recorded at all. `beforeSettleCount === 0`
+ *  therefore licenses only "no finding WE CAN SEE was raised before its PR
+ *  settled" — the unqualified version was live for a round, in a sentence the
+ *  unrecorded clause beside it then contradicted. */
 export function describeLeadTime(l: ReviewValueLeadTime): string {
   const b = l.beforeSettleCount;
   const a = l.afterSettleCount;
