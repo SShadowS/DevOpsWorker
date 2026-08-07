@@ -282,8 +282,28 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     expect(o.disputedAsWrong.measured).toBe(false);
     expect(o.disputedAsWrong.count).toBeNull();
     expect(o.disputedAsWrong.count).not.toBe(0);
+    // Same convention as `count`: a zero here would be a measured cross-tab of
+    // a population that was never measured.
+    expect(o.disputedAsWrong.unjudged).toBeNull();
+    expect(o.disputedAsWrong.unjudged).not.toBe(0);
     expect(o.disputedAsWrong.saidRecorded).toBe(0);
     expect(o.disputedAsWrong.reason.length).toBeGreaterThan(0);
+  });
+
+  // ENTAILMENT. The reason is rendered only when `saidRecorded === 0`, and that
+  // condition establishes that no row here carries a label — nothing about the
+  // classifier's existence. It asserted "it has not been built" for as long as
+  // that happened to be true, and stayed on the payload after the sweep ran and
+  // populated 72 of 135 live rows.
+  test('the not-measured reason does not claim the said phase is unbuilt', () => {
+    const reason = compute(mixedWindow(), spend()).disputedAsWrong.reason;
+    expect(reason).not.toContain('has not been built');
+    expect(reason).not.toContain('deliberately leaves null');
+    // It says what the condition DOES establish, and lists the causes it
+    // cannot distinguish rather than picking one.
+    expect(reason).toContain('No finding in this window carries a `said` label');
+    expect(reason).toContain('cannot tell them apart');
+    expect(reason).toContain('not measured rather than as zero');
   });
 
   test('starts measuring on its own once `said` is populated — no code change needed', () => {
@@ -302,6 +322,40 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     const o = compute([finding({ said: 'fixed' })], spend());
     expect(o.disputedAsWrong.measured).toBe(true);
     expect(o.disputedAsWrong.count).toBe(0);
+    expect(o.disputedAsWrong.unjudged).toBe(0);
+  });
+
+  test('the denominator is the LABELLED rows, not the traced ones and not the raised ones', () => {
+    // 3 traced, 2 labelled, 5 raised. Three candidate denominators, and only
+    // one of them is the population a `said` label can be read off.
+    const o = computeReviewValue(
+      [finding({ said: 'rejected-wrong' }), finding({ said: 'fixed' }), finding({ said: null })],
+      spend(),
+      { readBandRaised: 5, noFileAnchor: 2 },
+    );
+    expect(o.disputedAsWrong.saidRecorded).toBe(2);
+    expect(o.traceability.traced).toBe(3);
+    expect(o.findingsRaised).toBe(5);
+  });
+
+  test('the `did` cross-tab counts disputed rows with no verdict — the live shape', () => {
+    // Both disputed findings in production carry `did = null`.
+    const o = compute(
+      [
+        finding({ said: 'rejected-wrong', did: null }),
+        finding({ said: 'rejected-wrong', did: null }),
+        finding({ said: 'fixed', did: 'ADDRESSED' }),
+      ],
+      spend(),
+    );
+    expect(o.disputedAsWrong.count).toBe(2);
+    expect(o.disputedAsWrong.unjudged).toBe(2);
+  });
+
+  test('the cross-tab counts only DISPUTED rows — an unjudged row with another label is not one', () => {
+    const o = compute([finding({ said: 'rejected-wrong', did: 'not' }), finding({ said: 'fixed', did: null })], spend());
+    expect(o.disputedAsWrong.count).toBe(1);
+    expect(o.disputedAsWrong.unjudged).toBe(0);
   });
 });
 
@@ -702,7 +756,8 @@ describe('buildDidRows', () => {
 
 describe('describeDisputed', () => {
   test("renders 'not yet measured' with a reason, never a zero", () => {
-    const line = describeDisputed(compute(mixedWindow(), spend()).disputedAsWrong);
+    const o = compute(mixedWindow(), spend());
+    const line = describeDisputed(o.disputedAsWrong, o);
     expect(line.value).toBe('not yet measured');
     expect(line.value).not.toBe('0');
     expect(line.detail.length).toBeGreaterThan(0);
@@ -715,9 +770,151 @@ describe('describeDisputed', () => {
 
   test('renders the count as a count once measured, and says it is not a rate', () => {
     const o = compute([finding({ said: 'rejected-wrong' })], spend());
-    const line = describeDisputed(o.disputedAsWrong);
-    expect(line.value).toBe('1');
+    const line = describeDisputed(o.disputedAsWrong, o);
+    expect(line.value).toBe('1 of 1 said-labelled finding');
     expect(line.detail).toContain('not a rate');
+    // A count, never a percentage: n is 2 in production and the study that
+    // produced this taxonomy said in terms that a rate over single digits
+    // overstates it. No branch of this line may render one.
+    expect(line.value).not.toMatch(/%/);
+    expect(line.detail).not.toMatch(/%/);
+  });
+
+  // -------------------------------------------------------------------------
+  // THE DENOMINATOR. `2 of 72` and `2 of 135` are different claims and the
+  // headline figure at the top of the card is the raised total, so a bare "2"
+  // invites the second reading. Every assertion below is about which
+  // population the figure is over.
+  // -------------------------------------------------------------------------
+
+  test('the denominator travels with the figure — the value is never a bare count', () => {
+    // The live 30d/prod shape, scaled: 6 raised, 3 labelled, 2 disputed.
+    const o = computeReviewValue(
+      [finding({ said: 'rejected-wrong' }), finding({ said: 'rejected-wrong' }), finding({ said: 'fixed', did: 'ADDRESSED' })],
+      spend(),
+      { readBandRaised: 6, noFileAnchor: 3 },
+    );
+    const line = describeDisputed(o.disputedAsWrong, o);
+    expect(line.value).toBe('2 of 3 said-labelled findings');
+    expect(line.value).not.toBe('2');
+    // Never over raised, which is the number sitting at the top of the card.
+    expect(line.value).not.toContain('of 6');
+    expect(line.detail).toContain('the denominator is the 3 findings carrying a said label');
+    // The raised total is still stated — just not as this figure's denominator.
+    expect(line.detail).toContain('The other 3 raised findings carry no said label at all');
+  });
+
+  test('the contrast clause is OMITTED when every raised finding carries a label', () => {
+    // The live Test population: 2 raised, 2 traced, both labelled. "That is not
+    // all 2 raised" is simply false there — the same unbranched-clause defect
+    // the engagement line was corrected for, on the line next to it.
+    const o = compute([finding({ said: 'fixed', did: 'UNKNOWN' }), finding({ said: 'fixed', did: 'not' })], spend());
+    expect(o.disputedAsWrong.saidRecorded).toBe(o.findingsRaised);
+    const line = describeDisputed(o.disputedAsWrong, o);
+    expect(line.detail).not.toContain('The other');
+    expect(line.detail).not.toContain('raised finding');
+  });
+
+  test('the contrast clause states only that the rest are unlabelled, never WHY', () => {
+    // The gap has several causes (nothing written to read, a tied tally, no
+    // thread at all) and the table cannot say which applies to a given
+    // finding. Naming one is the unestablished-cause claim the coverage line
+    // was corrected for.
+    const o = computeReviewValue([finding({ said: 'fixed' })], spend(), { readBandRaised: 4, noFileAnchor: 2 });
+    const detail = describeDisputed(o.disputedAsWrong, o).detail;
+    expect(detail).toContain('carry no said label at all, which is not the same as carrying no dispute');
+    expect(detail).not.toContain('nobody wrote');
+    expect(detail).not.toContain('no thread');
+  });
+
+  test('a measured zero says it is a measured zero, and does not read as the not-measured line', () => {
+    const o = compute([finding({ said: 'fixed' }), finding({ said: 'ignored' })], spend());
+    const line = describeDisputed(o.disputedAsWrong, o);
+    expect(o.disputedAsWrong.count).toBe(0);
+    expect(line.value).toBe('0 of 2 said-labelled findings');
+    expect(line.value).not.toBe('not yet measured');
+    expect(line.detail).toContain('A measured zero, not an absence of measurement');
+    // ...and it is NOT dressed as the absence of a measurement.
+    expect(line.status).toBe('neutral');
+  });
+
+  test('the value form cannot be read as "0 of 2 HAVE a said label"', () => {
+    // "0 of 2 with a said label" — the engagement line's shape — parses just
+    // as easily as the not-measured claim. The adjective form does not: both
+    // parses of "0 of 2 said-labelled findings" mean the same thing.
+    const o = compute([finding({ said: 'fixed' }), finding({ said: 'ignored' })], spend());
+    expect(describeDisputed(o.disputedAsWrong, o).value).not.toContain('with a said label');
+  });
+
+  test('a denominator of 1 reads as English, and "of 0" is unreachable', () => {
+    const one = compute([finding({ said: 'rejected-wrong' })], spend());
+    expect(describeDisputed(one.disputedAsWrong, one).value).toBe('1 of 1 said-labelled finding');
+    expect(describeDisputed(one.disputedAsWrong, one).detail).toContain('the 1 finding carrying a said label');
+    // `measured` IS `saidRecorded > 0`, so the measured branch can never
+    // divide by an empty population — the engagement line's "no readable
+    // signal" escape hatch has nothing to guard here.
+    const none = compute([finding({ said: null })], spend());
+    expect(none.disputedAsWrong.measured).toBe(false);
+    expect(describeDisputed(none.disputedAsWrong, none).value).toBe('not yet measured');
+  });
+
+  test('the fraction cannot invert — a disputed row carries a label by definition', () => {
+    for (const rows of [
+      [finding({ said: 'rejected-wrong' })],
+      [finding({ said: 'rejected-wrong' }), finding({ said: 'rejected-wrong' }), finding({ said: null })],
+      [finding({ said: 'fixed' }), finding({ said: 'rejected-wrong' })],
+    ]) {
+      const d = compute(rows, spend()).disputedAsWrong;
+      expect(d.count!).toBeLessThanOrEqual(d.saidRecorded);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // The `did` cross-tab. Both disputed findings in production carry `did =
+  // null`: the team said the finding was wrong and no diff has been judged
+  // against it. Disclosed as a limitation, and only where there is one.
+  // -------------------------------------------------------------------------
+
+  test('all-unjudged reads "none of them", and claims only that no diff was judged', () => {
+    const o = compute([finding({ said: 'rejected-wrong' }), finding({ said: 'rejected-wrong' })], spend());
+    const caveat = describeDisputed(o.disputedAsWrong, o).caveat!;
+    expect(o.disputedAsWrong.unjudged).toBe(2);
+    expect(caveat).toContain('None of the 2 findings disputed here carries a verdict on the diff');
+    expect(caveat).toContain('cannot say whether the branch acted on any of them anyway');
+    // It must NOT promote "no verdict" into "the branch ignored it".
+    expect(caveat).not.toContain('ignored');
+    expect(caveat).not.toContain('was not acted on');
+  });
+
+  test('one disputed and unjudged reads as English, not "1 of the 1 findings"', () => {
+    const o = compute([finding({ said: 'rejected-wrong' })], spend());
+    const caveat = describeDisputed(o.disputedAsWrong, o).caveat!;
+    expect(caveat).toBe(
+      'The finding disputed here carries no verdict on the diff, so this card cannot say whether the branch acted on it anyway.',
+    );
+  });
+
+  test('a partly-judged cross-tab names both parts', () => {
+    const o = compute([finding({ said: 'rejected-wrong' }), finding({ said: 'rejected-wrong', did: 'not' })], spend());
+    const caveat = describeDisputed(o.disputedAsWrong, o).caveat!;
+    expect(o.disputedAsWrong.unjudged).toBe(1);
+    expect(caveat).toContain('1 of the 2 findings disputed here carries no verdict on the diff');
+  });
+
+  test('the cross-tab is OMITTED when every disputed finding has a verdict — a zero limitation is not a limitation', () => {
+    const o = compute(
+      [finding({ said: 'rejected-wrong', did: 'not' }), finding({ said: 'rejected-wrong', did: 'ADDRESSED' })],
+      spend(),
+    );
+    expect(o.disputedAsWrong.unjudged).toBe(0);
+    expect(describeDisputed(o.disputedAsWrong, o).caveat).toBeNull();
+  });
+
+  test('the cross-tab is OMITTED at a measured zero — there are no disputed findings to cross-tab', () => {
+    const o = compute([finding({ said: 'fixed' })], spend());
+    expect(o.disputedAsWrong.count).toBe(0);
+    expect(o.disputedAsWrong.unjudged).toBe(0);
+    expect(describeDisputed(o.disputedAsWrong, o).caveat).toBeNull();
   });
 });
 
@@ -909,7 +1106,7 @@ describe('count agreement across every rendered string', () => {
       describeSilentlyFixed(o),
       describeEngagement(o.engagement, o),
       describeSpend(o.spend, o.addressed, o),
-      describeDisputed(o.disputedAsWrong),
+      describeDisputed(o.disputedAsWrong, o),
     ];
     return [
       ...lines.flatMap((l) => [l.label, l.value, l.detail, l.caveat ?? '']),
@@ -933,6 +1130,26 @@ describe('count agreement across every rendered string', () => {
       [finding({ did: 'ADDRESSED', didConfidence: 'majority', saidEvidence: 'thread-reply', leadTimeMins: 5 })],
       { totalCostUsd: 100, reviewCount: 1, reviewsMissingCost: 1 },
       { readBandRaised: 1, noFileAnchor: 0 },
+    )],
+    // The disputed line's own strings only exist on the MEASURED branch, and
+    // every case above leaves `said` null, so without these the sweep renders
+    // "not yet measured" and checks none of them. Three shapes: one of
+    // everything; one where the counts differ so the fraction and the contrast
+    // clause both have to agree; and one at a measured zero.
+    ['everything at 1, said label present, disputed and unjudged', computeReviewValue(
+      [finding({ did: null, said: 'rejected-wrong', saidEvidence: 'thread-reply', leadTimeMins: 5 })],
+      { totalCostUsd: 100, reviewCount: 1, reviewsMissingCost: 1 },
+      { readBandRaised: 1, noFileAnchor: 0 },
+    )],
+    ['1 disputed of 2 labelled of 3 raised, one unjudged', computeReviewValue(
+      [finding({ did: null, said: 'rejected-wrong', saidEvidence: 'thread-reply' }), finding({ did: 'not', said: 'fixed', saidEvidence: 'thread-reply' })],
+      spend({ reviewCount: 1 }),
+      { readBandRaised: 3, noFileAnchor: 1 },
+    )],
+    ['a measured zero at a denominator of 1', computeReviewValue(
+      [finding({ did: 'ADDRESSED', said: 'fixed', saidEvidence: 'thread-reply' })],
+      spend({ reviewCount: 1 }),
+      { readBandRaised: 2, noFileAnchor: 1 },
     )],
     ['one untraceable, one traced', computeReviewValue(
       [finding({ did: 'ADDRESSED', saidEvidence: 'thread-reply' })],
@@ -1139,7 +1356,7 @@ describe('no clause points at a figure that does not exist', () => {
 
   test('the disputed line claims nothing about how large n is', () => {
     const o = compute([finding({ said: 'rejected-wrong' })], spend());
-    const line = describeDisputed(o.disputedAsWrong);
+    const line = describeDisputed(o.disputedAsWrong, o);
     // "n is small enough that a percentage would overstate it" is a claim
     // about a population that does not exist yet, and false at any scale.
     expect(line.detail).not.toContain('small enough');
@@ -1257,9 +1474,20 @@ describe('review-value structure', () => {
       describeSilentlyFixed(o),
       describeEngagement(o.engagement, o),
       describeSpend(o.spend, o.addressed, o),
-      describeDisputed(o.disputedAsWrong),
+      describeDisputed(o.disputedAsWrong, o),
     ];
     expect(lines.filter((l) => l.status === 'attention').map((l) => l.label)).toEqual(['Disputed as factually wrong']);
+  });
+
+  // The 'attention' treatment marks "this is not a measurement". Once the said
+  // sweep populates a window, the disputed line IS a measurement — including
+  // when it measures zero — and keeping the accent on it would say the
+  // opposite of what the data now supports.
+  test("a MEASURED disputed line drops 'attention' — including at a measured zero", () => {
+    const disputed = compute([finding({ said: 'rejected-wrong' })], spend());
+    expect(describeDisputed(disputed.disputedAsWrong, disputed).status).toBe('neutral');
+    const zero = compute([finding({ said: 'fixed' })], spend());
+    expect(describeDisputed(zero.disputedAsWrong, zero).status).toBe('neutral');
   });
 
   test('ScorecardLine.status is actually rendered — a builder-only field would make the flag decorative', () => {

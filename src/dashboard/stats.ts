@@ -1340,9 +1340,15 @@ export async function getOperationalStats(sql: postgres.Sql, window: StatsWindow
 //     reproduced 67% of the time on byte-identical input, which is why voting
 //     is 3 ballots and why `did` collapses to three values. Aggregates here are
 //     usable; a single row's verdict is not, and `reproducibilityNote` says so.
-//  3. `said` IS NOT POPULATED YET. The phase that fills it is not built, so
-//     anything keyed on `said` (notably "disputed as factually wrong") is
-//     reported as NOT MEASURED, never as zero — see `disputedAsWrong`.
+//  3. `said` IS POPULATED, BUT NOT ON EVERY ROW — AND THAT IS PERMANENT, NOT A
+//     BACKLOG. A said ballot is only spent on a finding with human text behind
+//     it, so a finding nobody answered keeps `said` null for good; a tied tally
+//     also stores null, with `said_confidence` recording the tie (see the
+//     column comments in src/db/postgres.ts). So anything keyed on `said` has
+//     its OWN denominator — the rows carrying a label — which is neither
+//     `judged` nor `raised`: live at 2026-08-07, 72 of 135 rows carry one while
+//     139 were raised. A window with NO labelled row is still reported as NOT
+//     MEASURED, never as zero — see `disputedAsWrong`.
 // ---------------------------------------------------------------------------
 
 /** One `finding_outcomes` row, reduced to the columns this computation reads.
@@ -1414,15 +1420,30 @@ export interface ReviewValueEngagement {
 
 export interface ReviewValueDisputed {
   /** False while no row carries a `said` label at all. Derived from the data,
-   *  not hardcoded: the day the phase that fills `said` runs, this flips to
-   *  true and `count` starts reporting on its own. */
+   *  not hardcoded — which is why this needed no code change on the day the
+   *  said sweep first ran: it flipped, and `count` started reporting, off the
+   *  rows alone. It can flip BACK for a window the sweep has not reached. */
   measured: boolean;
   /** Null — NOT zero — while `measured` is false. A zero here would assert
-   *  "nobody disputed anything", a claim this data cannot support. */
+   *  "nobody disputed anything", a claim this data cannot support. Once
+   *  measured, a zero is a real zero and the card says which it is. */
   count: number | null;
-  /** How many rows carry any `said` label, i.e. the population `count` would
-   *  be measured over. */
+  /** How many rows carry any `said` label — the population `count` is measured
+   *  over, and the ONLY defensible denominator for it. Not `judged` and not
+   *  `findingsRaised`: a said label is a fact about a finding's thread, and
+   *  most rows have no label for reasons that are not "nobody disputed it"
+   *  (nothing written to read, a tied tally, or no thread at all). `count <=
+   *  saidRecorded` holds by construction — a `rejected-wrong` row carries a
+   *  label by definition — so the fraction the card renders cannot invert. */
   saidRecorded: number;
+  /** Of `count`, how many carry no `did` verdict (`did` is null). Null — not
+   *  zero — while `measured` is false, for the same reason `count` is. Live at
+   *  2026-08-07 both disputed findings sit here: the team said the finding was
+   *  wrong and no diff has been judged against it, so the card must not be
+   *  read as saying the branch ignored them. It licenses NO claim about the
+   *  remainder — `count - unjudged` is "has a verdict", and which verdict is
+   *  the verdict table's business, not this line's. */
+  unjudged: number | null;
   reason: string;
 }
 
@@ -1596,8 +1617,9 @@ export interface ReviewValueOutcome {
    *  or a split is actually visible. */
   unanimous: number;
   /** `did = 'ADDRESSED' AND said_evidence = 'none'` — the code changed and
-   *  nobody said a word. Does not read `said` (unpopulated), so this is
-   *  measurable today. */
+   *  nobody said a word. Reads `said_evidence`, never `said`: these are by
+   *  definition the rows no said ballot was cast for, so keying this on the
+   *  label would count exactly none of them. */
   silentlyFixed: number;
   engagement: ReviewValueEngagement;
   disputedAsWrong: ReviewValueDisputed;
@@ -1729,8 +1751,14 @@ export function computeReviewValue(
   const silent = findings.filter((f) => f.saidEvidence === 'none').length;
   const engagementDenominator = engaged + silent;
 
-  // --- disputed (needs `said`, which nothing populates yet) ---
+  // --- disputed (needs `said`, which most rows will never carry) ---
+  // `saidRecorded` is the denominator, and it is deliberately NOT `traced`: a
+  // said ballot is only cast where there is human text to read, so a row with
+  // `said` null is not a row where nobody disputed anything — it is a row with
+  // no reading either way. Computed once here and carried on the payload so the
+  // card cannot quietly divide by something else.
   const saidRecorded = findings.filter((f) => f.said != null).length;
+  const disputed = findings.filter((f) => f.said === 'rejected-wrong');
 
   // --- lead time ---
   const withLeadTime = findings.filter((f) => f.leadTimeMins != null);
@@ -1781,13 +1809,22 @@ export function computeReviewValue(
     },
     disputedAsWrong: {
       measured: saidRecorded > 0,
-      count: saidRecorded > 0 ? findings.filter((f) => f.said === 'rejected-wrong').length : null,
+      count: saidRecorded > 0 ? disputed.length : null,
       saidRecorded,
+      unjudged: saidRecorded > 0 ? disputed.filter((f) => f.did == null).length : null,
+      // Rendered ONLY on the not-measured branch, so every clause is scoped to
+      // what `saidRecorded === 0` establishes: that no finding here carries a
+      // label. It must not say WHY beyond listing the possibilities — the
+      // three causes below are indistinguishable from this table, and naming
+      // one would be the same unestablished-cause claim the coverage line was
+      // corrected for. It also must not say the said phase is unbuilt: it is
+      // built, it has run, and this window simply has nothing labelled.
       reason:
-        'Requires the `said` label (fixed / rejected-wrong / rejected-wontfix / deferred / ignored), which the ' +
-        'classifier that populates this table deliberately leaves null — reading a dispute out of a thread is a ' +
-        'separate classification from reading engagement out of it, and it has not been built. Reported as not ' +
-        'measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+        'No finding in this window carries a `said` label, so there is nothing to count. Three different states ' +
+        'store the same null and this table cannot tell them apart: the outcome sweep has not classified these ' +
+        'findings for `said` yet, or nobody wrote anything for it to read (a said ballot is only spent on a finding ' +
+        'with a thread reply or PR discussion behind it), or the ballots tied. Reported as not measured rather than ' +
+        'as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
     },
     leadTime: {
       beforeSettleCount: beforeSettle.length,

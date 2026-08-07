@@ -2,7 +2,7 @@ import { reviewValueStats, statsWindow } from '../stats-store.ts';
 import type { FetchState } from '../stats-store.ts';
 import type { ReviewValueStats, ReviewValueOutcome, ReviewValueEngagement, ReviewValueDisputed, ReviewValueLeadTime, ReviewValueSpend } from '../../stats.ts';
 import { formatCost, formatPct } from '../format.ts';
-import { countOf, agree } from '../../count-phrase.ts';
+import { countOf, agree, itThem } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
 // Review value — the Stats tab's fifth slot. Answers "what did PR review
@@ -31,10 +31,15 @@ import { countOf, agree } from '../../count-phrase.ts';
 //      `n of m` fractions with the denominator NAMED in each, and coverage
 //      renders immediately beside them. A reader must not be able to carry
 //      away a percentage without knowing what it was over.
-//  R2. NOT MEASURED IS NOT ZERO. "Disputed as factually wrong" needs the
-//      `said` column, which nothing populates yet. It renders as an explicit
-//      "not yet measured" line with its one-line reason — never as 0, which
-//      would assert nobody disputed anything.
+//  R2. NOT MEASURED IS NOT ZERO, AND IT HAS ITS OWN DENOMINATOR. "Disputed as
+//      factually wrong" reads the `said` column, which most rows will never
+//      carry — a said ballot is only cast where a human wrote something. A
+//      window with no labelled row renders as an explicit "not yet measured"
+//      line with its reason, never as 0, which would assert nobody disputed
+//      anything. A window WITH labelled rows renders a COUNT, never a rate,
+//      over the rows carrying a label — not over all findings raised, which is
+//      a much larger and different number sitting on the same card (R1's
+//      hazard again, on the one line where the two are furthest apart).
 //  R3. NO TREND ARROWS. The per-acted-on cost is not comparable with the Cost
 //      panel's per-read-band-item figure (different denominators), so nothing
 //      on this card compares the two directionally. The server's own
@@ -211,10 +216,16 @@ export function describeEngagement(e: ReviewValueEngagement, o: ReviewValueOutco
   };
 }
 
-/** R2. Never a count when nothing measured it. The reason comes from the
- *  server (`disputedAsWrong.reason`) rather than being restated here, so
- *  there is one place to change when the `said` phase lands. */
-export function describeDisputed(d: ReviewValueDisputed): ScorecardLine {
+/** R2. Never a count when nothing measured it, and never a bare count when
+ *  something did. The not-measured reason comes from the server
+ *  (`disputedAsWrong.reason`) rather than being restated here, so there is one
+ *  place it can drift from what a null `said` actually means.
+ *
+ *  Takes the whole outcome, not just the disputed sub-object, for the same
+ *  reason `describeEngagement` does: the sentence has to name the denominator
+ *  it did NOT use, and `findingsRaised` is the number a reader would otherwise
+ *  divide by from the headline figure at the top of the card. */
+export function describeDisputed(d: ReviewValueDisputed, o: ReviewValueOutcome): ScorecardLine {
   if (!d.measured) {
     return {
       label: 'Disputed as factually wrong',
@@ -224,20 +235,88 @@ export function describeDisputed(d: ReviewValueDisputed): ScorecardLine {
       status: 'attention',
     };
   }
+  // `measured` is exactly `saidRecorded > 0`, so from here the denominator is
+  // at least 1: the "n of m" form below can never render "of 0", and the
+  // engagement line's "no readable signal" escape hatch is not needed. `count`
+  // and `unjudged` are non-null on this branch by the same construction, and
+  // `count <= saidRecorded` (a disputed row carries a label by definition), so
+  // the fraction cannot invert either.
+  const count = d.count!;
+  const unjudged = d.unjudged!;
+
+  // Conditional, and for the reason the engagement line's contrast clause is:
+  // at equal quantities "that is not all N raised" is simply false, and the
+  // Test population renders exactly that case today (2 raised, both labelled).
+  // It states only that the remainder carry no label — NOT why. The gap has
+  // several causes (nothing written, a tied tally, no thread at all) and this
+  // card cannot tell which applies to any given finding, so naming one would
+  // be the unestablished-cause claim the coverage line was corrected for.
+  const unlabelled = o.findingsRaised - d.saidRecorded;
+  const contrast =
+    unlabelled > 0
+      ? ` The other ${countOf(unlabelled, 'raised finding')} ${agree(unlabelled, 'carries', 'carry')} no said label ` +
+        'at all, which is not the same as carrying no dispute.'
+      : '';
+
+  // A measured zero must not look like the not-measured line one paragraph
+  // earlier in this same function. The value string already differs ("0 of 2
+  // said-labelled findings" vs "not yet measured"), but the distinction is the
+  // whole point of the line, so it is said in words too.
+  const zeroClause =
+    count === 0
+      ? 'A measured zero, not an absence of measurement: no finding carrying a said label in this window was ' +
+        'disputed as factually wrong. '
+      : '';
+
   return {
     label: 'Disputed as factually wrong',
-    value: `${d.count}`,
+    // The denominator travels WITH the figure, exactly as it does on the
+    // acted-on line. A bare "2" sits on a card whose headline number is the
+    // raised total, and 2-of-72 and 2-of-139 are different claims.
+    //
+    // "said-labelled findings", NOT the engagement line's "N of M with a said
+    // label" shape: that one is ambiguous at zero. "0 of 2 with a said label"
+    // parses just as easily as "0 of 2 HAVE a said label" — which is the
+    // not-measured claim this very line exists to distinguish a real zero
+    // from. With the qualifier as an adjective on the noun, both parses mean
+    // the same thing and neither is the wrong one.
+    value: `${count} of ${countOf(d.saidRecorded, 'said-labelled finding')}`,
     // Entailment: this used to assert "n is small enough that a percentage
     // would overstate what it can support" — a claim about the size of a
-    // population that does not exist yet, and one that becomes false as soon
-    // as `said` is populated at any scale. Reporting it as a count is a
-    // deliberate policy (the spec: "must show the count, never a rate"), so
-    // the sentence states the policy and the denominator, and claims nothing
-    // about how big n happens to be.
-    detail: `Reported as a count, not a rate, over the ${countOf(d.saidRecorded, 'finding')} carrying a said label.`,
-    caveat: null,
+    // population, and one that becomes false at scale. Reporting it as a count
+    // is a deliberate policy (the spec: "must show the count, never a rate"),
+    // so the sentence states the policy and the denominator, and claims
+    // nothing about how big n happens to be.
+    detail:
+      `${zeroClause}Reported as a count, not a rate: the denominator is the ` +
+      `${countOf(d.saidRecorded, 'finding')} carrying a said label.${contrast}`,
+    // The `did` cross-tab, disclosed only when there is something to disclose.
+    // At `unjudged === 0` there is no limitation to state and the clause would
+    // be a category that exists and is empty. It claims only what a null `did`
+    // establishes — that no diff was judged against the finding — and in
+    // particular does NOT say the branch ignored it.
+    caveat: unjudged > 0 ? describeDisputedUnjudged(count, unjudged) : null,
     status: 'neutral',
   };
+}
+
+/** The disputed-but-unjudged clause. Split out so its three forms are readable
+ *  side by side: the singular reads as English rather than "the 1 findings",
+ *  and the all-of-them case says "none of them" rather than "N of N", which
+ *  invites the reader to check the arithmetic instead of the claim. Only ever
+ *  called with `unjudged >= 1`, so no branch here describes an empty set. */
+function describeDisputedUnjudged(count: number, unjudged: number): string {
+  if (unjudged === count) {
+    return count === 1
+      ? 'The finding disputed here carries no verdict on the diff, so this card cannot say whether the branch acted ' +
+        'on it anyway.'
+      : `None of the ${count} findings disputed here carries a verdict on the diff, so this card cannot say whether ` +
+        'the branch acted on any of them anyway.';
+  }
+  return (
+    `${unjudged} of the ${countOf(count, 'finding')} disputed here ${agree(unjudged, 'carries', 'carry')} no verdict ` +
+    `on the diff, so this card cannot say whether the branch acted on ${itThem(unjudged)} anyway.`
+  );
 }
 
 export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewValueOutcome): ScorecardLine {
@@ -522,7 +601,7 @@ function ResponseSection({ o }: { o: ReviewValueOutcome }) {
     <ReviewValueSection title="What the team said" status="neutral">
       <ScorecardFigure line={describeSilentlyFixed(o)} />
       <ScorecardFigure line={describeEngagement(o.engagement, o)} />
-      <ScorecardFigure line={describeDisputed(o.disputedAsWrong)} />
+      <ScorecardFigure line={describeDisputed(o.disputedAsWrong, o)} />
     </ReviewValueSection>
   );
 }
