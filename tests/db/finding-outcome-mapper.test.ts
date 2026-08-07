@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { rowToFindingOutcome } from '../../src/db/finding-outcome-mapper.ts';
 
 const baseRow = {
-  pr_id: 52290, finding_key: 'abc123def4567890', repo_key: 'delivery-network',
+  pr_id: 52290, finding_key: 'abc123def4567890', repo_key: 'repo-a',
   severity: 'critical', title: 'Reminder e-documents fail', file: 'App/Foo.al',
   first_raised_at: '2026-07-30T08:05:00Z', pr_settled_at: '2026-07-31T14:03:00Z',
   lead_time_mins: 1918, said: 'fixed', said_quote: 'Aligned both paths',
@@ -16,7 +16,7 @@ describe('rowToFindingOutcome', () => {
     const o = rowToFindingOutcome(baseRow);
     expect(o.prId).toBe(52290);
     expect(o.findingKey).toBe('abc123def4567890');
-    expect(o.repoKey).toBe('delivery-network');
+    expect(o.repoKey).toBe('repo-a');
     expect(o.leadTimeMins).toBe(1918);
     expect(o.saidEvidence).toBe('pr-discussion');
     expect(o.didConfidence).toBe('unanimous');

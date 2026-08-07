@@ -170,8 +170,18 @@ CREATE TABLE IF NOT EXISTS finding_outcome_sweeps (
   batch_id    TEXT,
   swept_upto  TIMESTAMPTZ NOT NULL,
   status      TEXT NOT NULL,
+  -- The model the batch was SUBMITTED with. Persisted because a resumed run
+  -- grades results against the model it expected, and the resuming process may
+  -- be a different invocation with different flags: without this, resuming a
+  -- --model X batch without repeating that flag compares every result against
+  -- the default and marks the whole sweep model_verified = false. A false alarm
+  -- on the one signal that catches a real model substitution is worse than no
+  -- signal. Null on rows written before this column existed -> caller falls
+  -- back to the model it was invoked with.
+  model       TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS model TEXT;
 `;
 
 /**

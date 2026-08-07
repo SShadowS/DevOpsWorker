@@ -62,6 +62,15 @@ scripts/ab-results/
 # committed to this public repo — ignored here so they cannot be added by accident.
 /docs/superpowers/
 
+# Spec-driven-development working directory: plans, progress ledgers and review
+# notes for in-flight work. Same class of content as /docs/superpowers/ and worse
+# in one respect — a ledger records batch ids, database rows and measured spend,
+# and dollar figures say something real about the owner's operating costs to
+# anyone reading a public repo. It was protected only by a machine-local
+# .git/info/exclude, which does not travel with a clone: a fresh workspace would
+# have offered the whole directory to `git add .`.
+/.superpowers/
+
 # deployment-local Claude Code guidance (site-specific: internal repos, tools,
 # environments). Loads automatically at the workspace root. Never commit it here.
 /CLAUDE.local.md
