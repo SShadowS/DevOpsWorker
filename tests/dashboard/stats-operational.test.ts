@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   buildDailyReviewBars,
   buildReviewsChartView,
@@ -240,8 +242,47 @@ describe('buildToolMixSectionView', () => {
   // here — the check has no way to see a tool that has gone silent.
   test('all tools nonzero -> summary states the observed count and discloses the absent-tool blind spot', () => {
     const view = buildToolMixSectionView([toolMixFixture({ tool: 'Grep' }), toolMixFixture({ tool: 'Read', totalCalls: 40 })]);
-    expect(view.summary).toContain('None of the 2 observed tool(s) had zero calls');
+    expect(view.summary).toContain('None of the 2 observed tools had zero calls');
     expect(view.summary).toContain('does not appear in tool_calls at all');
+  });
+
+  // Count agreement (Task 7): the all-clear summary used to hard-code
+  // "tool(s)" — a literal placeholder that rendered unchanged for every n,
+  // including 1, where the correct reading is "tool" (no s). `rows.length`
+  // is always >= 1 on this branch (the zero-row case has its own earlier
+  // branch, tested above with an empty array), so 1 is a reachable value in
+  // production, not a hypothetical.
+  test('all-clear at n=1 reads "1 observed tool", not "1 observed tool(s)"', () => {
+    const view = buildToolMixSectionView([toolMixFixture({ tool: 'Grep' })]);
+    expect(view.summary).toBe(
+      'None of the 1 observed tool had zero calls in this window. A tool that is never called does not appear in ' +
+      'tool_calls at all and therefore cannot be listed here — this table can only speak to tools that fired at ' +
+      'least once, not to ones that have gone silent.',
+    );
+    expect(view.summary).not.toContain('(s)');
+  });
+
+  test('all-clear at n=2 reads "2 observed tools"', () => {
+    const view = buildToolMixSectionView([toolMixFixture({ tool: 'Grep' }), toolMixFixture({ tool: 'Read', totalCalls: 40 })]);
+    expect(view.summary).toContain('None of the 2 observed tools had zero calls');
+  });
+
+  // The attention summary's denominator (`rows.length`, the total tool
+  // count) has the same defect: "1 of 1 tool(s)" is reachable whenever a
+  // window recorded exactly one tool, and that one tool happened to be the
+  // zero-call one.
+  test('attention summary at a denominator of 1 reads "1 of 1 tool", not "1 of 1 tool(s)"', () => {
+    const view = buildToolMixSectionView([toolMixFixture({ tool: 'lsp', totalCalls: 0, avgPerReview: 0, reviewsUsing: 0 })]);
+    expect(view.summary).toContain('1 of 1 tool had ZERO calls');
+    expect(view.summary).not.toContain('(s)');
+  });
+
+  test('attention summary at a denominator of 2 reads "1 of 2 tools"', () => {
+    const view = buildToolMixSectionView([
+      toolMixFixture({ tool: 'Grep', totalCalls: 300 }),
+      toolMixFixture({ tool: 'lsp', totalCalls: 0, avgPerReview: 0, reviewsUsing: 0 }),
+    ]);
+    expect(view.summary).toContain('1 of 2 tools had ZERO calls');
   });
 
   test('the live lsp:0 case -> attention, named explicitly, not silently sorted to the tail', () => {
@@ -329,6 +370,27 @@ describe('buildErrorBreakdownSectionView', () => {
     const view = buildErrorBreakdownSectionView(errorClassificationFixture({ total: 1, categories: { 'rate-limit': 1, 'no-result': 0, 'schema-validation': 0, other: 0 }, exemplars: { 'rate-limit': 'Rate limit hit during "pr-reviewer": 11am (UTC)' } }));
     expect(view.rows.find((r) => r.key === 'no-result')?.exemplar).toBeNull();
   });
+
+  // Count agreement (Task 7): `total` fed a hard-coded "error(s)" literal.
+  // The total===0 branch is a separate hand-written sentence (tested above)
+  // and never reaches this clause; total===1 is the reachable singular case
+  // for the clause under test.
+  test('total===1 reads "1 error recorded", not "1 error(s) recorded"', () => {
+    const view = buildErrorBreakdownSectionView(errorClassificationFixture({
+      total: 1,
+      categories: { 'rate-limit': 0, 'no-result': 1, 'schema-validation': 0, other: 0 },
+    }));
+    expect(view.summary).toContain('1 error recorded in this window');
+    expect(view.summary).not.toContain('(s)');
+  });
+
+  test('total===2 reads "2 errors recorded"', () => {
+    const view = buildErrorBreakdownSectionView(errorClassificationFixture({
+      total: 2,
+      categories: { 'rate-limit': 0, 'no-result': 1, 'schema-validation': 1, other: 0 },
+    }));
+    expect(view.summary).toContain('2 errors recorded in this window');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -362,5 +424,105 @@ describe('buildOperationalPanelView', () => {
     const view = buildOperationalPanelView(state);
     expect(view.status).toBe('ready');
     expect(view.data).toBe(data);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Count agreement — structural guard (Task 7).
+//
+// Seven of the ten sites this task fixes are hand-written template literals
+// directly inside JSX render functions (ReviewsPerDayChart,
+// DurationTurnsSection, ToolMixSection, RepoBreakdownSection,
+// ErrorBreakdownSection), never routed through a pure builder — unlike
+// buildToolMixSectionView/buildErrorBreakdownSectionView above, there is no
+// value a `describe(...)`-style test can call and assert on. The task's
+// "Do NOT restructure / extract view models" constraint rules out adding new
+// pure string functions purely to create that seam.
+//
+// So this mirrors the "review-value structure" block in
+// stats-review-value.test.ts (source-text assertions, for properties a value
+// assertion cannot reach) rather than rendering a component tree, which
+// stats-costquality.test.ts's convention (repeated at the top of this file)
+// rules out. A `(s)` literal reappearing ANYWHERE in this file — at any of
+// these seven sites, or a new one introduced later — makes the sweep fail;
+// that is what stops the next edit reintroducing the class here, the same
+// job the value-level tests above do for the two sites that are pure
+// functions.
+// ---------------------------------------------------------------------------
+
+describe('operational card — count agreement in JSX-only prose (structural guard)', () => {
+  const cardSrc = readFileSync(
+    fileURLToPath(new URL('../../src/dashboard/client/components/stats-operational.tsx', import.meta.url)),
+    'utf-8',
+  );
+
+  // Excludes the one legitimate `(s)` substring in the file: the arrow-fn
+  // parameter `.map((s) => ...)` in buildDailyReviewBars, where `(s)` is
+  // preceded by the call's own opening paren, never by a letter — a
+  // hand-written prose placeholder is always `word(s)`, preceded by a letter.
+  const HANDWRITTEN_S_PLACEHOLDER = /(?<!\()\(s\)/;
+
+  test('the guard regex actually catches a placeholder and ignores the one legitimate (s) in the file', () => {
+    expect(HANDWRITTEN_S_PLACEHOLDER.test('tool(s)')).toBe(true);
+    expect(HANDWRITTEN_S_PLACEHOLDER.test('.map((s) => [s.date, s.count])')).toBe(false);
+  });
+
+  test('no hand-written "(s)" placeholder survives anywhere in the file', () => {
+    expect(cardSrc).not.toMatch(HANDWRITTEN_S_PLACEHOLDER);
+  });
+
+  // 385/404 mirror defect: 385 hard-coded the PLURAL ("calendar days") with
+  // no agreement at all, rather than a "(s)" placeholder, so the sweep above
+  // does not catch it on its own — checked directly here.
+  test('the aria-label no longer hard-codes the plural "calendar days"', () => {
+    expect(cardSrc).not.toContain('calendar days had zero reviews recorded');
+  });
+
+  // 385 (aria-label, screen reader) and 404 (visible note) state the same
+  // fact in two channels and must render the same grammar for the same
+  // values (brief's explicit requirement). Both now call the byte-identical
+  // expression, which makes that a construction guarantee rather than
+  // something that has to be kept in sync by hand.
+  test('385 (aria-label) and 404 (visible note) call the identical countOf expression', () => {
+    const occurrences = cardSrc.split("countOf(view.totalDays, 'calendar day')").length - 1;
+    expect(occurrences).toBe(2);
+  });
+
+  test('251/267 (tool mix) and 323 (error breakdown) route through countOf, not a literal', () => {
+    expect(cardSrc).toContain("countOf(rows.length, 'observed tool')");
+    expect(cardSrc).toContain("countOf(rows.length, 'tool')");
+    expect(cardSrc).toContain("countOf(errorClassification.total, 'error')");
+  });
+
+  test('437/438 (duration & turns note) route all three counts through countOf', () => {
+    expect(cardSrc).toContain("countOf(duration.sampleSize, 'row')");
+    expect(cardSrc).toContain("countOf(turns.sampleSize, 'row')");
+    expect(cardSrc).toContain("countOf(data.sampleSize, 'total row')");
+  });
+
+  test('485 (tool mix average note) routes through countOf', () => {
+    expect(cardSrc).toContain("countOf(data.sampleSize, 'review')");
+  });
+
+  test('521 (repo breakdown note) routes both counts through countOf', () => {
+    expect(cardSrc).toContain("countOf(data.perRepo.length, 'repo')");
+  });
+
+  test('571 (unclassified-error caveat) routes through countOf', () => {
+    expect(cardSrc).toContain("countOf(view.otherCount, 'error')");
+  });
+
+  // 393 (bar title) already had correct behaviour via a hand-written ternary
+  // — not one of the ten defect sites, but the brief invited using the
+  // helper here too for consistency. Not a behaviour change: countOf(n,
+  // 'review') renders identically to the ternary it replaces (both verified
+  // in the evidence script — see task-7-report.md).
+  test('393 (bar title) uses the helper for consistency, not a hand-written ternary', () => {
+    expect(cardSrc).toContain("countOf(b.count, 'review')");
+    expect(cardSrc).not.toContain("review${b.count === 1 ? '' : 's'}");
+  });
+
+  test('the file actually imports countOf — a guard against the calls above being dead literals in a comment', () => {
+    expect(cardSrc).toMatch(/import\s*\{\s*countOf\s*\}\s*from\s*'\.\.\/\.\.\/count-phrase\.ts'/);
   });
 });

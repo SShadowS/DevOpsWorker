@@ -2,6 +2,7 @@ import { operationalStats, statsWindow } from '../stats-store.ts';
 import type { FetchState } from '../stats-store.ts';
 import type { OperationalStats, ToolMixEntry, ErrorCategory, ErrorClassificationSummary } from '../../stats.ts';
 import { formatDurationDetailed } from '../format.ts';
+import { countOf } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
 // Operational panel (Task 9) — Section E, "how is the machine actually
@@ -248,7 +249,7 @@ export function buildToolMixSectionView(toolMix: ToolMixEntry[]): ToolMixSection
     return {
       status: 'ok',
       summary:
-        `None of the ${rows.length} observed tool(s) had zero calls in this window. A tool that is never called ` +
+        `None of the ${countOf(rows.length, 'observed tool')} had zero calls in this window. A tool that is never called ` +
         'does not appear in tool_calls at all and therefore cannot be listed here — this table can only speak to ' +
         'tools that fired at least once, not to ones that have gone silent.',
       rows,
@@ -264,7 +265,7 @@ export function buildToolMixSectionView(toolMix: ToolMixEntry[]): ToolMixSection
   return {
     status: 'attention',
     summary:
-      `${zero.length} of ${rows.length} tool(s) had ZERO calls in this window: ${zero.map((z) => z.tool).join(', ')} ` +
+      `${zero.length} of ${countOf(rows.length, 'tool')} had ZERO calls in this window: ${zero.map((z) => z.tool).join(', ')} ` +
       '— an expected tool that never fired is a finding, not an empty row.',
     rows,
   };
@@ -320,7 +321,7 @@ export function buildErrorBreakdownSectionView(errorClassification: ErrorClassif
   const otherCount = errorClassification.categories.other;
   const summary = errorClassification.total === 0
     ? '0 errors recorded in this window — a real, verified reading, not "we cannot tell."'
-    : `${errorClassification.total} error(s) recorded in this window: ${rateLimitCount} rate-limit, ` +
+    : `${countOf(errorClassification.total, 'error')} recorded in this window: ${rateLimitCount} rate-limit, ` +
       `${errorClassification.categories['no-result']} no-result, ${errorClassification.categories['schema-validation']} ` +
       `schema-validation, ${otherCount} unclassified.`;
   return { status: rateLimitCount > 0 ? 'attention' : 'ok', summary, rows, otherCount };
@@ -382,7 +383,7 @@ function ReviewsPerDayChart({ view }: { view: ReviewsChartView }) {
       <div
         class="operational-chart"
         role="img"
-        aria-label={`Reviews per day: ${view.averageText}. ${view.zeroDays} of ${view.totalDays} calendar days had zero reviews recorded.`}
+        aria-label={`Reviews per day: ${view.averageText}. ${view.zeroDays} of ${countOf(view.totalDays, 'calendar day')} had zero reviews recorded.`}
       >
         <div class="operational-chart__bars">
           {view.bars.map((b) => (
@@ -390,7 +391,7 @@ function ReviewsPerDayChart({ view }: { view: ReviewsChartView }) {
               key={b.date}
               class={`operational-chart__bar ${b.count === 0 ? 'operational-chart__bar--zero' : ''}`}
               style={{ height: `${b.heightPct}%` }}
-              title={`${b.date}: ${b.count} review${b.count === 1 ? '' : 's'}`}
+              title={`${b.date}: ${countOf(b.count, 'review')}`}
             />
           ))}
         </div>
@@ -401,7 +402,7 @@ function ReviewsPerDayChart({ view }: { view: ReviewsChartView }) {
       </div>
       <p class="operational-section__summary">{view.averageText}</p>
       <p class="operational-section__note">
-        {view.zeroDays} of {view.totalDays} calendar day(s) shown had zero reviews recorded — rendered as a
+        {view.zeroDays} of {countOf(view.totalDays, 'calendar day')} shown had zero reviews recorded — rendered as a
         zero-height (muted) bar, not omitted. The first bar may reflect a partial day: the window's start is a
         rolling timestamp, not midnight.
       </p>
@@ -434,8 +435,8 @@ function DurationTurnsSection({ data }: { data: OperationalStats }) {
         <dd>{turns.p90Text}</dd>
       </dl>
       <p class="operational-section__note">
-        Duration computed over {duration.sampleSize} row(s) with duration recorded; turns over {turns.sampleSize} row(s)
-        with turns recorded — each may differ from this window's {data.sampleSize} total row(s).
+        Duration computed over {countOf(duration.sampleSize, 'row')} with duration recorded; turns over {countOf(turns.sampleSize, 'row')}
+        with turns recorded — each may differ from this window's {countOf(data.sampleSize, 'total row')}.
       </p>
     </OperationalSection>
   );
@@ -482,7 +483,7 @@ function ToolMixSection({ data }: { data: OperationalStats }) {
       </p>
       <ToolMixTable rows={view.rows} />
       <p class="operational-section__note">
-        Average per review is divided by all {data.sampleSize} review(s) in this window, not just the reviews that
+        Average per review is divided by all {countOf(data.sampleSize, 'review')} in this window, not just the reviews that
         called a given tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a
         shrunk denominator (same convention `aggregateToolMix`, stats.ts, documents server-side).
       </p>
@@ -518,7 +519,7 @@ function RepoBreakdownSection({ data }: { data: OperationalStats }) {
     <OperationalSection title="Repo breakdown" status="neutral">
       <RepoBreakdownTable rows={data.perRepo} />
       <p class="operational-section__note">
-        {data.perRepo.length} repo(s) across {data.sampleSize} review(s) in this window — every row counts here
+        {countOf(data.perRepo.length, 'repo')} across {countOf(data.sampleSize, 'review')} in this window — every row counts here
         (unlike the Cost card's per-repo table, scoped to rows with cost recorded).
       </p>
     </OperationalSection>
@@ -568,7 +569,7 @@ function ErrorBreakdownSection({ data }: { data: OperationalStats }) {
       {view.otherCount > 0 && (
         <p class="operational-section__note">
           <strong class="operational-tag operational-tag--caveat">Known instrument caveat: </strong>
-          {view.otherCount} error(s) matched none of the three known failure shapes this classifier recognises — a
+          {countOf(view.otherCount, 'error')} matched none of the three known failure shapes this classifier recognises — a
           fact about this classifier's own coverage (it may need a new pattern), not necessarily a claim that the
           pipeline itself got less reliable. A growing count here is the signal to watch.
         </p>
