@@ -1,5 +1,6 @@
 /**
- * Row ⇄ object mapping for `finding_outcomes`. Pure — no I/O, no `sql` handle.
+ * Row ⇄ object mapping for `finding_outcomes`. Pure aside from a diagnostic
+ * `console.warn` — no database or network I/O, no `sql` handle.
  *
  * Separate from the sweep that writes these rows because that sweep lives in the private
  * overlay (it imports the repo registry) while the shape of the table is generic. Keeping
@@ -84,8 +85,8 @@ export const SAID_LABELS: readonly SaidLabel[] =
  *  Keep in sync with the type above. */
 export const DID_LABELS: readonly DidLabel[] = ['ADDRESSED', 'not', 'UNKNOWN', 'SPLIT'];
 
-const SAID_LABEL_SET: ReadonlySet<string> = new Set(SAID_LABELS);
-const DID_LABEL_SET: ReadonlySet<string> = new Set(DID_LABELS);
+const SAID_LABEL_SET: ReadonlySet<SaidLabel> = new Set(SAID_LABELS);
+const DID_LABEL_SET: ReadonlySet<DidLabel> = new Set(DID_LABELS);
 
 /** Distinct "<column>:<value>" pairs already warned about, so a batch of rows
  *  sharing one bad value warns once — not once per row. Keyed by column so
@@ -103,14 +104,20 @@ const warnedUnknownLabels = new Set<string>();
  * unrecognised value: silently nulling a REAL label would be a different,
  * worse failure than the one this guards against, so the substitution must
  * stay visible somewhere.
+ *
+ * `legal` is typed `ReadonlySet<T>`, not `ReadonlySet<string>`, so pairing
+ * the wrong label set with the wrong `column`/type argument (e.g. a
+ * `DID_LABEL_SET` passed for a call typed `<SaidLabel>`) is a compile error,
+ * not a silent runtime gap — the same class of mistake this function exists
+ * to catch, one level up.
  */
 function validateLabel<T extends string>(
   value: string | null,
-  legal: ReadonlySet<string>,
+  legal: ReadonlySet<T>,
   column: string,
 ): T | null {
   if (value === null) return null;
-  if (legal.has(value)) return value as T;
+  if (legal.has(value as T)) return value as T;
   const key = `${column}:${value}`;
   if (!warnedUnknownLabels.has(key)) {
     warnedUnknownLabels.add(key);

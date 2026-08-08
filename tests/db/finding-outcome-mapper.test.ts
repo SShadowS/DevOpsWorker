@@ -99,6 +99,7 @@ describe('rowToFindingOutcome', () => {
     });
     expect(o.file).toBeNull();
     expect(o.prSettledAt).toBeNull();
+    expect(o.did).toBeNull();
     expect(o.didVotes).toBeNull();
     expect(o.saidConfidence).toBeNull();
     expect(o.saidVotes).toBeNull();
