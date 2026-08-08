@@ -426,10 +426,14 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     //
     // The closing clause here is "cannot confirm", NOT "nothing here
     // checked" — a prior round left the tail gated on `tied === 0` alone,
-    // which let it leak into exactly this state: a `saidConfidence` of
-    // `'unanimous'` means three ballots WERE graded (a stale pre-guard
-    // writer's signature, per the comment on `unrecognized`), so "nothing
-    // checked" would be false, not merely unproven.
+    // which let it leak into exactly this state. A `saidConfidence` of
+    // `'unanimous'` beside a null `said` is the signature of a writer that
+    // graded ballots and dropped the label (per the comment on `unrecognized`),
+    // so this line has no basis for "nothing checked" — which is why the tail
+    // says it cannot confirm either way rather than asserting the opposite.
+    // "Cannot confirm" is the whole window's state HERE only because no tie is
+    // present: with one, the line could confirm a check ran, and the tail names
+    // it and scopes this doubt to the unrecognized rows instead (see below).
     test('a said_confidence value outside {null, split} lands in an explicit residual bucket, not "no ballot"', () => {
       const rows = [finding({ saidConfidence: 'unanimous', saidEvidence: 'none' })];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
@@ -455,17 +459,20 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         'balloted and tied (`said_confidence` = `split`), 1 carries no thread reply or PR discussion on record ' +
         'at all, so no ballot was ever cast for it, and 2 carry a `said_confidence` value this line does not ' +
         'recognize. Reported as not measured rather than as zero: a zero would assert nobody disputed a ' +
-        'finding, and this line cannot confirm whether anything here was checked.',
+        'finding; a tied ballot settled no verdict either way, and this line cannot confirm what was checked ' +
+        'for the findings whose `said_confidence` it does not recognize.',
       );
     });
 
-    // The residual "cannot confirm" tail takes priority over the tied-aware
-    // tail whenever BOTH are present in the same window — the mix above pins
-    // this with a tied row present, this test isolates the priority claim
-    // itself: unrecognized wins even though a tie is also in the mix, because
-    // "a tied ballot settled no verdict either way" would silently drop the
-    // caveat the unrecognized row needs.
-    test('unrecognized takes priority over the tied-aware closing clause when both are present', () => {
+    // A tie AND an unrecognized row in the same window: the tail must render
+    // BOTH facts. An earlier round let the residual clause win outright, so the
+    // string asserted a ballot was cast and tied and then, in the very next
+    // sentence, that it "cannot confirm whether ANYTHING here was checked" —
+    // asserting and denying the same proposition. Scoping the residual WITHOUT
+    // naming the tie is the mirror-image defect: it drops the one thing in the
+    // window this line positively knows was checked. So: tie named, residual
+    // scoped to its own rows, and neither unscoped variant present.
+    test('a tie beside an unrecognized row renders both facts, each scoped to its own rows', () => {
       const withTie = compute(
         [
           finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
@@ -473,8 +480,19 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         ],
         spend(),
       ).disputedAsWrong.reason!;
-      expect(withTie).toContain('this line cannot confirm whether anything here was checked');
-      expect(withTie).not.toContain('a tied ballot settled no verdict either way');
+      expect(withTie).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding was ' +
+        'balloted and tied (`said_confidence` = `split`) and 1 carries a `said_confidence` value this line ' +
+        'does not recognize. Reported as not measured rather than as zero: a zero would assert nobody ' +
+        'disputed a finding; a tied ballot settled no verdict either way, and this line cannot confirm what ' +
+        'was checked for the finding whose `said_confidence` it does not recognize.',
+      );
+      // The tie survives...
+      expect(withTie).toContain('a tied ballot settled no verdict either way');
+      // ...the residual doubt is scoped to the rows it covers, not to the window...
+      expect(withTie).toContain('cannot confirm what was checked for the finding whose');
+      // ...and neither the window-wide denial nor "nothing checked" appears.
+      expect(withTie).not.toContain('cannot confirm whether anything here was checked');
       expect(withTie).not.toContain('which nothing here checked');
     });
 
@@ -562,22 +580,30 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       }
     });
 
-    // The closing "why not zero" clause must never say "nothing here
-    // checked" where a tied ballot is in the mix — three ballots WERE cast
-    // and asked exactly this question, which contradicts "nothing checked"
-    // two clauses earlier in the same sentence.
-    test('the closing clause never says "nothing here checked" where a tie is present', () => {
-      const pureTied = compute([finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
-      expect(pureTied).not.toContain('nothing here checked');
-
-      const mixedWithTie = compute(
-        [
-          finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
-          finding({ saidConfidence: null, saidEvidence: 'none' }),
-        ],
-        spend(),
-      ).disputedAsWrong.reason!;
-      expect(mixedWithTie).not.toContain('nothing here checked');
+    // The closing "why not zero" clause must never deny that anything here was
+    // checked where a tied ballot is in the mix — three ballots WERE cast and
+    // asked exactly this question, and the string says so in the sentence right
+    // before the denial. There are two ways to phrase that denial and
+    // this line has shipped both: "nothing here checked" outright, and "cannot
+    // confirm whether ANYTHING here was checked", which denies the line's own
+    // knowledge of a check it just reported. Both are barred wherever a tie is
+    // present, whatever else is in the window.
+    test('the closing clause never denies a check happened where a tie is present', () => {
+      const DENIALS = ['nothing here checked', 'cannot confirm whether anything here was checked'];
+      const tiedRow = finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' });
+      const withTie: Array<[string, ReviewValueFindingRow[]]> = [
+        ['tie alone', [tiedRow]],
+        ['tie + no ballot', [tiedRow, finding({ saidConfidence: null, saidEvidence: 'none' })]],
+        ['tie + not yet classified', [tiedRow, finding({ saidConfidence: null, saidEvidence: 'thread-reply' })]],
+        ['tie + unrecognized', [tiedRow, finding({ saidConfidence: 'unanimous', saidEvidence: 'none' })]],
+      ];
+      for (const [label, rows] of withTie) {
+        const reason = compute(rows, spend()).disputedAsWrong.reason!;
+        expect(reason, `${label}: the tie must be named`).toContain('a tied ballot settled no verdict either way');
+        for (const denial of DENIALS) {
+          expect(reason, `${label}: must not contain "${denial}"`).not.toContain(denial);
+        }
+      }
 
       // ...and conversely, "settled no verdict" must not appear where there
       // is no tie — it would assert a check that never happened.
@@ -586,37 +612,89 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(noTie).not.toContain('settled no verdict');
     });
 
-    // The three closing-clause states are mutually exclusive: exactly one of
-    // {"nothing here checked", "settled no verdict", "cannot confirm"} may
-    // appear, gated on `tied === 0 && unrecognized === 0` /
-    // `tied > 0 && unrecognized === 0` / `unrecognized > 0` respectively. This
-    // is the necessary-vs-sufficient defect a prior round shipped: gating
-    // solely on `tied === 0` made "nothing checked" render for an
-    // unrecognized-only window too.
-    test('the three closing-clause states never overlap, across all four bucket combinations', () => {
-      const NOTHING_CHECKED = 'which nothing here checked';
-      const TIED_SETTLED = 'and a tied ballot settled no verdict either way';
-      const CANNOT_CONFIRM = 'and this line cannot confirm whether anything here was checked';
-      const allClauses = [NOTHING_CHECKED, TIED_SETTLED, CANNOT_CONFIRM];
+    // THE FULL TRUTH TABLE. Four buckets give FIFTEEN non-empty combinations,
+    // not four — and the previous version of this test walked four of them while
+    // claiming "all four bucket combinations" in its name, never exercising `N`
+    // at all. Of the four states the closing clause was rendering falsely at the
+    // time (T+U, T+N+U, T+E+U, T+N+E+U) that table reached exactly one, T+U, and
+    // pinned the false rendering as the expected output.
+    //
+    // The combinations are GENERATED from `bucketRow`'s keys rather than hand-
+    // listed, so no combination of the declared buckets can be skipped, and
+    // declaring a fifth bucket here forces expectations for all 31: the key-set
+    // assertion below fails until every new combination has one. The expected
+    // tail per combination is written out by hand, because deriving it would
+    // just restate the gate this test exists to check. T = tied,
+    // N = not-yet-classified, E = no-engaged-evidence,
+    // U = unrecognized `said_confidence`.
+    //
+    // Only (tied > 0, unrecognized > 0) selects the tail, so four tails cover
+    // all fifteen: a tie in the mix ⇒ the tie is named; an unrecognized row in
+    // the mix ⇒ its doubt is voiced, window-wide where there is no tie for it to
+    // contradict and scoped to its own rows where there is; neither ⇒ nothing
+    // checked.
+    test('all fifteen non-empty bucket combinations render exactly one tail, and it is the true one', () => {
+      const NOTHING_CHECKED = 'a finding, which nothing here checked.';
+      const TIED_SETTLED = 'a finding, and a tied ballot settled no verdict either way.';
+      const CANNOT_CONFIRM = 'a finding, and this line cannot confirm whether anything here was checked.';
+      const TIED_AND_SCOPED_RESIDUAL =
+        'a finding; a tied ballot settled no verdict either way, and this line cannot confirm what was checked ' +
+        'for the finding whose `said_confidence` it does not recognize.';
+      const allTails = [NOTHING_CHECKED, TIED_SETTLED, CANNOT_CONFIRM, TIED_AND_SCOPED_RESIDUAL];
 
-      const cases: Array<[string, ReturnType<typeof finding>[], string]> = [
-        ['no ballot only', [finding({ saidConfidence: null, saidEvidence: 'none' })], NOTHING_CHECKED],
-        ['tied only', [finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' })], TIED_SETTLED],
-        ['unrecognized only', [finding({ saidConfidence: 'unanimous', saidEvidence: 'none' })], CANNOT_CONFIRM],
-        [
-          'tied + unrecognized',
-          [
-            finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
-            finding({ saidConfidence: 'unanimous', saidEvidence: 'none' }),
-          ],
-          CANNOT_CONFIRM, // priority over "settled no verdict" — see the dedicated priority test above
-        ],
-      ];
-      for (const [label, rows, expectedClause] of cases) {
+      // The "must not also contain" assertions below only mean anything if no
+      // tail is a substring of another. Assert that rather than assume it — the
+      // combined tail deliberately reuses wording from two of the others.
+      for (const tail of allTails) {
+        for (const other of allTails) {
+          if (tail !== other) {
+            expect(other, `a tail containing another makes the exclusivity checks vacuous: "${tail}"`).not.toContain(tail);
+          }
+        }
+      }
+
+      const bucketRow: Record<string, () => ReviewValueFindingRow> = {
+        T: () => finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
+        N: () => finding({ saidConfidence: null, saidEvidence: 'thread-reply' }),
+        E: () => finding({ saidConfidence: null, saidEvidence: 'none' }),
+        U: () => finding({ saidConfidence: 'unanimous', saidEvidence: 'none' }),
+      };
+
+      const expectedTail: Record<string, string> = {
+        'T': TIED_SETTLED,
+        'N': NOTHING_CHECKED,
+        'E': NOTHING_CHECKED,
+        'U': CANNOT_CONFIRM,
+        'T+N': TIED_SETTLED,
+        'T+E': TIED_SETTLED,
+        'T+U': TIED_AND_SCOPED_RESIDUAL,
+        'N+E': NOTHING_CHECKED,
+        'N+U': CANNOT_CONFIRM,
+        'E+U': CANNOT_CONFIRM,
+        'T+N+E': TIED_SETTLED,
+        'T+N+U': TIED_AND_SCOPED_RESIDUAL,
+        'T+E+U': TIED_AND_SCOPED_RESIDUAL,
+        'N+E+U': CANNOT_CONFIRM,
+        'T+N+E+U': TIED_AND_SCOPED_RESIDUAL,
+      };
+
+      const buckets = Object.keys(bucketRow);
+      const combinations = Array.from({ length: 2 ** buckets.length - 1 }, (_unused, i) =>
+        buckets.filter((_b, bit) => (((i + 1) >> bit) & 1) === 1).join('+'),
+      );
+      expect(combinations).toHaveLength(15);
+      // Every generated combination has a hand-written expectation, and no
+      // expectation names a combination that cannot occur.
+      expect([...combinations].sort()).toEqual(Object.keys(expectedTail).sort());
+
+      for (const combination of combinations) {
+        const rows = combination.split('+').map((b) => bucketRow[b]!());
         const reason = compute(rows, spend()).disputedAsWrong.reason!;
-        expect(reason, label).toContain(expectedClause);
-        for (const clause of allClauses) {
-          if (clause !== expectedClause) expect(reason, `${label}: must not also contain "${clause}"`).not.toContain(clause);
+        expect(reason, combination).toContain(expectedTail[combination]!);
+        for (const tail of allTails) {
+          if (tail !== expectedTail[combination]) {
+            expect(reason, `${combination}: must not also contain "${tail}"`).not.toContain(tail);
+          }
         }
       }
     });

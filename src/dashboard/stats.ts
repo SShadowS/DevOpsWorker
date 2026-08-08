@@ -1818,23 +1818,42 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
         ? `${parts[0]} and ${parts[1]}`
         : `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
 
-  // The reason NOT to print zero differs by state, and `tied === 0` is a
-  // NECESSARY condition for "nothing here checked", not a sufficient one —
-  // an earlier version of this gate used it as sufficient and leaked the
-  // claim into windows containing an `unrecognized` row too. A row lands in
-  // `unrecognized` because its `saidConfidence` is neither `'split'` nor
-  // null, which — per the comment on `unrecognized` above — is exactly the
-  // signature a stale pre-guard writer leaves on a row it graded three
-  // ballots for. This line cannot tell whether that check happened, so it
-  // must not claim either way, and takes priority over the tied-only wording
-  // below: "cannot confirm" is the one true statement across every mix that
-  // includes it, tied or not.
+  // The reason NOT to print zero differs by state, and only the pair (`tied`,
+  // `unrecognized`) selects which tail renders. `notYetClassified` and
+  // `noEngagedEvidence` cannot change it: both carry `saidConfidence` null,
+  // which is no ballot cast, so they answer "was anything checked here" the
+  // same way. Each branch asserts only what its own gate establishes and stays
+  // silent about the other buckets — partial is fine here, false is not.
+  //
+  // `tied === 0` — the fall-through case at the bottom — is a NECESSARY
+  // condition for "nothing here checked", not a sufficient one: an earlier
+  // version of this gate used it as sufficient and leaked that claim into
+  // windows containing an `unrecognized` row too. A row lands in `unrecognized`
+  // because its `saidConfidence` is neither `'split'` nor null, which — per the
+  // comment on `unrecognized` above — is exactly the signature a stale pre-guard
+  // writer leaves on a row it graded three ballots for. This line cannot tell
+  // whether that check happened, so it must not claim either way.
+  //
+  // But "cannot confirm whether ANYTHING here was checked" is not a statement
+  // that survives every mix containing an unrecognized row either — the fix
+  // that closed the leak above claimed it did, and it is false wherever a tie
+  // is also present: `said_confidence = 'split'` IS a check this line can
+  // confirm ran, and does confirm, in the sentence immediately before this one
+  // in the rendered string. "Anything" would have to mean "everything" for both
+  // halves to stand, which is not what it says. So that mix gets its own tail,
+  // naming the tie AND scoping the residual doubt to the rows it actually
+  // covers: neither fact is dropped, neither is stretched over rows it does not
+  // hold for.
   const zeroWouldMisstate =
-    unrecognized > 0
-      ? 'a zero would assert nobody disputed a finding, and this line cannot confirm whether anything here was checked'
-      : tied === 0
-        ? 'a zero would assert nobody disputed a finding, which nothing here checked'
-        : 'a zero would assert nobody disputed a finding, and a tied ballot settled no verdict either way';
+    tied > 0 && unrecognized > 0
+      ? 'a zero would assert nobody disputed a finding; a tied ballot settled no verdict either way, and this ' +
+        `line cannot confirm what was checked for the ${agree(unrecognized, 'finding', 'findings')} whose ` +
+        '`said_confidence` it does not recognize'
+      : unrecognized > 0
+        ? 'a zero would assert nobody disputed a finding, and this line cannot confirm whether anything here was checked'
+        : tied > 0
+          ? 'a zero would assert nobody disputed a finding, and a tied ballot settled no verdict either way'
+          : 'a zero would assert nobody disputed a finding, which nothing here checked';
 
   return (
     'No finding in this window carries a `said` label, so there is nothing to count. ' +
@@ -1980,11 +1999,15 @@ export function computeReviewValue(
       // both columns are selected, and saying otherwise would be the exact
       // stale claim this comment exists to keep from recurring.
       //
-      // Nor may the closing "why not print zero" clause say "nothing here
-      // checked" unconditionally: where a tied ballot is part of the mix,
-      // three ballots WERE cast and asked exactly this question — the check
-      // ran, it just settled nothing. `buildDisputedNotMeasuredReason` swaps
-      // in the tied-aware version of that clause whenever `tied > 0`.
+      // Nor may the closing "why not print zero" clause deny that anything was
+      // checked while a tied ballot is part of the mix: three ballots WERE cast
+      // and asked exactly this question — the check ran, it just settled
+      // nothing. So whenever `tied > 0` the clause names the tie, in one of two
+      // forms: a window can ALSO hold a row whose `said_confidence` this line
+      // does not recognize, and that residual doubt gets scoped to those rows
+      // rather than phrased as doubt about the whole window, which would deny
+      // the tie the preceding sentence just asserted. See the branch comment in
+      // `buildDisputedNotMeasuredReason`.
       reason: saidRecorded > 0 ? null : buildDisputedNotMeasuredReason(findings),
     },
     leadTime: {
