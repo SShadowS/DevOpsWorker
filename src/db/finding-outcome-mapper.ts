@@ -73,16 +73,21 @@ const str = (v: unknown): string | null => (v == null ? null : String(v));
 const num = (v: unknown): number | null => (v == null ? null : Number(v));
 const arr = (v: unknown): string[] | null => (Array.isArray(v) ? v.map(String) : null);
 
-/** Runtime mirror of `SaidLabel`'s members — keep in sync with the type above;
- *  TypeScript cannot check the two against each other because the union does
- *  not exist at runtime. */
+/** Runtime mirror of `SaidLabel`'s members — keep in sync with the type above, which is now the
+ *  ONLY sync this needs. TypeScript cannot check the two against each other because the union
+ *  does not exist at runtime, but this is the single hand-maintained copy of the array itself:
+ *  `private/scripts/lib/outcome-batch.ts` imports this export rather than declaring its own —
+ *  two copies drift, and drift here would silently break comparability between the one-off
+ *  study and the nightly job. */
 export const SAID_LABELS: readonly SaidLabel[] =
   ['fixed', 'rejected-wrong', 'rejected-wontfix', 'deferred', 'ignored', 'unclear'];
 
 /** Runtime mirror of `DidLabel`'s members. `SPLIT` is a real, live value —
  *  the tally stores it whenever the ballots do not reach a majority — so
  *  omitting it here would null out genuine rows, not just malformed ones.
- *  Keep in sync with the type above. */
+ *  Keep in sync with the type above, which is now the ONLY sync this needs: this is the single
+ *  hand-maintained copy, and `src/dashboard/stats.ts` imports this export rather than declaring
+ *  its own. */
 export const DID_LABELS: readonly DidLabel[] = ['ADDRESSED', 'not', 'UNKNOWN', 'SPLIT'];
 
 const SAID_LABEL_SET: ReadonlySet<SaidLabel> = new Set(SAID_LABELS);

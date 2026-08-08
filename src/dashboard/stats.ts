@@ -24,6 +24,7 @@
 import { statSync } from 'node:fs';
 import type postgres from 'postgres';
 import type { PRFinding } from '../agents/pr-reviewer/schema.ts';
+import { DID_LABELS } from '../db/finding-outcome-mapper.ts';
 import { MIN_RELIABLE_COVERAGE_PCT } from './coverage-thresholds.ts';
 import { countOf, agree, itThem } from './count-phrase.ts';
 
@@ -1391,11 +1392,6 @@ export interface ReviewValueSpendInput {
   reviewsMissingCost: number;
 }
 
-/** `did` values, in the order the card lists them. `SPLIT` (ballots reached no
- *  majority) is listed even at zero: its absence from a breakdown would read as
- *  "splits cannot happen", which is not what a zero count means. */
-const DID_LABELS = ['ADDRESSED', 'not', 'UNKNOWN', 'SPLIT'] as const;
-
 /** `said_evidence` values that mean a human engaged with the finding in
  *  writing. `'stale-signal'` is deliberately NOT here — it is an inference from
  *  the thread going stale, not somebody saying something. */
@@ -1746,6 +1742,10 @@ export function computeReviewValue(
   const addressed = findings.filter((f) => f.did === 'ADDRESSED').length;
 
   const didBreakdown: Record<string, number> = {};
+  // `DID_LABELS`, in the order the card lists them — imported from the core mapper, the single
+  // hand-maintained copy of this list; see the comment on that export. `SPLIT` (ballots reached
+  // no majority) is listed even at zero: its absence from a breakdown would read as "splits
+  // cannot happen", which is not what a zero count means.
   for (const label of DID_LABELS) didBreakdown[label] = 0;
   for (const f of judgedRows) didBreakdown[f.did!] = (didBreakdown[f.did!] ?? 0) + 1;
 
