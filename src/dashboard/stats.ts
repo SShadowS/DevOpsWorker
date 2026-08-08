@@ -1720,8 +1720,8 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
 }
 
 /** `finding.saidEvidence` counts as a reply on record — same test the
- *  engagement computation below (`engaged`/`silent`, ~stats.ts:1890) already
- *  applies to the same column. */
+ *  engagement computation in `computeReviewValue` (`engaged`/`silent`,
+ *  ~stats.ts:1930) already applies to the same column. */
 function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
   return f.saidEvidence != null && (ENGAGED_EVIDENCE as readonly string[]).includes(f.saidEvidence);
 }
@@ -1734,9 +1734,9 @@ function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
  *  three states below) — `said_evidence` is needed too:
  *    - `said_confidence = 'split'`: a ballot WAS cast and it tied.
  *    - `said_confidence` null AND `said_evidence` is an engaged value
- *      (`hasEngagedEvidence`, the same test the engagement computation below
- *      applies, ~stats.ts:1890): there is a thread reply or PR discussion on
- *      record, but the sweep has not classified it for `said` yet.
+ *      (`hasEngagedEvidence`, the same test `computeReviewValue`'s engagement
+ *      computation applies, ~stats.ts:1930): there is a thread reply or PR
+ *      discussion on record, but the sweep has not classified it yet for `said`.
  *    - `said_confidence` null AND `said_evidence` is not engaged: no ballot
  *      was ever cast, because a said ballot is only spent where there is a
  *      reply to read. `'none'`, `'stale-signal'`, and unset are folded
@@ -1754,10 +1754,13 @@ function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
  *  absorbed into "no ballot was ever cast", which it would not earn.
  *  Names every bucket that is non-empty (there can be more than one — e.g. a
  *  window with both a tie and an unclassified reply) rather than picking one.
- *  Live at 2026-08-08, only the "no ballot" bucket has ever been observed (63
- *  of 63 not-yet-measured rows carry `said_evidence = 'none'`) — the other
- *  two are unverifiable against production today and are pinned by forced
- *  fixtures in the test suite instead. */
+ *  Live at 2026-08-08, every not-yet-measured row in the table sits in the
+ *  "no ballot" bucket (63 of 63 carry `said_confidence` null and
+ *  `said_evidence = 'none'`) — the other two of the three states above have no
+ *  live row to read today and are pinned by forced fixtures in the test suite
+ *  instead. That is the table's PRESENT contents, not its history: the
+ *  `unrecognized` residual below records a combination production HAS
+ *  produced, on rows since repaired. */
 function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): string {
   if (findings.length === 0) {
     return (
@@ -1822,8 +1825,15 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   // `unrecognized`) selects which tail renders. `notYetClassified` and
   // `noEngagedEvidence` cannot change it: both carry `saidConfidence` null,
   // which is no ballot cast, so they answer "was anything checked here" the
-  // same way. Each branch asserts only what its own gate establishes and stays
-  // silent about the other buckets — partial is fine here, false is not.
+  // same way. Each branch asserts only what its own gate establishes — partial
+  // is fine here, false is not. Two of the four scope a claim to the whole
+  // window rather than staying silent about the buckets they do not gate on:
+  // the fall-through's "nothing HERE checked" (sound, because that branch is
+  // reached only when `tied` and `unrecognized` are both 0, i.e. every row
+  // carries `saidConfidence` null) and the `unrecognized`-only branch's "cannot
+  // confirm whether anything HERE was checked" — and that second scope is
+  // exactly why a tie in the mix falsifies it and earns the combined tail
+  // below.
   //
   // `tied === 0` — the fall-through case at the bottom — is a NECESSARY
   // condition for "nothing here checked", not a sufficient one: an earlier
@@ -1914,7 +1924,10 @@ export function computeReviewValue(
     const key = f.saidEvidence ?? '(unrecorded)';
     evidenceBreakdown[key] = (evidenceBreakdown[key] ?? 0) + 1;
   }
-  const engaged = findings.filter((f) => f.saidEvidence != null && (ENGAGED_EVIDENCE as readonly string[]).includes(f.saidEvidence)).length;
+  // `hasEngagedEvidence`, not an inlined copy of its body: the not-measured
+  // reason above documents itself as applying "the same test" this line does,
+  // and two copies of a null-check are how that stops being true.
+  const engaged = findings.filter((f) => hasEngagedEvidence(f)).length;
   const silent = findings.filter((f) => f.saidEvidence === 'none').length;
   const engagementDenominator = engaged + silent;
 
