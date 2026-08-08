@@ -9,6 +9,12 @@ import {
   buildToolMixSectionView,
   buildErrorBreakdownSectionView,
   buildOperationalPanelView,
+  describeZeroDaysClause,
+  describeBarTitle,
+  describeDurationTurnsSampleNote,
+  describeToolMixAverageNote,
+  describeRepoBreakdownNote,
+  describeOtherErrorsCaveat,
 } from '../../src/dashboard/client/components/stats-operational.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { OperationalStats, ToolMixEntry, ErrorClassificationSummary } from '../../src/dashboard/stats.ts';
@@ -428,29 +434,118 @@ describe('buildOperationalPanelView', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Count agreement — structural guard (Task 7).
-//
-// Seven of the ten sites this task fixes are hand-written template literals
-// directly inside JSX render functions (ReviewsPerDayChart,
-// DurationTurnsSection, ToolMixSection, RepoBreakdownSection,
-// ErrorBreakdownSection), never routed through a pure builder — unlike
-// buildToolMixSectionView/buildErrorBreakdownSectionView above, there is no
-// value a `describe(...)`-style test can call and assert on. The task's
-// "Do NOT restructure / extract view models" constraint rules out adding new
-// pure string functions purely to create that seam.
-//
-// So this mirrors the "review-value structure" block in
-// stats-review-value.test.ts (source-text assertions, for properties a value
-// assertion cannot reach) rather than rendering a component tree, which
-// stats-costquality.test.ts's convention (repeated at the top of this file)
-// rules out. A `(s)` literal reappearing ANYWHERE in this file — at any of
-// these seven sites, or a new one introduced later — makes the sweep fail;
-// that is what stops the next edit reintroducing the class here, the same
-// job the value-level tests above do for the two sites that are pure
-// functions.
+// Count agreement — the seven sites that were hand-written template literals
+// directly inside JSX render functions (Task 7). Pulled into minimal pure
+// functions — just the counts in, the sentence out, nothing restructured —
+// so each one is real, value-level, rendered-output evidence: called with
+// forced 0/1/2 (and for the 385/404 pair, the two extra required cases),
+// printed and asserted on, exactly like buildToolMixSectionView /
+// buildErrorBreakdownSectionView above. A source-text regex would prove only
+// that `countOf(` appears somewhere near the right variable name — it cannot
+// catch a `countOf` call sitting next to a hard-coded verb, or two channels
+// that drifted apart while each still individually "contains countOf". This
+// codebase already answered which one counts as evidence: stats-review-value.tsx
+// got its prose right by putting the sentences in pure builders tests call
+// with forced values (module doc comment there: three review rounds before
+// that was true), so this follows that precedent rather than a new one.
 // ---------------------------------------------------------------------------
 
-describe('operational card — count agreement in JSX-only prose (structural guard)', () => {
+describe('describeZeroDaysClause (385 aria-label / 404 visible note — shared source)', () => {
+  test('n=0', () => expect(describeZeroDaysClause(0, 5)).toBe('0 of 5 calendar days'));
+  test('n=1', () => expect(describeZeroDaysClause(1, 5)).toBe('1 of 5 calendar days'));
+  test('n=2', () => expect(describeZeroDaysClause(2, 5)).toBe('2 of 5 calendar days'));
+
+  // Required extra case: zeroDays === totalDays.
+  test('zeroDays === totalDays', () => expect(describeZeroDaysClause(3, 3)).toBe('3 of 3 calendar days'));
+
+  // Required extra case: totalDays === 1 (the noun's own agreement point),
+  // at both reachable zeroDays values (0 or 1 — zeroDays can never exceed
+  // totalDays).
+  test('totalDays === 1, zeroDays === 0', () => expect(describeZeroDaysClause(0, 1)).toBe('0 of 1 calendar day'));
+  test('totalDays === 1, zeroDays === 1', () => expect(describeZeroDaysClause(1, 1)).toBe('1 of 1 calendar day'));
+
+  test('no "(s)" placeholder survives at any tested value', () => {
+    for (const [z, t] of [[0, 5], [1, 5], [2, 5], [3, 3], [0, 1], [1, 1]] as const) {
+      expect(describeZeroDaysClause(z, t)).not.toContain('(s)');
+    }
+  });
+
+  // The construction guarantee: both the aria-label and the visible note
+  // call THIS function with the SAME arguments (view.zeroDays, view.totalDays)
+  // — verified directly against the source below (secondary net), but the
+  // real guarantee is architectural: there is exactly one function that
+  // knows how to render this clause, so a screen-reader user and a sighted
+  // user cannot get different grammar for the same data.
+});
+
+describe('describeBarTitle (393 — helper-consistency swap, not a defect site)', () => {
+  test('n=0', () => expect(describeBarTitle('2026-07-01', 0)).toBe('2026-07-01: 0 reviews'));
+  test('n=1', () => expect(describeBarTitle('2026-07-01', 1)).toBe('2026-07-01: 1 review'));
+  test('n=2', () => expect(describeBarTitle('2026-07-01', 2)).toBe('2026-07-01: 2 reviews'));
+});
+
+describe('describeDurationTurnsSampleNote (437/438 — three independent sample sizes)', () => {
+  test('n=0 for all three', () => {
+    expect(describeDurationTurnsSampleNote(0, 0, 0)).toBe(
+      "Duration computed over 0 rows with duration recorded; turns over 0 rows with turns recorded — each may differ from this window's 0 total rows.",
+    );
+  });
+
+  test('n=1 for all three — the value the old literal always got wrong', () => {
+    expect(describeDurationTurnsSampleNote(1, 1, 1)).toBe(
+      "Duration computed over 1 row with duration recorded; turns over 1 row with turns recorded — each may differ from this window's 1 total row.",
+    );
+  });
+
+  test('n=2 for all three', () => {
+    expect(describeDurationTurnsSampleNote(2, 2, 2)).toBe(
+      "Duration computed over 2 rows with duration recorded; turns over 2 rows with turns recorded — each may differ from this window's 2 total rows.",
+    );
+  });
+
+  // The three counts are independent (duration/turns/total sample sizes can
+  // differ — the whole reason this note exists, per the module doc comment),
+  // so a mixed case where they are NOT all equal is the realistic shape.
+  test('mixed — each count agrees independently, not all forced to the same form', () => {
+    expect(describeDurationTurnsSampleNote(1, 2, 150)).toBe(
+      "Duration computed over 1 row with duration recorded; turns over 2 rows with turns recorded — each may differ from this window's 150 total rows.",
+    );
+  });
+});
+
+describe('describeToolMixAverageNote (485)', () => {
+  test('n=0', () => expect(describeToolMixAverageNote(0)).toContain('all 0 reviews in this window'));
+  test('n=1', () => expect(describeToolMixAverageNote(1)).toContain('all 1 review in this window'));
+  test('n=2', () => expect(describeToolMixAverageNote(2)).toContain('all 2 reviews in this window'));
+  test('no "(s)" placeholder survives', () => expect(describeToolMixAverageNote(1)).not.toContain('(s)'));
+});
+
+describe('describeRepoBreakdownNote (521 — two independent counts)', () => {
+  test('n=0 for both', () => expect(describeRepoBreakdownNote(0, 0)).toContain('0 repos across 0 reviews'));
+  test('n=1 for both', () => expect(describeRepoBreakdownNote(1, 1)).toContain('1 repo across 1 review'));
+  test('n=2 for both', () => expect(describeRepoBreakdownNote(2, 2)).toContain('2 repos across 2 reviews'));
+  // The realistic shape: exactly one repo, many reviews against it.
+  test('mixed — repo count and review count agree independently', () => {
+    expect(describeRepoBreakdownNote(1, 150)).toContain('1 repo across 150 reviews');
+  });
+});
+
+describe('describeOtherErrorsCaveat (571)', () => {
+  test('n=0', () => expect(describeOtherErrorsCaveat(0)).toContain('0 errors matched none'));
+  test('n=1', () => expect(describeOtherErrorsCaveat(1)).toContain('1 error matched none'));
+  test('n=2', () => expect(describeOtherErrorsCaveat(2)).toContain('2 errors matched none'));
+});
+
+// ---------------------------------------------------------------------------
+// Secondary net (not the evidence — the value-level tests above are). A
+// `(s)` literal reappearing ANYWHERE in this file, including a new site
+// nobody wrote a describe-function test for yet, fails this immediately.
+// Mirrors stats-review-value.test.ts's "review-value structure" block
+// (source-text assertions for a property a value assertion cannot reach —
+// here, "did every call site route through the helper, not just some").
+// ---------------------------------------------------------------------------
+
+describe('operational card structure — secondary net', () => {
   const cardSrc = readFileSync(
     fileURLToPath(new URL('../../src/dashboard/client/components/stats-operational.tsx', import.meta.url)),
     'utf-8',
@@ -471,58 +566,17 @@ describe('operational card — count agreement in JSX-only prose (structural gua
     expect(cardSrc).not.toMatch(HANDWRITTEN_S_PLACEHOLDER);
   });
 
-  // 385/404 mirror defect: 385 hard-coded the PLURAL ("calendar days") with
-  // no agreement at all, rather than a "(s)" placeholder, so the sweep above
-  // does not catch it on its own — checked directly here.
-  test('the aria-label no longer hard-codes the plural "calendar days"', () => {
+  // 385's specific historical defect was a hard-coded PLURAL ("calendar
+  // days"), not a "(s)" placeholder, so the sweep above does not catch it.
+  test('no hard-coded "calendar days" plural survives', () => {
     expect(cardSrc).not.toContain('calendar days had zero reviews recorded');
   });
 
-  // 385 (aria-label, screen reader) and 404 (visible note) state the same
-  // fact in two channels and must render the same grammar for the same
-  // values (brief's explicit requirement). Both now call the byte-identical
-  // expression, which makes that a construction guarantee rather than
-  // something that has to be kept in sync by hand.
-  test('385 (aria-label) and 404 (visible note) call the identical countOf expression', () => {
-    const occurrences = cardSrc.split("countOf(view.totalDays, 'calendar day')").length - 1;
+  // The 385/404 construction guarantee, checked directly: both call sites
+  // must invoke describeZeroDaysClause — if either were ever rewritten back
+  // to its own literal, the two channels could drift apart again silently.
+  test('385 (aria-label) and 404 (visible note) both call describeZeroDaysClause', () => {
+    const occurrences = cardSrc.split('describeZeroDaysClause(view.zeroDays, view.totalDays)').length - 1;
     expect(occurrences).toBe(2);
-  });
-
-  test('251/267 (tool mix) and 323 (error breakdown) route through countOf, not a literal', () => {
-    expect(cardSrc).toContain("countOf(rows.length, 'observed tool')");
-    expect(cardSrc).toContain("countOf(rows.length, 'tool')");
-    expect(cardSrc).toContain("countOf(errorClassification.total, 'error')");
-  });
-
-  test('437/438 (duration & turns note) route all three counts through countOf', () => {
-    expect(cardSrc).toContain("countOf(duration.sampleSize, 'row')");
-    expect(cardSrc).toContain("countOf(turns.sampleSize, 'row')");
-    expect(cardSrc).toContain("countOf(data.sampleSize, 'total row')");
-  });
-
-  test('485 (tool mix average note) routes through countOf', () => {
-    expect(cardSrc).toContain("countOf(data.sampleSize, 'review')");
-  });
-
-  test('521 (repo breakdown note) routes both counts through countOf', () => {
-    expect(cardSrc).toContain("countOf(data.perRepo.length, 'repo')");
-  });
-
-  test('571 (unclassified-error caveat) routes through countOf', () => {
-    expect(cardSrc).toContain("countOf(view.otherCount, 'error')");
-  });
-
-  // 393 (bar title) already had correct behaviour via a hand-written ternary
-  // — not one of the ten defect sites, but the brief invited using the
-  // helper here too for consistency. Not a behaviour change: countOf(n,
-  // 'review') renders identically to the ternary it replaces (both verified
-  // in the evidence script — see task-7-report.md).
-  test('393 (bar title) uses the helper for consistency, not a hand-written ternary', () => {
-    expect(cardSrc).toContain("countOf(b.count, 'review')");
-    expect(cardSrc).not.toContain("review${b.count === 1 ? '' : 's'}");
-  });
-
-  test('the file actually imports countOf — a guard against the calls above being dead literals in a comment', () => {
-    expect(cardSrc).toMatch(/import\s*\{\s*countOf\s*\}\s*from\s*'\.\.\/\.\.\/count-phrase\.ts'/);
   });
 });

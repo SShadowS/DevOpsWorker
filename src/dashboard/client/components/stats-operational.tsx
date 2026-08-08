@@ -171,6 +171,26 @@ export function buildReviewsChartView(
   };
 }
 
+/** The zero-days clause ("N of M calendar {day, days}", the noun agreeing
+ *  with M, singular exactly when M is 1) shared VERBATIM between the chart's
+ *  `aria-label` (screen reader) and its visible note (sighted user): two
+ *  channels stating the same fact, which must render the same grammar for
+ *  the same values. One function producing the shared clause makes that a
+ *  construction guarantee: the two call sites cannot drift apart the way two
+ *  hand-synced strings could. */
+export function describeZeroDaysClause(zeroDays: number, totalDays: number): string {
+  return `${zeroDays} of ${countOf(totalDays, 'calendar day')}`;
+}
+
+/** Each bar's tooltip. Not one of the ten count-agreement defect sites — the
+ *  ternary it replaces (`review${b.count === 1 ? '' : 's'}`) already had
+ *  correct behaviour at every count — swapped to the helper purely for
+ *  consistency with the rest of this card's counted prose, renders
+ *  identically to the ternary it replaces (see the tests below). */
+export function describeBarTitle(date: string, count: number): string {
+  return `${date}: ${countOf(count, 'review')}`;
+}
+
 // ---------------------------------------------------------------------------
 // Duration & turns — both are percentile pairs with their own sample size,
 // which can differ from the window's total row count (constraint: "every
@@ -213,6 +233,15 @@ export function buildTurnsSectionView(turns: OperationalStats['turns']): Percent
     p90Text: turns.p90 == null ? 'n/a' : `${turns.p90}`,
     sampleSize: turns.sampleSize,
   };
+}
+
+/** The note under the duration/turns figures — three independent sample
+ *  sizes, each of which can be 1. */
+export function describeDurationTurnsSampleNote(durationSampleSize: number, turnsSampleSize: number, totalSampleSize: number): string {
+  return (
+    `Duration computed over ${countOf(durationSampleSize, 'row')} with duration recorded; turns over ${countOf(turnsSampleSize, 'row')} ` +
+    `with turns recorded — each may differ from this window's ${countOf(totalSampleSize, 'total row')}.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +300,31 @@ export function buildToolMixSectionView(toolMix: ToolMixEntry[]): ToolMixSection
   };
 }
 
+/** The note under the tool-mix table — states the denominator the average is
+ *  divided by. */
+export function describeToolMixAverageNote(sampleSize: number): string {
+  return (
+    `Average per review is divided by all ${countOf(sampleSize, 'review')} in this window, not just the reviews that ` +
+    "called a given tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a " +
+    'shrunk denominator (same convention `aggregateToolMix`, stats.ts, documents server-side).'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Repo breakdown — a plain, unscored table (see the module doc comment for
+// why it carries no coverage caveat the way the Cost card's per-repo table
+// does).
+// ---------------------------------------------------------------------------
+
+/** The note under the repo breakdown table — two independent counts, either
+ *  of which can be 1 (a window with exactly one repo, or exactly one review). */
+export function describeRepoBreakdownNote(repoCount: number, sampleSize: number): string {
+  return (
+    `${countOf(repoCount, 'repo')} across ${countOf(sampleSize, 'review')} in this window — every row counts here ` +
+    "(unlike the Cost card's per-repo table, scoped to rows with cost recorded)."
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Error breakdown (fix round 1) — a report of what `pr_reviews.error`
 // actually classifies as, not a second error-RATE judgement (that already
@@ -325,6 +379,17 @@ export function buildErrorBreakdownSectionView(errorClassification: ErrorClassif
       `${errorClassification.categories['no-result']} no-result, ${errorClassification.categories['schema-validation']} ` +
       `schema-validation, ${otherCount} unclassified.`;
   return { status: rateLimitCount > 0 ? 'attention' : 'ok', summary, rows, otherCount };
+}
+
+/** The "Known instrument caveat" note under the error breakdown table —
+ *  `otherCount` is a fact about the classifier's own coverage, not a
+ *  pipeline-health finding (see the module doc comment). */
+export function describeOtherErrorsCaveat(otherCount: number): string {
+  return (
+    `${countOf(otherCount, 'error')} matched none of the three known failure shapes this classifier recognises — a ` +
+    "fact about this classifier's own coverage (it may need a new pattern), not necessarily a claim that the " +
+    'pipeline itself got less reliable. A growing count here is the signal to watch.'
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +448,7 @@ function ReviewsPerDayChart({ view }: { view: ReviewsChartView }) {
       <div
         class="operational-chart"
         role="img"
-        aria-label={`Reviews per day: ${view.averageText}. ${view.zeroDays} of ${countOf(view.totalDays, 'calendar day')} had zero reviews recorded.`}
+        aria-label={`Reviews per day: ${view.averageText}. ${describeZeroDaysClause(view.zeroDays, view.totalDays)} had zero reviews recorded.`}
       >
         <div class="operational-chart__bars">
           {view.bars.map((b) => (
@@ -391,7 +456,7 @@ function ReviewsPerDayChart({ view }: { view: ReviewsChartView }) {
               key={b.date}
               class={`operational-chart__bar ${b.count === 0 ? 'operational-chart__bar--zero' : ''}`}
               style={{ height: `${b.heightPct}%` }}
-              title={`${b.date}: ${countOf(b.count, 'review')}`}
+              title={describeBarTitle(b.date, b.count)}
             />
           ))}
         </div>
@@ -402,7 +467,7 @@ function ReviewsPerDayChart({ view }: { view: ReviewsChartView }) {
       </div>
       <p class="operational-section__summary">{view.averageText}</p>
       <p class="operational-section__note">
-        {view.zeroDays} of {countOf(view.totalDays, 'calendar day')} shown had zero reviews recorded — rendered as a
+        {describeZeroDaysClause(view.zeroDays, view.totalDays)} shown had zero reviews recorded — rendered as a
         zero-height (muted) bar, not omitted. The first bar may reflect a partial day: the window's start is a
         rolling timestamp, not midnight.
       </p>
@@ -435,8 +500,7 @@ function DurationTurnsSection({ data }: { data: OperationalStats }) {
         <dd>{turns.p90Text}</dd>
       </dl>
       <p class="operational-section__note">
-        Duration computed over {countOf(duration.sampleSize, 'row')} with duration recorded; turns over {countOf(turns.sampleSize, 'row')}
-        with turns recorded — each may differ from this window's {countOf(data.sampleSize, 'total row')}.
+        {describeDurationTurnsSampleNote(duration.sampleSize, turns.sampleSize, data.sampleSize)}
       </p>
     </OperationalSection>
   );
@@ -483,9 +547,7 @@ function ToolMixSection({ data }: { data: OperationalStats }) {
       </p>
       <ToolMixTable rows={view.rows} />
       <p class="operational-section__note">
-        Average per review is divided by all {countOf(data.sampleSize, 'review')} in this window, not just the reviews that
-        called a given tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a
-        shrunk denominator (same convention `aggregateToolMix`, stats.ts, documents server-side).
+        {describeToolMixAverageNote(data.sampleSize)}
       </p>
     </OperationalSection>
   );
@@ -519,8 +581,7 @@ function RepoBreakdownSection({ data }: { data: OperationalStats }) {
     <OperationalSection title="Repo breakdown" status="neutral">
       <RepoBreakdownTable rows={data.perRepo} />
       <p class="operational-section__note">
-        {countOf(data.perRepo.length, 'repo')} across {countOf(data.sampleSize, 'review')} in this window — every row counts here
-        (unlike the Cost card's per-repo table, scoped to rows with cost recorded).
+        {describeRepoBreakdownNote(data.perRepo.length, data.sampleSize)}
       </p>
     </OperationalSection>
   );
@@ -569,9 +630,7 @@ function ErrorBreakdownSection({ data }: { data: OperationalStats }) {
       {view.otherCount > 0 && (
         <p class="operational-section__note">
           <strong class="operational-tag operational-tag--caveat">Known instrument caveat: </strong>
-          {countOf(view.otherCount, 'error')} matched none of the three known failure shapes this classifier recognises — a
-          fact about this classifier's own coverage (it may need a new pattern), not necessarily a claim that the
-          pipeline itself got less reliable. A growing count here is the signal to watch.
+          {describeOtherErrorsCaveat(view.otherCount)}
         </p>
       )}
       <p class="operational-section__note">
