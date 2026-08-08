@@ -251,6 +251,15 @@ ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS model TEXT;
 -- time AND request count, rather than guessed at. Null on rows written before
 -- this column existed. See the sweep's 'submitting' status.
 ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS request_count INTEGER;
+-- How many days back this row's batch scanned when it was submitted. Read only
+-- on resume, where it is the authority for the window a dead run's candidates
+-- are rebuilt against -- NOT the resuming invocation's own --lookback-days,
+-- and not a hardcoded default either. A batch submitted with a WIDER window
+-- than the default resumes narrower under a hardcoded default, and a
+-- candidate missing from the narrower rebuild is a billed ballot that lands
+-- nowhere. Null on rows written before this column existed -> caller falls
+-- back to the default lookback and says so, same as the model column above.
+ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS lookback_days INTEGER;
 `;
 
 /**
