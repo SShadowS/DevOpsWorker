@@ -1526,32 +1526,35 @@ export interface ReviewValueSpend extends ReviewValueSpendInput {
   costPerAddressed: number | null;
   numeratorState: NumeratorState;
   denominatorState: DenominatorState;
-  /** Prose derived from the two states above — never the other way round.
-   *  Whichever direction(s) the figure can still move is stated explicitly,
-   *  including the case where the two inputs move it in OPPOSITE directions
-   *  (missing cost pushes up, rising coverage pushes down), which is the one
-   *  case where calling it an upper bound would be wrong. */
+  /** Plain-English prose derived from the two states above — never the other
+   *  way round. Whichever direction(s) the figure can still move is stated
+   *  explicitly, including the case where the missing-cost side and the
+   *  coverage side pull it in OPPOSITE directions (missing cost pushes up,
+   *  rising coverage pushes down), which is the one case where claiming a
+   *  single-direction bound would be wrong. */
   note: string;
 }
 
 /** Builds `spend.note` from the two states, so the sentence cannot drift out
  *  of agreement with the flags a test asserts on. Split out (rather than
- *  inlined in `computeReviewValue`) purely so the four state combinations are
- *  readable side by side. */
+ *  inlined in `computeReviewValue`) so the five leaves this can render — the
+ *  degenerate zero-review case, plus the four real numerator × denominator
+ *  combinations — are readable side by side, each spelling out only what
+ *  that combination of states actually establishes. */
 function buildSpendNote(numerator: NumeratorState, denominator: DenominatorState, missing: number, reviewCount: number): string {
   const core =
     numerator === 'exact'
       ? reviewCount === 0
         ? 'No review on these pull requests has a recorded cost, so this shows zero rather than a real figure.'
         : denominator === 'settled'
-          ? 'This figure is reliable. Every review on these pull requests has a recorded cost, and every problem has ' +
+          ? 'This figure is settled. Every review on these pull requests has a recorded cost, and every problem has ' +
             'been checked, so it will not move as more checking happens.'
           : 'The real figure is at most this much. Every review has a recorded cost, but not every problem has been ' +
             'checked yet, and each one confirmed acted on brings this figure down.'
       : denominator === 'settled'
         ? `The real figure is at least this much. ${missing} of ${countOf(reviewCount, 'review')} ${agree(missing, 'has', 'have')} ` +
-          'no recorded cost, so the spend shown is lower than what was actually spent. Every problem has been ' +
-          'checked, so that side will not change.'
+          'no recorded cost, so the real spend is at least the figure shown. Every problem has been checked, so ' +
+          'that side will not change.'
         : `Treat this as a rough reading, not a firm number. Two things are still incomplete and they pull in opposite ` +
           `directions: ${missing} of ${countOf(reviewCount, 'review')} ${agree(missing, 'has', 'have')} no recorded cost, ` +
           'which makes the figure look low, and not every problem has been checked yet, which makes it look high.';
@@ -1559,7 +1562,7 @@ function buildSpendNote(numerator: NumeratorState, denominator: DenominatorState
   return (
     `${core} This is not the same measurement as the Cost panel, which divides by every problem raised rather than ` +
     'by the problems confirmed acted on, so the gap between the two numbers is not a trend. Spend here counts ' +
-    'every review on these pull requests, including repeat reviews.'
+    'every review on these pull requests, including repeat reviews that found none of the problems counted here.'
   );
 }
 

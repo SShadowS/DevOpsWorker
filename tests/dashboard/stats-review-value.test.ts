@@ -844,7 +844,7 @@ describe('computeReviewValue — spend', () => {
   const TRAILER =
     'This is not the same measurement as the Cost panel, which divides by every problem raised rather than by the ' +
     'problems confirmed acted on, so the gap between the two numbers is not a trend. Spend here counts every ' +
-    'review on these pull requests, including repeat reviews.';
+    'review on these pull requests, including repeat reviews that found none of the problems counted here.';
 
   test('reviewCount 0 is a degenerate case: the note says there is no real figure, not a false zero', () => {
     const o = compute([], { totalCostUsd: 0, reviewCount: 0, reviewsMissingCost: 0 });
@@ -855,12 +855,12 @@ describe('computeReviewValue — spend', () => {
     );
   });
 
-  test('exact numerator + settled denominator: the note says the figure is reliable and will not move', () => {
+  test('exact numerator + settled denominator: the note says the figure is settled and will not move', () => {
     const o = compute([finding({ did: 'ADDRESSED' })], spend());
     expect(o.spend.numeratorState).toBe('exact');
     expect(o.spend.denominatorState).toBe('settled');
     expect(o.spend.note).toBe(
-      'This figure is reliable. Every review on these pull requests has a recorded cost, and every problem has ' +
+      'This figure is settled. Every review on these pull requests has a recorded cost, and every problem has ' +
         `been checked, so it will not move as more checking happens. ${TRAILER}`,
     );
   });
@@ -870,8 +870,8 @@ describe('computeReviewValue — spend', () => {
     expect(o.spend.numeratorState).toBe('floor');
     expect(o.spend.denominatorState).toBe('settled');
     expect(o.spend.note).toBe(
-      'The real figure is at least this much. 1 of 65 reviews has no recorded cost, so the spend shown is lower ' +
-        `than what was actually spent. Every problem has been checked, so that side will not change. ${TRAILER}`,
+      'The real figure is at least this much. 1 of 65 reviews has no recorded cost, so the real spend is at ' +
+        `least the figure shown. Every problem has been checked, so that side will not change. ${TRAILER}`,
     );
   });
 
@@ -943,6 +943,10 @@ describe('computeReviewValue — numerator exactness', () => {
   test('claims exactness only when every review carries a cost', () => {
     const o = compute(mixedWindow(), spend({ reviewsMissingCost: 0 }));
     expect(o.spend.numeratorState).toBe('exact');
+    // Both substrings: the degenerate leaf's "No review ... has a recorded
+    // cost" also contains "has a recorded cost", so that phrase alone would
+    // pass on the negated claim too. "Every review" is what pins the leaf.
+    expect(o.spend.note).toContain('Every review');
     expect(o.spend.note).toContain('has a recorded cost');
   });
 
@@ -969,6 +973,7 @@ describe('computeReviewValue — numerator exactness', () => {
     const o = compute([finding({ did: 'ADDRESSED' })], spend({ reviewsMissingCost: 1 }));
     expect(o.spend.denominatorState).toBe('settled');
     expect(o.spend.note).toContain('at least this much');
+    expect(o.spend.note).not.toContain('at most this much');
   });
 });
 
