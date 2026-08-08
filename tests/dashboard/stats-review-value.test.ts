@@ -292,10 +292,10 @@ describe('computeReviewValue — disputed as factually wrong', () => {
 
   // The reason's clauses are true only while `saidRecorded === 0`, so on a
   // measured payload it is not unused — it is FALSE. It shipped as a plain
-  // `string` for one round and every live payload served "No finding in this
-  // window carries a `said` label" beside a `saidRecorded` of 72. The card
-  // never rendered it, which is exactly why the type has to carry the scope:
-  // "nothing reads it" is not a contract.
+  // `string` for one round and every live payload served the not-measured
+  // sentence — which opens by saying no problem here has a recorded answer —
+  // beside a `saidRecorded` of 72. The card never rendered it, which is exactly
+  // why the type has to carry the scope: "nothing reads it" is not a contract.
   test('the reason is NULL once measured — it is not merely unread there, it is false', () => {
     const measured = compute([finding({ said: 'fixed' })], spend());
     expect(measured.disputedAsWrong.measured).toBe(true);
@@ -316,7 +316,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     expect(reason).not.toContain('deliberately leaves null');
     // It says what the condition DOES establish, and lists the causes it
     // cannot distinguish rather than picking one.
-    expect(reason).toContain('No finding in this window carries a `said` label');
+    expect(reason).toContain('No problem here has a recorded answer for what the team said about it');
     expect(reason).toContain('not measured rather than as zero');
   });
 
@@ -339,9 +339,10 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const rows = Array.from({ length: 5 }, () => finding({ saidConfidence: null, saidEvidence: 'none' }));
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 5 findings carry no ' +
-        'thread reply or PR discussion on record at all, so no ballot was ever cast for them. Reported as not ' +
-        'measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+        'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
+        '5 findings have no reply on record, so nothing was ever checked for them. Reported as not measured ' +
+        'rather than as zero: counting this as zero would say nobody disputed these, and nothing here checked ' +
+        'whether anyone did.',
       );
     });
 
@@ -359,18 +360,21 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 4 findings have a ' +
-        'thread reply or PR discussion on record but no said ballot yet (`said_confidence` is null despite ' +
-        'that). Reported as not measured rather than as zero: a zero would assert nobody disputed a finding, ' +
-        'which nothing here checked.',
+        'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
+        '4 findings have a reply on the thread or in the pull request discussion, but have not been checked ' +
+        'yet. Reported as not measured rather than as zero: counting this as zero would say nobody disputed ' +
+        'these, and nothing here checked whether anyone did.',
       );
     });
 
     // NO LIVE EXAMPLE as of 2026-08-08 (0 of 72 said-labelled rows are a
     // tie) — reachable in principle (`SaidLabel` has no tie value, so a tie
     // stores `said = null, said_confidence = 'split'`), forced here. Note the
-    // closing clause: "were balloted" and "nothing here checked" cannot both
-    // be true in the same sentence, so the tied branch gets its own tail.
+    // closing clause: "were voted on" and "nothing here checked whether anyone
+    // did" cannot both be true in the same sentence, so the tied branch gets
+    // its own tail. Note too what the tail does NOT say: not "the three
+    // checks" — three is the per-finding vote count, and this window of three
+    // tied findings ran nine.
     test('PURE: tied — no live example, forced fixture', () => {
       const rows = [
         finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
@@ -379,22 +383,22 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 3 findings were ' +
-        'balloted and tied (`said_confidence` = `split`). Reported as not measured rather than as zero: a zero ' +
-        'would assert nobody disputed a finding, and a tied ballot settled no verdict either way.',
+        'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
+        '3 findings were voted on and the votes did not agree. Reported as not measured rather than as zero: ' +
+        'counting this as zero would say nobody disputed these, and the votes that ran did not agree on an answer.',
       );
     });
 
     test('count-of-1 for each pure state', () => {
       const noEngaged = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
-      expect(noEngaged).toContain('1 finding carries no thread reply or PR discussion on record at all, so no ballot was ever cast for it.');
+      expect(noEngaged).toContain('1 finding has no reply on record, so nothing was ever checked for it.');
 
       const notYetClassified = compute([finding({ saidConfidence: null, saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
-      expect(notYetClassified).toContain('1 finding has a thread reply or PR discussion on record but no said ballot yet');
+      expect(notYetClassified).toContain('1 finding has a reply on the thread or in the pull request discussion, but has not been checked yet');
 
       const tied = compute([finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
-      expect(tied).toContain('1 finding was balloted and tied (`said_confidence` = `split`).');
-      expect(tied).toContain('a tied ballot settled no verdict either way');
+      expect(tied).toContain('1 finding was voted on and the votes did not agree.');
+      expect(tied).toContain('the votes that ran did not agree on an answer');
     });
 
     // `said_evidence` values that are NOT engaged (`'none'`, `'stale-signal'`,
@@ -411,8 +415,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         finding({ saidConfidence: null, saidEvidence: null }),
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
-      expect(reason).toContain('3 findings carry no thread reply or PR discussion on record at all');
-      expect(reason).not.toContain('has a thread reply or PR discussion on record but no said ballot yet');
+      expect(reason).toContain('3 findings have no reply on record, so nothing was ever checked for them');
+      expect(reason).not.toContain('a reply on the thread or in the pull request discussion');
     });
 
     // POSITIVE counting. `saidConfidence` mirrors `did_confidence`, whose
@@ -420,27 +424,27 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // 'unanimous'/'majority'/'split'/'single-vote'/'none' — more than the two
     // values {null, 'split'} this line's fast path assumes for a null `said`.
     // A row that matches neither positive test must not be silently absorbed
-    // into "no ballot was ever cast", which it has not earned: it goes to an
-    // explicit residual bucket instead, so the total never silently drops
-    // findings the way `findings.length - tied` would have.
+    // into "nothing was ever checked for them", which it has not earned: it
+    // goes to an explicit residual bucket instead, so the total never silently
+    // drops findings the way `findings.length - tied` would have.
     //
-    // The closing clause here is "cannot confirm", NOT "nothing here
-    // checked" — a prior round left the tail gated on `tied === 0` alone,
-    // which let it leak into exactly this state. A `saidConfidence` of
+    // The closing clause here is "cannot tell", NOT "nothing here checked
+    // whether anyone did" — a prior round left the tail gated on `tied === 0`
+    // alone, which let it leak into exactly this state. A `saidConfidence` of
     // `'unanimous'` beside a null `said` is the signature of a writer that
-    // graded ballots and dropped the label (per the comment on `unrecognized`),
-    // so this line has no basis for "nothing checked" — which is why the tail
-    // says it cannot confirm either way rather than asserting the opposite.
-    // "Cannot confirm" is the whole window's state HERE only because no tie is
-    // present: with one, the line could confirm a check ran, and the tail names
+    // graded votes and dropped the label (per the comment on `unrecognized`),
+    // so this card has no basis for "nothing checked" — which is why the tail
+    // says it cannot tell either way rather than asserting the opposite.
+    // "Cannot tell" is the whole window's state HERE only because no tie is
+    // present: with one, the card could confirm a check ran, and the tail names
     // it and scopes this doubt to the unrecognized rows instead (see below).
     test('a said_confidence value outside {null, split} lands in an explicit residual bucket, not "no ballot"', () => {
       const rows = [finding({ saidConfidence: 'unanimous', saidEvidence: 'none' })];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding carries a ' +
-        '`said_confidence` value this line does not recognize. Reported as not measured rather than as zero: a ' +
-        'zero would assert nobody disputed a finding, and this line cannot confirm whether anything here was checked.',
+        'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
+        '1 finding has a stored result this card cannot read. Reported as not measured rather than as zero: ' +
+        'counting this as zero would say nobody disputed these, and this card cannot tell whether anything was checked.',
       );
     });
 
@@ -455,23 +459,22 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(o.disputedAsWrong.saidRecorded).toBe(0); // untouched — still gated on `said`, not `saidConfidence`
       const reason = o.disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding was ' +
-        'balloted and tied (`said_confidence` = `split`), 1 carries no thread reply or PR discussion on record ' +
-        'at all, so no ballot was ever cast for it, and 2 carry a `said_confidence` value this line does not ' +
-        'recognize. Reported as not measured rather than as zero: a zero would assert nobody disputed a ' +
-        'finding; a tied ballot settled no verdict either way, and this line cannot confirm what was checked ' +
-        'for the findings whose `said_confidence` it does not recognize.',
+        'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
+        '1 finding was voted on and the votes did not agree, 1 has no reply on record, so nothing was ever ' +
+        'checked for it, and 2 have a stored result this card cannot read. Reported as not measured rather ' +
+        'than as zero: counting this as zero would say nobody disputed these; the votes that ran did not agree ' +
+        'on an answer, and this card cannot tell what was checked for the ones whose stored result it cannot read.',
       );
     });
 
     // A tie AND an unrecognized row in the same window: the tail must render
     // BOTH facts. An earlier round let the residual clause win outright, so the
-    // string asserted a ballot was cast and tied and then, in the very next
-    // sentence, that it "cannot confirm whether ANYTHING here was checked" —
+    // string asserted votes were cast and did not agree and then, in the very
+    // next sentence, that it "cannot tell whether ANYTHING was checked" —
     // asserting and denying the same proposition. Scoping the residual WITHOUT
-    // naming the tie is the mirror-image defect: it drops the one thing in the
-    // window this line positively knows was checked. So: tie named, residual
-    // scoped to its own rows, and neither unscoped variant present.
+    // naming the votes is the mirror-image defect: it drops the one thing in
+    // the window this card positively knows was checked. So: votes named,
+    // residual scoped to its own rows, and neither unscoped variant present.
     test('a tie beside an unrecognized row renders both facts, each scoped to its own rows', () => {
       const withTie = compute(
         [
@@ -481,19 +484,19 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         spend(),
       ).disputedAsWrong.reason!;
       expect(withTie).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding was ' +
-        'balloted and tied (`said_confidence` = `split`) and 1 carries a `said_confidence` value this line ' +
-        'does not recognize. Reported as not measured rather than as zero: a zero would assert nobody ' +
-        'disputed a finding; a tied ballot settled no verdict either way, and this line cannot confirm what ' +
-        'was checked for the finding whose `said_confidence` it does not recognize.',
+        'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
+        '1 finding was voted on and the votes did not agree and 1 has a stored result this card cannot read. ' +
+        'Reported as not measured rather than as zero: counting this as zero would say nobody disputed these; ' +
+        'the votes that ran did not agree on an answer, and this card cannot tell what was checked for the ' +
+        'ones whose stored result it cannot read.',
       );
       // The tie survives...
-      expect(withTie).toContain('a tied ballot settled no verdict either way');
+      expect(withTie).toContain('the votes that ran did not agree on an answer');
       // ...the residual doubt is scoped to the rows it covers, not to the window...
-      expect(withTie).toContain('cannot confirm what was checked for the finding whose');
+      expect(withTie).toContain('cannot tell what was checked for the ones whose');
       // ...and neither the window-wide denial nor "nothing checked" appears.
-      expect(withTie).not.toContain('cannot confirm whether anything here was checked');
-      expect(withTie).not.toContain('which nothing here checked');
+      expect(withTie).not.toContain('cannot tell whether anything was checked');
+      expect(withTie).not.toContain('nothing here checked whether anyone did');
     });
 
     // Bare numerals after the first fragment — "2 findings…and 3 findings…"
@@ -509,10 +512,10 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 2 findings were ' +
-        'balloted and tied (`said_confidence` = `split`) and 3 carry no thread reply or PR discussion on ' +
-        'record at all, so no ballot was ever cast for them. Reported as not measured rather than as zero: a ' +
-        'zero would assert nobody disputed a finding, and a tied ballot settled no verdict either way.',
+        'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
+        '2 findings were voted on and the votes did not agree and 3 have no reply on record, so nothing was ' +
+        'ever checked for them. Reported as not measured rather than as zero: counting this as zero would say ' +
+        'nobody disputed these, and the votes that ran did not agree on an answer.',
       );
     });
 
@@ -526,11 +529,11 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 2 findings have a ' +
-        'thread reply or PR discussion on record but no said ballot yet (`said_confidence` is null despite ' +
-        'that) and 3 carry no thread reply or PR discussion on record at all, so no ballot was ever cast for ' +
-        'them. Reported as not measured rather than as zero: a zero would assert nobody disputed a finding, ' +
-        'which nothing here checked.',
+        'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
+        '2 findings have a reply on the thread or in the pull request discussion, but have not been checked ' +
+        'yet and 3 have no reply on record, so nothing was ever checked for them. Reported as not measured ' +
+        'rather than as zero: counting this as zero would say nobody disputed these, and nothing here checked ' +
+        'whether anyone did.',
       );
     });
 
@@ -545,12 +548,11 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding was ' +
-        'balloted and tied (`said_confidence` = `split`), 2 have a thread reply or PR discussion on record but ' +
-        'no said ballot yet (`said_confidence` is null despite that), and 3 carry no thread reply or PR ' +
-        'discussion on record at all, so no ballot was ever cast for them. Reported as not measured rather ' +
-        'than as zero: a zero would assert nobody disputed a finding, and a tied ballot settled no verdict ' +
-        'either way.',
+        'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
+        '1 finding was voted on and the votes did not agree, 2 have a reply on the thread or in the pull ' +
+        'request discussion, but have not been checked yet, and 3 have no reply on record, so nothing was ever ' +
+        'checked for them. Reported as not measured rather than as zero: counting this as zero would say ' +
+        'nobody disputed these, and the votes that ran did not agree on an answer.',
       );
     });
 
@@ -560,7 +562,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute([], spend(), { readBandRaised: 0, noFileAnchor: 0 }).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No finding was traced in this window at all, so there is nothing to count. Reported as not measured ' +
-        'rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+        'rather than as zero: counting this as zero would say nobody disputed these, and nothing here checked ' +
+        'whether anyone did.',
       );
     });
 
@@ -581,15 +584,17 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     });
 
     // The closing "why not zero" clause must never deny that anything here was
-    // checked where a tied ballot is in the mix — three ballots WERE cast and
-    // asked exactly this question, and the string says so in the sentence right
-    // before the denial. There are two ways to phrase that denial and
-    // this line has shipped both: "nothing here checked" outright, and "cannot
-    // confirm whether ANYTHING here was checked", which denies the line's own
+    // checked where a tie is in the mix — votes WERE cast and asked exactly
+    // this question, and the string says so in the sentence right before the
+    // denial. There are two ways to phrase that denial and this card has
+    // shipped both: "nothing here checked whether anyone did" outright, and
+    // "cannot tell whether ANYTHING was checked", which denies the card's own
     // knowledge of a check it just reported. Both are barred wherever a tie is
-    // present, whatever else is in the window.
+    // present, whatever else is in the window. DENIALS below tracks the CURRENT
+    // wording — reword a tail and these substrings stop matching anything, so
+    // they must be re-derived from the new wording, not left to pass vacuously.
     test('the closing clause never denies a check happened where a tie is present', () => {
-      const DENIALS = ['nothing here checked', 'cannot confirm whether anything here was checked'];
+      const DENIALS = ['nothing here checked whether anyone did', 'cannot tell whether anything was checked'];
       const tiedRow = finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' });
       const withTie: Array<[string, ReviewValueFindingRow[]]> = [
         ['tie alone', [tiedRow]],
@@ -599,7 +604,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       ];
       for (const [label, rows] of withTie) {
         const reason = compute(rows, spend()).disputedAsWrong.reason!;
-        expect(reason, `${label}: the tie must be named`).toContain('a tied ballot settled no verdict either way');
+        expect(reason, `${label}: the tie must be named`).toContain('the votes that ran did not agree on an answer');
         for (const denial of DENIALS) {
           expect(reason, `${label}: must not contain "${denial}"`).not.toContain(denial);
         }
@@ -608,8 +613,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       // ...and conversely, "settled no verdict" must not appear where there
       // is no tie — it would assert a check that never happened.
       const noTie = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
-      expect(noTie).toContain('nothing here checked');
-      expect(noTie).not.toContain('settled no verdict');
+      expect(noTie).toContain('nothing here checked whether anyone did');
+      expect(noTie).not.toContain('the votes that ran did not agree on an answer');
     });
 
     // THE FULL TRUTH TABLE. Four buckets give FIFTEEN non-empty combinations,
@@ -629,17 +634,31 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // U = unrecognized `said_confidence`.
     //
     // Only (tied > 0, unrecognized > 0) selects the tail, so four tails cover
-    // all fifteen: a tie in the mix ⇒ the tie is named; an unrecognized row in
-    // the mix ⇒ its doubt is voiced, window-wide where there is no tie for it to
-    // contradict and scoped to its own rows where there is; neither ⇒ nothing
-    // checked.
+    // all fifteen: a tie in the mix ⇒ the votes that ran are named; an
+    // unrecognized row in the mix ⇒ its doubt is voiced, window-wide where there
+    // is no tie for it to contradict and scoped to its own rows where there is;
+    // neither ⇒ nothing here checked.
+    //
+    // WHAT THIS TABLE DOES NOT CHECK, and the reason three false states once
+    // shipped green: it pins SELECTION, not TRUTH. Feed it four false constants
+    // and all fifteen combinations pass, having confirmed only that each gate
+    // reaches the constant written beside it. Every constant below must be
+    // checked BY HAND against the condition that gates it. In particular all
+    // four open with the subjunctive "counting this as zero WOULD say nobody
+    // disputed these" — a caution about how a zero reads, never the assertion
+    // "nobody disputed these", which the `N` bucket alone can falsify (a reply
+    // is on record there and nothing has read it yet). Flatten that and the
+    // table still passes.
     test('all fifteen non-empty bucket combinations render exactly one tail, and it is the true one', () => {
-      const NOTHING_CHECKED = 'a finding, which nothing here checked.';
-      const TIED_SETTLED = 'a finding, and a tied ballot settled no verdict either way.';
-      const CANNOT_CONFIRM = 'a finding, and this line cannot confirm whether anything here was checked.';
+      const NOTHING_CHECKED =
+        'counting this as zero would say nobody disputed these, and nothing here checked whether anyone did.';
+      const TIED_SETTLED =
+        'counting this as zero would say nobody disputed these, and the votes that ran did not agree on an answer.';
+      const CANNOT_CONFIRM =
+        'counting this as zero would say nobody disputed these, and this card cannot tell whether anything was checked.';
       const TIED_AND_SCOPED_RESIDUAL =
-        'a finding; a tied ballot settled no verdict either way, and this line cannot confirm what was checked ' +
-        'for the finding whose `said_confidence` it does not recognize.';
+        'counting this as zero would say nobody disputed these; the votes that ran did not agree on an answer, and ' +
+        'this card cannot tell what was checked for the ones whose stored result it cannot read.';
       const allTails = [NOTHING_CHECKED, TIED_SETTLED, CANNOT_CONFIRM, TIED_AND_SCOPED_RESIDUAL];
 
       // The "must not also contain" assertions below only mean anything if no

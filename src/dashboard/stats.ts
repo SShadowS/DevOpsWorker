@@ -1458,8 +1458,9 @@ export interface ReviewValueDisputed {
    *  than symmetry: every clause in it is scoped to what `saidRecorded === 0`
    *  establishes, so on a measured payload it is not merely unused, it is
    *  FALSE. It shipped as a plain `string` for one round and every live
-   *  payload carried "No finding in this window carries a `said` label" beside
-   *  a `saidRecorded` of 72. The card never rendered it — `describeDisputed`
+   *  payload carried the not-measured sentence — which opens by saying no
+   *  problem here has a recorded answer — beside a `saidRecorded` of 72,
+   *  contradicting itself. The card never rendered it — `describeDisputed`
    *  returns on the measured branch first — but a consumer reading the JSON
    *  had a self-contradiction inside one object, and "it happens not to be
    *  read" is not a contract. Putting the not-measured-only scope in the TYPE
@@ -1730,20 +1731,32 @@ function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
 
 /** The `disputedAsWrong.reason` string for a not-measured window — call ONLY
  *  where `saidRecorded === 0`, i.e. every row in `findings` has `said` null.
+ *
+ *  The column names below are the GATES, not the words on screen. Nothing this
+ *  function returns names a column: a reader of the card has no schema to
+ *  resolve `said_confidence` against, so the rendered sentence says what
+ *  happened ("was voted on and the votes did not agree", "has a stored result
+ *  this card cannot read") and this comment says which column establishes it.
+ *  On screen THIS function calls a said ballot a "vote" throughout; "ballot"
+ *  survives in this comment only where it names the `said_votes` rows
+ *  themselves. Other lines on this card still say "ballots" for the three `did`
+ *  verdicts — a different column, and not this function's to rename.
+ *
  *  `said_confidence` ALONE is not enough to resolve which state a null
  *  `said` means (verified against production: live rows in this branch all
  *  carry `said_confidence` null, and that value is shared by two of the
  *  three states below) — `said_evidence` is needed too:
- *    - `said_confidence = 'split'`: a ballot WAS cast and it tied.
+ *    - `said_confidence = 'split'`: votes WERE cast and they did not agree.
  *    - `said_confidence` null AND `said_evidence` is an engaged value
  *      (`hasEngagedEvidence`, the same test `computeReviewValue`'s engagement
- *      computation applies, ~stats.ts:1930): there is a thread reply or PR
- *      discussion on record, but the sweep has not classified it yet for `said`.
- *    - `said_confidence` null AND `said_evidence` is not engaged: no ballot
- *      was ever cast, because a said ballot is only spent where there is a
+ *      computation applies, ~stats.ts:1930): there is a reply on the thread or
+ *      in the PR discussion, but the sweep has not checked it yet for `said`.
+ *    - `said_confidence` null AND `said_evidence` is not engaged: no vote was
+ *      ever cast, because a said ballot is only spent where there is a
  *      reply to read. `'none'`, `'stale-signal'`, and unset are folded
  *      together here — none of the three is a reply on record, which is the
- *      only thing this bucket claims.
+ *      only thing this bucket claims. It says "no reply ON RECORD", never "no
+ *      reply": what is absent is the record, and the card cannot see past it.
  *  Every bucket is a POSITIVE test on `saidConfidence` (`=== 'split'` or
  *  `== null`), never a complement — `findings.length - tied` would only
  *  prove "not split", and this file already has one doc comment (on
@@ -1753,11 +1766,11 @@ function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
  *  row that matches neither positive test lands in an explicit, honestly-worded
  *  residual bucket (`unrecognized`, below — see the comment there for why
  *  this is defensive rather than speculative) rather than being silently
- *  absorbed into "no ballot was ever cast", which it would not earn.
+ *  absorbed into "nothing was ever checked for them", which it would not earn.
  *  Names every bucket that is non-empty (there can be more than one — e.g. a
- *  window with both a tie and an unclassified reply) rather than picking one.
+ *  window with both a tie and an unchecked reply) rather than picking one.
  *  Live at 2026-08-08, every not-yet-measured row in the table sits in the
- *  "no ballot" bucket (63 of 63 carry `said_confidence` null and
+ *  "no vote" bucket (63 of 63 carry `said_confidence` null and
  *  `said_evidence = 'none'`) — the other two of the three states above have no
  *  live row to read today and are pinned by forced fixtures in the test suite
  *  instead. That is the table's PRESENT contents, not its history: the
@@ -1767,7 +1780,8 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   if (findings.length === 0) {
     return (
       'No finding was traced in this window at all, so there is nothing to count. Reported as not measured ' +
-      'rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.'
+      'rather than as zero: counting this as zero would say nobody disputed these, and nothing here checked ' +
+      'whether anyone did.'
     );
   }
 
@@ -1780,9 +1794,9 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   // bucket is expected to stay empty. It exists because a writer running code
   // older than the said-guard HAS produced exactly that combination in
   // production — `said` null beside a non-`split` confidence, on rows whose
-  // ballots were still recorded in `said_votes` — and folding those into "no
-  // ballot was ever cast" would have been false. Nobody has verified this
-  // column's domain beyond what the current writer can produce.
+  // ballots were still recorded in `said_votes` — and folding those into
+  // "nothing was ever checked for them" would have been false. Nobody has
+  // verified this column's domain beyond what the current writer can produce.
   const unrecognized = findings.length - tied - noBallotAtAll.length;
 
   // Bare numerals after the first fragment — repeating "finding(s)" once per
@@ -1796,22 +1810,22 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
 
   const parts: string[] = [];
   if (tied > 0) {
-    parts.push(`${subject(tied)} ${agree(tied, 'was balloted and tied', 'were balloted and tied')} (\`said_confidence\` = \`split\`)`);
+    parts.push(`${subject(tied)} ${agree(tied, 'was voted on and the votes did not agree', 'were voted on and the votes did not agree')}`);
   }
   if (notYetClassified > 0) {
     parts.push(
-      `${subject(notYetClassified)} ${agree(notYetClassified, 'has', 'have')} a thread reply or PR discussion on ` +
-      'record but no said ballot yet (`said_confidence` is null despite that)',
+      `${subject(notYetClassified)} ${agree(notYetClassified, 'has', 'have')} a reply on the thread or in the ` +
+      `pull request discussion, but ${agree(notYetClassified, 'has', 'have')} not been checked yet`,
     );
   }
   if (noEngagedEvidence > 0) {
     parts.push(
-      `${subject(noEngagedEvidence)} ${agree(noEngagedEvidence, 'carries', 'carry')} no thread reply or PR ` +
-      `discussion on record at all, so no ballot was ever cast for ${itThem(noEngagedEvidence)}`,
+      `${subject(noEngagedEvidence)} ${agree(noEngagedEvidence, 'has', 'have')} no reply on record, so nothing ` +
+      `was ever checked for ${itThem(noEngagedEvidence)}`,
     );
   }
   if (unrecognized > 0) {
-    parts.push(`${subject(unrecognized)} ${agree(unrecognized, 'carries', 'carry')} a \`said_confidence\` value this line does not recognize`);
+    parts.push(`${subject(unrecognized)} ${agree(unrecognized, 'has', 'have')} a stored result this card cannot read`);
   }
 
   // `parts` cannot be empty here: tied + noBallotAtAll.length + unrecognized
@@ -1826,49 +1840,59 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   // The reason NOT to print zero differs by state, and only the pair (`tied`,
   // `unrecognized`) selects which tail renders. `notYetClassified` and
   // `noEngagedEvidence` cannot change it: both carry `saidConfidence` null,
-  // which is no ballot cast, so they answer "was anything checked here" the
+  // which is no vote cast, so they answer "was anything checked here" the
   // same way. Each branch asserts only what its own gate establishes — partial
-  // is fine here, false is not. Two of the four scope a claim to the whole
-  // window rather than staying silent about the buckets they do not gate on:
-  // the fall-through's "nothing HERE checked" (sound, because that branch is
-  // reached only when `tied` and `unrecognized` are both 0, i.e. every row
-  // carries `saidConfidence` null) and the `unrecognized`-only branch's "cannot
-  // confirm whether anything HERE was checked" — and that second scope is
-  // exactly why a tie in the mix falsifies it and earns the combined tail
-  // below.
+  // is fine here, false is not.
+  //
+  // ALL FOUR open with the SUBJUNCTIVE "counting this as zero WOULD say nobody
+  // disputed these". That is a caution about how a zero would be read, NOT the
+  // claim "nobody disputed these" — which this data cannot support and which
+  // the `notYetClassified` bucket can outright falsify, since a reply is on
+  // record there and nothing has read it yet. Flattening the subjunctive into
+  // an assertion is the defect this whole clause exists to avoid; it is
+  // invisible to the type system and every test here would go green on it.
+  //
+  // Two of the four then scope a claim to the whole window rather than staying
+  // silent about the buckets they do not gate on: the fall-through's "nothing
+  // HERE checked whether anyone did" (sound, because that branch is reached
+  // only when `tied` and `unrecognized` are both 0, i.e. every row carries
+  // `saidConfidence` null) and the `unrecognized`-only branch's "cannot tell
+  // whether ANYTHING was checked" — and that second scope is exactly why a tie
+  // in the mix falsifies it and earns the combined tail below.
   //
   // `tied === 0` — the fall-through case at the bottom — is a NECESSARY
-  // condition for "nothing here checked", not a sufficient one: an earlier
-  // version of this gate used it as sufficient and leaked that claim into
-  // windows containing an `unrecognized` row too. A row lands in `unrecognized`
-  // because its `saidConfidence` is neither `'split'` nor null, which — per the
-  // comment on `unrecognized` above — is exactly the signature a stale pre-guard
-  // writer leaves on a row it graded three ballots for. This line cannot tell
-  // whether that check happened, so it must not claim either way.
+  // condition for "nothing here checked whether anyone did", not a sufficient
+  // one: an earlier version of this gate used it as sufficient and leaked that
+  // claim into windows containing an `unrecognized` row too. A row lands in
+  // `unrecognized` because its `saidConfidence` is neither `'split'` nor null,
+  // which — per the comment on `unrecognized` above — is exactly the signature a
+  // stale pre-guard writer leaves on a row it graded three votes for. This card
+  // cannot tell whether that check happened, so it must not claim either way.
   //
-  // But "cannot confirm whether ANYTHING here was checked" is not a statement
-  // that survives every mix containing an unrecognized row either — the fix
-  // that closed the leak above claimed it did, and it is false wherever a tie
-  // is also present: `said_confidence = 'split'` IS a check this line can
-  // confirm ran, and does confirm, in the sentence immediately before this one
-  // in the rendered string. "Anything" would have to mean "everything" for both
-  // halves to stand, which is not what it says. So that mix gets its own tail,
-  // naming the tie AND scoping the residual doubt to the rows it actually
+  // But "cannot tell whether ANYTHING was checked" is not a statement that
+  // survives every mix containing an unrecognized row either — the fix that
+  // closed the leak above claimed it did, and it is false wherever a tie is
+  // also present: `said_confidence = 'split'` IS a check this card can confirm
+  // ran, and does confirm, in the sentence immediately before this one in the
+  // rendered string. "Anything" would have to mean "everything" for both halves
+  // to stand, which is not what it says. So that mix gets its own tail, naming
+  // the votes that ran AND scoping the residual doubt to the rows it actually
   // covers: neither fact is dropped, neither is stretched over rows it does not
-  // hold for.
+  // hold for. The tie is named as "the votes that ran did not agree on an
+  // answer" and NOT as "the three checks": three is the per-finding vote count,
+  // and a window holding two tied findings ran six.
   const zeroWouldMisstate =
     tied > 0 && unrecognized > 0
-      ? 'a zero would assert nobody disputed a finding; a tied ballot settled no verdict either way, and this ' +
-        `line cannot confirm what was checked for the ${agree(unrecognized, 'finding', 'findings')} whose ` +
-        '`said_confidence` it does not recognize'
+      ? 'counting this as zero would say nobody disputed these; the votes that ran did not agree on an answer, ' +
+        'and this card cannot tell what was checked for the ones whose stored result it cannot read'
       : unrecognized > 0
-        ? 'a zero would assert nobody disputed a finding, and this line cannot confirm whether anything here was checked'
+        ? 'counting this as zero would say nobody disputed these, and this card cannot tell whether anything was checked'
         : tied > 0
-          ? 'a zero would assert nobody disputed a finding, and a tied ballot settled no verdict either way'
-          : 'a zero would assert nobody disputed a finding, which nothing here checked';
+          ? 'counting this as zero would say nobody disputed these, and the votes that ran did not agree on an answer'
+          : 'counting this as zero would say nobody disputed these, and nothing here checked whether anyone did';
 
   return (
-    'No finding in this window carries a `said` label, so there is nothing to count. ' +
+    'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
     state +
     `. Reported as not measured rather than as zero: ${zeroWouldMisstate}.`
   );
@@ -2015,14 +2039,16 @@ export function computeReviewValue(
       // stale claim this comment exists to keep from recurring.
       //
       // Nor may the closing "why not print zero" clause deny that anything was
-      // checked while a tied ballot is part of the mix: three ballots WERE cast
-      // and asked exactly this question — the check ran, it just settled
-      // nothing. So whenever `tied > 0` the clause names the tie, in one of two
-      // forms: a window can ALSO hold a row whose `said_confidence` this line
-      // does not recognize, and that residual doubt gets scoped to those rows
-      // rather than phrased as doubt about the whole window, which would deny
-      // the tie the preceding sentence just asserted. See the branch comment in
-      // `buildDisputedNotMeasuredReason`.
+      // checked while a tie is part of the mix: votes WERE cast and asked
+      // exactly this question — the check ran, it just did not agree on an
+      // answer. So whenever `tied > 0` the clause names those votes, in one of
+      // two forms: a window can ALSO hold a row whose `said_confidence` this
+      // computation does not recognize, and that residual doubt gets scoped to
+      // those rows rather than phrased as doubt about the whole window, which
+      // would deny the tie the preceding sentence just asserted. And that
+      // clause stays SUBJUNCTIVE throughout — it says what counting this as
+      // zero WOULD claim, never that nobody disputed anything. See the branch
+      // comment in `buildDisputedNotMeasuredReason`.
       reason: saidRecorded > 0 ? null : buildDisputedNotMeasuredReason(findings),
     },
     leadTime: {
