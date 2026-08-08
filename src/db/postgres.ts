@@ -150,15 +150,40 @@ CREATE TABLE IF NOT EXISTS finding_outcomes (
   file            TEXT,
   first_raised_at TIMESTAMPTZ NOT NULL,
   pr_settled_at   TIMESTAMPTZ,
+  -- Finding raised -> PR settled, in minutes. CAN BE NEGATIVE: a cherry-pick
+  -- backport or a post-merge review can settle before, or against a commit
+  -- later than, the moment the finding was first raised. Real on live data,
+  -- not a defect -- 13 of 135 rows. An aggregate must segment negatives out;
+  -- averaging them in with the rest silently drags the mean down and hides
+  -- both the negative and the positive populations it was blended from.
   lead_time_mins  INTEGER,
   said            TEXT,
   said_quote      TEXT,
+  -- One of FOUR values. 'stale-signal' is the one to read carefully: it means
+  -- the reviewer stopped re-raising the finding across follow-up reviews --
+  -- evidence that nobody said anything, not evidence that someone did.
   said_evidence   TEXT,
+  -- What the branch DID, judged from the post-review diff. NULL on roughly
+  -- two thirds of live rows: most findings have no diff yet to judge against.
+  -- A query must filter "did IS NOT NULL" or knowingly compute over a
+  -- mostly-null denominator -- treating a bare NULL as "not addressed"
+  -- silently inflates the addressed rate's denominator.
   did             TEXT,
+  -- The value 'none' is UNREACHABLE from the harvest that populates this
+  -- column. Do not build a filter or a chart bucket expecting to see it.
   did_confidence  TEXT,
   did_votes       JSONB,
   files_read      JSONB,
+  -- Whether the batch result's model matched what was requested. NULL means
+  -- "no ballots were cast" OR "every ballot errored" -- it is not a third
+  -- verdict of "unverified". Filter "model_verified IS NOT NULL" before
+  -- reading a false as a caught model substitution, or a row with no ballots
+  -- reads as one. Describes the DID verdict only -- said_model_verified
+  -- (added below) is the SAID verdict's own, separate attestation.
   model_verified  BOOLEAN,
+  -- The batch that produced the DID verdict. Describes did only --
+  -- said_batch_id (added below) describes the SAID verdict, because the two
+  -- verdicts are reached by different batches on different nights.
   batch_id        TEXT,
   computed_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (pr_id, finding_key)

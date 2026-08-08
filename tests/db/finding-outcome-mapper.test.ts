@@ -1,5 +1,5 @@
-import { describe, test, expect } from 'bun:test';
-import { rowToFindingOutcome } from '../../src/db/finding-outcome-mapper.ts';
+import { describe, test, expect, spyOn } from 'bun:test';
+import { rowToFindingOutcome, SAID_LABELS, DID_LABELS } from '../../src/db/finding-outcome-mapper.ts';
 
 const baseRow = {
   pr_id: 52290, finding_key: 'abc123def4567890', repo_key: 'repo-a',
@@ -110,5 +110,91 @@ describe('rowToFindingOutcome', () => {
   test('accepts a Date for timestamp columns (what postgres.js returns)', () => {
     const o = rowToFindingOutcome({ ...baseRow, first_raised_at: new Date('2026-07-30T08:05:00Z') });
     expect(o.firstRaisedAt).toBe('2026-07-30T08:05:00.000Z');
+  });
+
+  /**
+   * `said`/`did` come off the wire as bare strings -- an unexpected value would
+   * otherwise type as a legitimate label and flow silently into the dashboard's
+   * denominators. Every real label must survive the validation unchanged,
+   * including `SPLIT` on the `did` side: the tally genuinely stores it whenever
+   * ballots don't reach a majority, so a validator that treated it as unknown
+   * would null out live rows, not just malformed ones.
+   */
+  describe('label validation', () => {
+    test('every legitimate said label round-trips', () => {
+      for (const label of SAID_LABELS) {
+        const o = rowToFindingOutcome({ ...baseRow, said: label });
+        expect(o.said).toBe(label);
+      }
+    });
+
+    test('every legitimate did label round-trips, including SPLIT', () => {
+      expect(DID_LABELS).toContain('SPLIT');
+      for (const label of DID_LABELS) {
+        const o = rowToFindingOutcome({ ...baseRow, did: label });
+        expect(o.did).toBe(label);
+      }
+    });
+
+    test('an unrecognised said value maps to null instead of flowing through', () => {
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const o = rowToFindingOutcome({ ...baseRow, said: 'bogus-said-value' });
+        expect(o.said).toBeNull();
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test('an unrecognised did value maps to null instead of flowing through', () => {
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const o = rowToFindingOutcome({ ...baseRow, did: 'bogus-did-value' });
+        expect(o.did).toBeNull();
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    /** Silently nulling a real label would be a worse, quieter failure than the
+     *  one this guards against -- the unrecognised value must stay visible. */
+    test('an unrecognised value warns exactly once for that distinct value, then stays silent', () => {
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        rowToFindingOutcome({ ...baseRow, said: 'repeated-bogus-value' });
+        rowToFindingOutcome({ ...baseRow, said: 'repeated-bogus-value' });
+        rowToFindingOutcome({ ...baseRow, said: 'repeated-bogus-value' });
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    /** A second, DIFFERENT unrecognised value is a second fact worth surfacing --
+     *  the dedupe must be keyed by value, not a single "already warned" flag. */
+    test('a different unrecognised value warns again', () => {
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        rowToFindingOutcome({ ...baseRow, said: 'first-distinct-bogus-value' });
+        rowToFindingOutcome({ ...baseRow, said: 'second-distinct-bogus-value' });
+        expect(warnSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test('a bogus said value and a bogus did value on the same row both null out independently', () => {
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const o = rowToFindingOutcome({ ...baseRow, said: 'nonsense-said', did: 'nonsense-did' });
+        expect(o.said).toBeNull();
+        expect(o.did).toBeNull();
+        expect(warnSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
   });
 });

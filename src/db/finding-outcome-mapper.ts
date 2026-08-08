@@ -72,6 +72,55 @@ const str = (v: unknown): string | null => (v == null ? null : String(v));
 const num = (v: unknown): number | null => (v == null ? null : Number(v));
 const arr = (v: unknown): string[] | null => (Array.isArray(v) ? v.map(String) : null);
 
+/** Runtime mirror of `SaidLabel`'s members — keep in sync with the type above;
+ *  TypeScript cannot check the two against each other because the union does
+ *  not exist at runtime. */
+export const SAID_LABELS: readonly SaidLabel[] =
+  ['fixed', 'rejected-wrong', 'rejected-wontfix', 'deferred', 'ignored', 'unclear'];
+
+/** Runtime mirror of `DidLabel`'s members. `SPLIT` is a real, live value —
+ *  the tally stores it whenever the ballots do not reach a majority — so
+ *  omitting it here would null out genuine rows, not just malformed ones.
+ *  Keep in sync with the type above. */
+export const DID_LABELS: readonly DidLabel[] = ['ADDRESSED', 'not', 'UNKNOWN', 'SPLIT'];
+
+const SAID_LABEL_SET: ReadonlySet<string> = new Set(SAID_LABELS);
+const DID_LABEL_SET: ReadonlySet<string> = new Set(DID_LABELS);
+
+/** Distinct "<column>:<value>" pairs already warned about, so a batch of rows
+ *  sharing one bad value warns once — not once per row. Keyed by column so
+ *  the (disjoint, but not provably so at runtime) said/did label domains can
+ *  never collide. Module-level and never reset: the question it answers is
+ *  "has anyone been told about this value yet", for the life of the process. */
+const warnedUnknownLabels = new Set<string>();
+
+/**
+ * A database string types as a valid label just by being a string — an
+ * unexpected value here would otherwise flow straight into the dashboard's
+ * denominators, silently joining a rate or slipping past a filter. Map
+ * anything outside the known set to `null`, which already has a defined
+ * meaning ("not judged" / "no ballot"). But warn once per distinct
+ * unrecognised value: silently nulling a REAL label would be a different,
+ * worse failure than the one this guards against, so the substitution must
+ * stay visible somewhere.
+ */
+function validateLabel<T extends string>(
+  value: string | null,
+  legal: ReadonlySet<string>,
+  column: string,
+): T | null {
+  if (value === null) return null;
+  if (legal.has(value)) return value as T;
+  const key = `${column}:${value}`;
+  if (!warnedUnknownLabels.has(key)) {
+    warnedUnknownLabels.add(key);
+    console.warn(
+      `[finding-outcome-mapper] unrecognised ${column} value ${JSON.stringify(value)} in finding_outcomes; mapping to null`,
+    );
+  }
+  return null;
+}
+
 export function rowToFindingOutcome(row: Record<string, unknown>): FindingOutcome {
   return {
     prId: Number(row['pr_id']),
@@ -85,14 +134,14 @@ export function rowToFindingOutcome(row: Record<string, unknown>): FindingOutcom
     firstRaisedAt: iso(row['first_raised_at']) ?? '',
     prSettledAt: iso(row['pr_settled_at']),
     leadTimeMins: num(row['lead_time_mins']),
-    said: str(row['said']) as SaidLabel | null,
+    said: validateLabel<SaidLabel>(str(row['said']), SAID_LABEL_SET, 'said'),
     saidQuote: str(row['said_quote']),
     saidEvidence: str(row['said_evidence']),
     saidConfidence: str(row['said_confidence']),
     saidVotes: arr(row['said_votes']),
     saidBatchId: str(row['said_batch_id']),
     saidModelVerified: row['said_model_verified'] == null ? null : Boolean(row['said_model_verified']),
-    did: str(row['did']) as DidLabel | null,
+    did: validateLabel<DidLabel>(str(row['did']), DID_LABEL_SET, 'did'),
     didConfidence: str(row['did_confidence']),
     didVotes: arr(row['did_votes']),
     filesRead: arr(row['files_read']),
