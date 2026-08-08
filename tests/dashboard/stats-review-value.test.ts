@@ -368,7 +368,9 @@ describe('computeReviewValue — disputed as factually wrong', () => {
 
     // NO LIVE EXAMPLE as of 2026-08-08 (0 of 72 said-labelled rows are a
     // tie) — reachable in principle (`SaidLabel` has no tie value, so a tie
-    // stores `said = null, said_confidence = 'split'`), forced here.
+    // stores `said = null, said_confidence = 'split'`), forced here. Note the
+    // closing clause: "were balloted" and "nothing here checked" cannot both
+    // be true in the same sentence, so the tied branch gets its own tail.
     test('PURE: tied — no live example, forced fixture', () => {
       const rows = [
         finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
@@ -379,7 +381,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(reason).toBe(
         'No finding in this window carries a `said` label, so there is nothing to count. 3 findings were ' +
         'balloted and tied (`said_confidence` = `split`). Reported as not measured rather than as zero: a zero ' +
-        'would assert nobody disputed a finding, which nothing here checked.',
+        'would assert nobody disputed a finding, and a tied ballot settled no verdict either way.',
       );
     });
 
@@ -392,6 +394,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
 
       const tied = compute([finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
       expect(tied).toContain('1 finding was balloted and tied (`said_confidence` = `split`).');
+      expect(tied).toContain('a tied ballot settled no verdict either way');
     });
 
     // `said_evidence` values that are NOT engaged (`'none'`, `'stale-signal'`,
@@ -412,7 +415,47 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(reason).not.toContain('has a thread reply or PR discussion on record but no said ballot yet');
     });
 
-    test('mixture: tied + no engaged evidence', () => {
+    // POSITIVE counting. `saidConfidence` mirrors `did_confidence`, whose
+    // fuller domain (documented at `unanimous`, ~stats.ts:1623) is
+    // 'unanimous'/'majority'/'split'/'single-vote'/'none' — more than the two
+    // values {null, 'split'} this line's fast path assumes for a null `said`.
+    // A row that matches neither positive test must not be silently absorbed
+    // into "no ballot was ever cast", which it has not earned: it goes to an
+    // explicit residual bucket instead, so the total never silently drops
+    // findings the way `findings.length - tied` would have.
+    test('a said_confidence value outside {null, split} lands in an explicit residual bucket, not "no ballot"', () => {
+      const rows = [finding({ saidConfidence: 'unanimous', saidEvidence: 'none' })];
+      const reason = compute(rows, spend()).disputedAsWrong.reason!;
+      expect(reason).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding carries a ' +
+        '`said_confidence` value this line does not recognize. Reported as not measured rather than as zero: a ' +
+        'zero would assert nobody disputed a finding, which nothing here checked.',
+      );
+    });
+
+    test('the residual bucket does not silently drop counts when mixed with named buckets', () => {
+      const rows = [
+        finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+        finding({ saidConfidence: 'unanimous', saidEvidence: 'none' }),
+        finding({ saidConfidence: 'majority', saidEvidence: 'none' }),
+      ];
+      const o = compute(rows, spend());
+      expect(o.disputedAsWrong.saidRecorded).toBe(0); // untouched — still gated on `said`, not `saidConfidence`
+      const reason = o.disputedAsWrong.reason!;
+      expect(reason).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding was ' +
+        'balloted and tied (`said_confidence` = `split`), 1 carries no thread reply or PR discussion on record ' +
+        'at all, so no ballot was ever cast for it, and 2 carry a `said_confidence` value this line does not ' +
+        'recognize. Reported as not measured rather than as zero: a zero would assert nobody disputed a ' +
+        'finding, and a tied ballot settled no verdict either way.',
+      );
+    });
+
+    // Bare numerals after the first fragment — "2 findings…and 3 findings…"
+    // reads as two separate counts of the same population; "2 findings…and
+    // 3…" reads as one window's breakdown, which is what it is.
+    test('mixture: tied + no engaged evidence (bare numeral after the first fragment)', () => {
       const rows = [
         finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
         finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
@@ -423,9 +466,9 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No finding in this window carries a `said` label, so there is nothing to count. 2 findings were ' +
-        'balloted and tied (`said_confidence` = `split`) and 3 findings carry no thread reply or PR discussion ' +
-        'on record at all, so no ballot was ever cast for them. Reported as not measured rather than as zero: a ' +
-        'zero would assert nobody disputed a finding, which nothing here checked.',
+        'balloted and tied (`said_confidence` = `split`) and 3 carry no thread reply or PR discussion on ' +
+        'record at all, so no ballot was ever cast for them. Reported as not measured rather than as zero: a ' +
+        'zero would assert nobody disputed a finding, and a tied ballot settled no verdict either way.',
       );
     });
 
@@ -441,9 +484,9 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(reason).toBe(
         'No finding in this window carries a `said` label, so there is nothing to count. 2 findings have a ' +
         'thread reply or PR discussion on record but no said ballot yet (`said_confidence` is null despite ' +
-        'that) and 3 findings carry no thread reply or PR discussion on record at all, so no ballot was ever ' +
-        'cast for them. Reported as not measured rather than as zero: a zero would assert nobody disputed a ' +
-        'finding, which nothing here checked.',
+        'that) and 3 carry no thread reply or PR discussion on record at all, so no ballot was ever cast for ' +
+        'them. Reported as not measured rather than as zero: a zero would assert nobody disputed a finding, ' +
+        'which nothing here checked.',
       );
     });
 
@@ -459,10 +502,11 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No finding in this window carries a `said` label, so there is nothing to count. 1 finding was ' +
-        'balloted and tied (`said_confidence` = `split`), 2 findings have a thread reply or PR discussion on ' +
-        'record but no said ballot yet (`said_confidence` is null despite that), and 3 findings carry no ' +
-        'thread reply or PR discussion on record at all, so no ballot was ever cast for them. Reported as not ' +
-        'measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+        'balloted and tied (`said_confidence` = `split`), 2 have a thread reply or PR discussion on record but ' +
+        'no said ballot yet (`said_confidence` is null despite that), and 3 carry no thread reply or PR ' +
+        'discussion on record at all, so no ballot was ever cast for them. Reported as not measured rather ' +
+        'than as zero: a zero would assert nobody disputed a finding, and a tied ballot settled no verdict ' +
+        'either way.',
       );
     });
 
@@ -476,7 +520,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       );
     });
 
-    // The removed claim: the previous round asserted THIS CARD could not tell
+    // The removed claim: an earlier round asserted THIS CARD could not tell
     // the three states apart. That was false the moment both columns were
     // selected, so it must not reappear in any state, pure or mixed.
     test('no state claims the card cannot tell the three states apart', () => {
@@ -490,6 +534,30 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         expect(reason).not.toContain('cannot tell them apart');
         expect(reason).not.toContain('THIS CARD');
       }
+    });
+
+    // The closing "why not zero" clause must never say "nothing here
+    // checked" where a tied ballot is in the mix — three ballots WERE cast
+    // and asked exactly this question, which contradicts "nothing checked"
+    // two clauses earlier in the same sentence.
+    test('the closing clause never says "nothing here checked" where a tie is present', () => {
+      const pureTied = compute([finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
+      expect(pureTied).not.toContain('nothing here checked');
+
+      const mixedWithTie = compute(
+        [
+          finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
+          finding({ saidConfidence: null, saidEvidence: 'none' }),
+        ],
+        spend(),
+      ).disputedAsWrong.reason!;
+      expect(mixedWithTie).not.toContain('nothing here checked');
+
+      // ...and conversely, "settled no verdict" must not appear where there
+      // is no tie — it would assert a check that never happened.
+      const noTie = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
+      expect(noTie).toContain('nothing here checked');
+      expect(noTie).not.toContain('settled no verdict');
     });
   });
 

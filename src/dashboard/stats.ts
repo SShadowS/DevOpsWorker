@@ -1360,11 +1360,18 @@ export interface ReviewValueFindingRow {
   did: string | null;
   didConfidence: string | null;
   said: string | null;
-  /** Null when no said ballot was ever cast, `'split'` when one was cast and
+  /** On a row whose `said` is null (the only case this is read for): null
+   *  means no said ballot was ever cast, `'split'` means one was cast and
    *  tied (`said` has no `SaidLabel` value for a tie, so both leave `said`
-   *  null — see the column comment in src/db/postgres.ts). Read only by the
-   *  not-measured `reason` in `disputedAsWrong`, to say WHICH null-`said`
-   *  state a window is actually in instead of listing all of them. */
+   *  null — see the column comment in src/db/postgres.ts). The column's
+   *  fuller domain, mirroring `did_confidence`, also has `'unanimous'`,
+   *  `'majority'`, and `'single-vote'` — values that pair with a non-null
+   *  `said` (a ballot resolved to an answer) and so are outside the two
+   *  above for THIS scope, not values this field promises never to hold.
+   *  Read only by the not-measured `reason` in `disputedAsWrong`, to say
+   *  WHICH null-`said` state a window is actually in instead of listing all
+   *  of them — see `buildDisputedNotMeasuredReason` for how it treats a row
+   *  outside the two documented values rather than assuming one. */
   saidConfidence: string | null;
   saidEvidence: string | null;
   leadTimeMins: number | null;
@@ -1712,28 +1719,43 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
   return head + cause;
 }
 
+/** `finding.saidEvidence` counts as a reply on record — same test the
+ *  engagement computation above already applies to the same column. */
+function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
+  return f.saidEvidence != null && (ENGAGED_EVIDENCE as readonly string[]).includes(f.saidEvidence);
+}
+
 /** The `disputedAsWrong.reason` string for a not-measured window — call ONLY
  *  where `saidRecorded === 0`, i.e. every row in `findings` has `said` null.
- *  `said_confidence` ALONE is not enough to resolve which of the three states
- *  a null `said` means (verified against production: live rows in this
- *  branch all carry `said_confidence` null, and that value is shared by two
- *  of the three states) — `said_evidence` is needed too, to separate them:
+ *  `said_confidence` ALONE is not enough to resolve which state a null
+ *  `said` means (verified against production: live rows in this branch all
+ *  carry `said_confidence` null, and that value is shared by two of the
+ *  three states below) — `said_evidence` is needed too:
  *    - `said_confidence = 'split'`: a ballot WAS cast and it tied.
  *    - `said_confidence` null AND `said_evidence` is an engaged value
- *      (`ENGAGED_EVIDENCE`, same set the engagement line above classifies):
- *      there is a thread reply or PR discussion on record, but the sweep has
- *      not classified it for `said` yet.
+ *      (`hasEngagedEvidence`, the same test the engagement line above
+ *      applies): there is a thread reply or PR discussion on record, but the
+ *      sweep has not classified it for `said` yet.
  *    - `said_confidence` null AND `said_evidence` is not engaged: no ballot
  *      was ever cast, because a said ballot is only spent where there is a
  *      reply to read. `'none'`, `'stale-signal'`, and unset are folded
  *      together here — none of the three is a reply on record, which is the
  *      only thing this bucket claims.
+ *  Every bucket is a POSITIVE test on `saidConfidence` (`=== 'split'` or
+ *  `== null`), never a complement — `findings.length - tied` would only
+ *  prove "not split", and this file already has one doc comment (on
+ *  `unanimous`, ~20 lines above) that was corrected for exactly that
+ *  over-read once the column's fuller domain was written down. Any row that
+ *  matches neither positive test (`saidConfidence` is neither `'split'` nor
+ *  null — not expected to occur, but not disproven for this column either)
+ *  lands in an explicit, honestly-worded residual bucket rather than being
+ *  silently absorbed into "no ballot was ever cast", which it would not earn.
  *  Names every bucket that is non-empty (there can be more than one — e.g. a
  *  window with both a tie and an unclassified reply) rather than picking one.
- *  Live at 2026-08-08, only the third bucket has ever been observed (63 of 63
- *  not-yet-measured rows carry `said_evidence = 'none'`) — the other two are
- *  unverifiable against production today and are pinned by forced fixtures in
- *  the test suite instead. */
+ *  Live at 2026-08-08, only the "no ballot" bucket has ever been observed (63
+ *  of 63 not-yet-measured rows carry `said_evidence = 'none'`) — the other
+ *  two are unverifiable against production today and are pinned by forced
+ *  fixtures in the test suite instead. */
 function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): string {
   if (findings.length === 0) {
     return (
@@ -1743,32 +1765,41 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   }
 
   const tied = findings.filter((f) => f.saidConfidence === 'split').length;
-  const notYetClassified = findings.filter(
-    (f) => f.saidConfidence !== 'split' && f.saidEvidence != null && (ENGAGED_EVIDENCE as readonly string[]).includes(f.saidEvidence),
-  ).length;
-  const noEngagedEvidence = findings.length - tied - notYetClassified;
+  const noBallotAtAll = findings.filter((f) => f.saidConfidence == null);
+  const notYetClassified = noBallotAtAll.filter(hasEngagedEvidence).length;
+  const noEngagedEvidence = noBallotAtAll.length - notYetClassified;
+  const unrecognized = findings.length - tied - noBallotAtAll.length;
+
+  // Bare numerals after the first fragment — repeating "finding(s)" once per
+  // clause reads as three separate counts rather than one window's breakdown.
+  let namedFinding = false;
+  const subject = (n: number): string => {
+    if (namedFinding) return `${n}`;
+    namedFinding = true;
+    return countOf(n, 'finding');
+  };
 
   const parts: string[] = [];
   if (tied > 0) {
-    parts.push(
-      `${countOf(tied, 'finding')} ${agree(tied, 'was balloted and tied', 'were balloted and tied')} ` +
-      '(`said_confidence` = `split`)',
-    );
+    parts.push(`${subject(tied)} ${agree(tied, 'was balloted and tied', 'were balloted and tied')} (\`said_confidence\` = \`split\`)`);
   }
   if (notYetClassified > 0) {
     parts.push(
-      `${countOf(notYetClassified, 'finding')} ${agree(notYetClassified, 'has', 'have')} a thread reply or PR ` +
-      'discussion on record but no said ballot yet (`said_confidence` is null despite that)',
+      `${subject(notYetClassified)} ${agree(notYetClassified, 'has', 'have')} a thread reply or PR discussion on ` +
+      'record but no said ballot yet (`said_confidence` is null despite that)',
     );
   }
   if (noEngagedEvidence > 0) {
     parts.push(
-      `${countOf(noEngagedEvidence, 'finding')} ${agree(noEngagedEvidence, 'carries', 'carry')} no thread reply ` +
-      `or PR discussion on record at all, so no ballot was ever cast for ${itThem(noEngagedEvidence)}`,
+      `${subject(noEngagedEvidence)} ${agree(noEngagedEvidence, 'carries', 'carry')} no thread reply or PR ` +
+      `discussion on record at all, so no ballot was ever cast for ${itThem(noEngagedEvidence)}`,
     );
   }
+  if (unrecognized > 0) {
+    parts.push(`${subject(unrecognized)} ${agree(unrecognized, 'carries', 'carry')} a \`said_confidence\` value this line does not recognize`);
+  }
 
-  // `parts` cannot be empty here: tied + notYetClassified + noEngagedEvidence
+  // `parts` cannot be empty here: tied + noBallotAtAll.length + unrecognized
   // === findings.length, and findings.length > 0 is checked above.
   const state =
     parts.length === 1
@@ -1777,11 +1808,22 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
         ? `${parts[0]} and ${parts[1]}`
         : `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
 
+  // The reason NOT to print zero differs by state. "Nothing here checked" is
+  // true only where `tied === 0`: a tied ballot DID check — three ballots
+  // were cast and asked exactly this question — it just settled nothing, so
+  // "nothing checked" would contradict the "was balloted" clause two clauses
+  // earlier in the same sentence. Where a tie is part of the mix, the
+  // stronger and still-true fact is that the check ran and produced no
+  // verdict either way.
+  const zeroWouldMisstate =
+    tied === 0
+      ? 'a zero would assert nobody disputed a finding, which nothing here checked'
+      : 'a zero would assert nobody disputed a finding, and a tied ballot settled no verdict either way';
+
   return (
     'No finding in this window carries a `said` label, so there is nothing to count. ' +
     state +
-    '. Reported as not measured rather than as zero: a zero would assert nobody disputed a finding, which ' +
-    'nothing here checked.'
+    `. Reported as not measured rather than as zero: ${zeroWouldMisstate}.`
   );
 }
 
@@ -1921,6 +1963,12 @@ export function computeReviewValue(
       // computation cannot tell the three states apart — it can, now that
       // both columns are selected, and saying otherwise would be the exact
       // stale claim this comment exists to keep from recurring.
+      //
+      // Nor may the closing "why not print zero" clause say "nothing here
+      // checked" unconditionally: where a tied ballot is part of the mix,
+      // three ballots WERE cast and asked exactly this question — the check
+      // ran, it just settled nothing. `buildDisputedNotMeasuredReason` swaps
+      // in the tied-aware version of that clause whenever `tied > 0`.
       reason: saidRecorded > 0 ? null : buildDisputedNotMeasuredReason(findings),
     },
     leadTime: {
