@@ -1778,10 +1778,14 @@ function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
  *  produced, on rows since repaired. */
 function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): string {
   if (findings.length === 0) {
+    // "a finding", not the "these" the four tails below use: over an empty
+    // window a demonstrative points at nothing the reader has been told
+    // exists. The plural elsewhere has antecedents — the buckets named in the
+    // sentence before it.
     return (
       'No finding was traced in this window at all, so there is nothing to count. Reported as not measured ' +
-      'rather than as zero: counting this as zero would say nobody disputed these, and nothing here checked ' +
-      'whether anyone did.'
+      'rather than as zero: counting this as zero would say nobody disputed a finding, and nothing here ' +
+      'checked whether anyone did.'
     );
   }
 
@@ -1876,15 +1880,30 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   // ran, and does confirm, in the sentence immediately before this one in the
   // rendered string. "Anything" would have to mean "everything" for both halves
   // to stand, which is not what it says. So that mix gets its own tail, naming
-  // the votes that ran AND scoping the residual doubt to the rows it actually
-  // covers: neither fact is dropped, neither is stretched over rows it does not
-  // hold for. The tie is named as "the votes that ran did not agree on an
-  // answer" and NOT as "the three checks": three is the per-finding vote count,
+  // the tie AND scoping the residual doubt to the rows it actually covers:
+  // neither fact is dropped, neither is stretched over rows it does not hold
+  // for.
+  //
+  // WHICH IS WHY THE TWO TIE CLAUSES ARE WORDED DIFFERENTLY, and it is not
+  // drift. The standalone tie tail says "the votes that ran did not agree on an
+  // answer" — sound there, because that branch requires `unrecognized === 0`,
+  // so every other row carries `saidConfidence` null and ran no votes at all.
+  // The combined tail says "the votes THIS CARD CAN READ did not agree", the
+  // narrower claim, because it renders only where `unrecognized > 0` and those
+  // rows carry `'unanimous'`/`'majority'`/`'single-vote'` (see the domain note
+  // on `saidConfidence`, ~stats.ts:1367-1370) — votes that ran AND agreed. Over
+  // that window "the votes that ran" is a definite description whose extension
+  // includes them, so the universal would deny votes the window actually holds:
+  // the exact mirror of the older defect above, over-claiming the tie at the
+  // residual's expense instead of denying the tie to protect it.
+  //
+  // Neither form says "the three checks": three is the PER-FINDING vote count,
   // and a window holding two tied findings ran six.
   const zeroWouldMisstate =
     tied > 0 && unrecognized > 0
-      ? 'counting this as zero would say nobody disputed these; the votes that ran did not agree on an answer, ' +
-        'and this card cannot tell what was checked for the ones whose stored result it cannot read'
+      ? 'counting this as zero would say nobody disputed these; the votes this card can read did not agree on ' +
+        `an answer, and this card cannot tell what was checked for the ${agree(unrecognized, 'one', 'ones')} ` +
+        'whose stored result it cannot read'
       : unrecognized > 0
         ? 'counting this as zero would say nobody disputed these, and this card cannot tell whether anything was checked'
         : tied > 0

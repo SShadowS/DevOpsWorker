@@ -462,8 +462,9 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
         '1 finding was voted on and the votes did not agree, 1 has no reply on record, so nothing was ever ' +
         'checked for it, and 2 have a stored result this card cannot read. Reported as not measured rather ' +
-        'than as zero: counting this as zero would say nobody disputed these; the votes that ran did not agree ' +
-        'on an answer, and this card cannot tell what was checked for the ones whose stored result it cannot read.',
+        'than as zero: counting this as zero would say nobody disputed these; the votes this card can read did ' +
+        'not agree on an answer, and this card cannot tell what was checked for the ones whose stored result ' +
+        'it cannot read.',
       );
     });
 
@@ -487,13 +488,15 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
         '1 finding was voted on and the votes did not agree and 1 has a stored result this card cannot read. ' +
         'Reported as not measured rather than as zero: counting this as zero would say nobody disputed these; ' +
-        'the votes that ran did not agree on an answer, and this card cannot tell what was checked for the ' +
-        'ones whose stored result it cannot read.',
+        'the votes this card can read did not agree on an answer, and this card cannot tell what was checked ' +
+        'for the one whose stored result it cannot read.',
       );
-      // The tie survives...
-      expect(withTie).toContain('the votes that ran did not agree on an answer');
+      // The tie survives, scoped to the votes this card can read — the
+      // unrecognized row beside it carries votes that ran AND agreed.
+      expect(withTie).toContain('the votes this card can read did not agree on an answer');
+      expect(withTie).not.toContain('the votes that ran did not agree on an answer');
       // ...the residual doubt is scoped to the rows it covers, not to the window...
-      expect(withTie).toContain('cannot tell what was checked for the ones whose');
+      expect(withTie).toContain('cannot tell what was checked for the one whose');
       // ...and neither the window-wide denial nor "nothing checked" appears.
       expect(withTie).not.toContain('cannot tell whether anything was checked');
       expect(withTie).not.toContain('nothing here checked whether anyone did');
@@ -562,9 +565,12 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute([], spend(), { readBandRaised: 0, noFileAnchor: 0 }).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No finding was traced in this window at all, so there is nothing to count. Reported as not measured ' +
-        'rather than as zero: counting this as zero would say nobody disputed these, and nothing here checked ' +
-        'whether anyone did.',
+        'rather than as zero: counting this as zero would say nobody disputed a finding, and nothing here ' +
+        'checked whether anyone did.',
       );
+      // "a finding", not "these": there is no window contents for a
+      // demonstrative to point at here.
+      expect(reason).not.toContain('nobody disputed these');
     });
 
     // The removed claim: an earlier round asserted THIS CARD could not tell
@@ -595,6 +601,15 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // they must be re-derived from the new wording, not left to pass vacuously.
     test('the closing clause never denies a check happened where a tie is present', () => {
       const DENIALS = ['nothing here checked whether anyone did', 'cannot tell whether anything was checked'];
+      // Two forms, because the combined tail scopes the tie to the votes this
+      // card can read (an unrecognized row in the window carries votes that ran
+      // AND agreed, so the universal would over-claim). Exactly one must
+      // render: naming the tie is the property, and the two forms are
+      // alternatives, never both.
+      const TIE_NAMED = [
+        'the votes that ran did not agree on an answer',
+        'the votes this card can read did not agree on an answer',
+      ];
       const tiedRow = finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' });
       const withTie: Array<[string, ReviewValueFindingRow[]]> = [
         ['tie alone', [tiedRow]],
@@ -604,17 +619,22 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       ];
       for (const [label, rows] of withTie) {
         const reason = compute(rows, spend()).disputedAsWrong.reason!;
-        expect(reason, `${label}: the tie must be named`).toContain('the votes that ran did not agree on an answer');
+        expect(
+          TIE_NAMED.filter((form) => reason.includes(form)),
+          `${label}: the tie must be named, in exactly one of its two forms`,
+        ).toHaveLength(1);
         for (const denial of DENIALS) {
           expect(reason, `${label}: must not contain "${denial}"`).not.toContain(denial);
         }
       }
 
-      // ...and conversely, "settled no verdict" must not appear where there
-      // is no tie — it would assert a check that never happened.
+      // ...and conversely, NEITHER form of "the votes did not agree" may appear
+      // where there is no tie — it would assert a check that never happened.
       const noTie = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
       expect(noTie).toContain('nothing here checked whether anyone did');
-      expect(noTie).not.toContain('the votes that ran did not agree on an answer');
+      for (const form of TIE_NAMED) {
+        expect(noTie, `no tie: must not contain "${form}"`).not.toContain(form);
+      }
     });
 
     // THE FULL TRUTH TABLE. Four buckets give FIFTEEN non-empty combinations,
@@ -656,9 +676,19 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         'counting this as zero would say nobody disputed these, and the votes that ran did not agree on an answer.';
       const CANNOT_CONFIRM =
         'counting this as zero would say nobody disputed these, and this card cannot tell whether anything was checked.';
+      // "the votes THIS CARD CAN READ", not "the votes that ran": this tail
+      // renders only where an `unrecognized` row is also present, and those
+      // rows carry a `said_confidence` of `'unanimous'`/`'majority'`/
+      // `'single-vote'` (~stats.ts:1367-1370) — votes that ran AND agreed. A
+      // definite description over the whole window would deny them. The
+      // standalone tie tail above keeps the universal, where it is sound.
+      //
+      // Singular here because every combination below contributes exactly one
+      // row per bucket, so `agree()` renders "the one". The plural form is
+      // pinned by the two-unrecognized-row test above.
       const TIED_AND_SCOPED_RESIDUAL =
-        'counting this as zero would say nobody disputed these; the votes that ran did not agree on an answer, and ' +
-        'this card cannot tell what was checked for the ones whose stored result it cannot read.';
+        'counting this as zero would say nobody disputed these; the votes this card can read did not agree on an ' +
+        'answer, and this card cannot tell what was checked for the one whose stored result it cannot read.';
       const allTails = [NOTHING_CHECKED, TIED_SETTLED, CANNOT_CONFIRM, TIED_AND_SCOPED_RESIDUAL];
 
       // The "must not also contain" assertions below only mean anything if no
