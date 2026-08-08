@@ -2713,3 +2713,14 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 @media (max-width: 767px) {
   .review-value-table { display: block; overflow-x: auto; }
 }
+
+/* Task 1: a card's own glossary sentence (card-glossary.tsx). Same size/color contract as the
+   __note/__summary rules above — --color-text-secondary, not --color-text-muted, for WCAG AA
+   (4.5:1) on this prose. Italic marks it as a definition aside, distinct from the card's own
+   __note caveats. */
+.card-glossary {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
