@@ -825,29 +825,94 @@ describe('computeReviewValue — spend', () => {
 
   test("the note names the per-read-band-item figure as NOT comparable, so nothing invites a trend reading", () => {
     const o = compute(mixedWindow(), spend());
-    expect(o.spend.note).toContain('NOT comparable');
+    expect(o.spend.note).toContain('not the same measurement');
     expect(o.spend.note).toContain('not a trend');
   });
 
   // -------------------------------------------------------------------------
-  // The note is DERIVED from two state flags, and the flags are what these
-  // assert. An earlier version of this block constructed a fully-judged
-  // fixture and then asserted `toContain('can only fall')` — pinning as
-  // required behaviour a growth claim that is false at full coverage. It also
-  // banned only the literal word 'large', which "the unjudged share dominates"
-  // would have walked straight past. Asserting the STATE, and asserting the
-  // absence of growth claims as a property over a phrase set, fixes both.
+  // The note is plain English, built from the same two state flags
+  // (`numeratorState`, `denominatorState`) — the flags are what these assert,
+  // and the full rendered sentence is pinned with `toBe` so the wording can't
+  // drift without a test noticing. Six combinations are reachable in theory
+  // (the movement half re-tests `numerator === 'exact'`, the same boolean the
+  // numerator half already branches on, so the two halves are not independent
+  // axes — see `NumeratorState`'s doc comment), but the `reviewCount === 0`
+  // pair is unreachable in practice per that comment, so only one degenerate
+  // case plus the four real combinations are pinned below.
   // -------------------------------------------------------------------------
 
-  /** Every way the note could claim the denominator still has room to move. */
-  const GROWTH_CLAIMS = ['not settled', 'grows as', 'can only FALL', 'can only fall', 'upper bound at the current coverage'];
+  const TRAILER =
+    'This is not the same measurement as the Cost panel, which divides by every problem raised rather than by the ' +
+    'problems confirmed acted on, so the gap between the two numbers is not a trend. Spend here counts every ' +
+    'review on these pull requests, including repeat reviews.';
+
+  test('reviewCount 0 is a degenerate case: the note says there is no real figure, not a false zero', () => {
+    const o = compute([], { totalCostUsd: 0, reviewCount: 0, reviewsMissingCost: 0 });
+    expect(o.spend.numeratorState).toBe('exact');
+    expect(o.spend.reviewCount).toBe(0);
+    expect(o.spend.note).toBe(
+      `No review on these pull requests has a recorded cost, so this shows zero rather than a real figure. ${TRAILER}`,
+    );
+  });
+
+  test('exact numerator + settled denominator: the note says the figure is reliable and will not move', () => {
+    const o = compute([finding({ did: 'ADDRESSED' })], spend());
+    expect(o.spend.numeratorState).toBe('exact');
+    expect(o.spend.denominatorState).toBe('settled');
+    expect(o.spend.note).toBe(
+      'This figure is reliable. Every review on these pull requests has a recorded cost, and every problem has ' +
+        `been checked, so it will not move as more checking happens. ${TRAILER}`,
+    );
+  });
+
+  test('floor numerator + settled denominator: the note says the real figure is AT LEAST this much', () => {
+    const o = compute([finding({ did: 'ADDRESSED' })], spend({ reviewCount: 65, reviewsMissingCost: 1 }));
+    expect(o.spend.numeratorState).toBe('floor');
+    expect(o.spend.denominatorState).toBe('settled');
+    expect(o.spend.note).toBe(
+      'The real figure is at least this much. 1 of 65 reviews has no recorded cost, so the spend shown is lower ' +
+        `than what was actually spent. Every problem has been checked, so that side will not change. ${TRAILER}`,
+    );
+  });
+
+  test('exact numerator + will-grow denominator: the note says the real figure is AT MOST this much', () => {
+    const o = compute(mixedWindow(), spend());
+    expect(o.spend.numeratorState).toBe('exact');
+    expect(o.spend.denominatorState).toBe('will-grow');
+    expect(o.spend.note).toBe(
+      'The real figure is at most this much. Every review has a recorded cost, but not every problem has been ' +
+        `checked yet, and each one confirmed acted on brings this figure down. ${TRAILER}`,
+    );
+  });
+
+  test('floor numerator + will-grow denominator: the note says treat this as a rough reading, pulled both ways', () => {
+    const o = compute(mixedWindow(), spend({ reviewCount: 65, reviewsMissingCost: 1 }));
+    expect(o.spend.numeratorState).toBe('floor');
+    expect(o.spend.denominatorState).toBe('will-grow');
+    expect(o.spend.note).toBe(
+      'Treat this as a rough reading, not a firm number. Two things are still incomplete and they pull in ' +
+        'opposite directions: 1 of 65 reviews has no recorded cost, which makes the figure look low, and not ' +
+        `every problem has been checked yet, which makes it look high. ${TRAILER}`,
+    );
+  });
+
+  /** Every way the note could claim the denominator still has room to move —
+   *  substrings drawn from the two will-grow leaves above and checked absent
+   *  from a settled note. An earlier version of this block constructed a
+   *  fully-judged fixture and then asserted `toContain('can only fall')` —
+   *  pinning as required behaviour a growth claim that is false at full
+   *  coverage. It also banned only the literal word 'large', which "the
+   *  unjudged share dominates" would have walked straight past. Asserting the
+   *  STATE, and asserting the absence of growth claims as a property over a
+   *  phrase set, fixes both. */
+  const GROWTH_CLAIMS = ['not every problem has been checked yet', 'brings this figure down', 'at most this much', 'still incomplete', 'makes it look high'];
 
   test('at PARTIAL coverage the denominator is `will-grow` and the note says the figure can only fall', () => {
     const o = compute(mixedWindow(), spend());
     expect(o.judgedCoverage).toBeLessThan(1);
     expect(o.spend.denominatorState).toBe('will-grow');
     expect(o.spend.numeratorState).toBe('exact');
-    expect(o.spend.note).toContain('can only FALL');
+    expect(o.spend.note).toContain('brings this figure down');
   });
 
   test('at FULL coverage the denominator is `settled` and the note makes NO growth claim at all', () => {
@@ -878,32 +943,32 @@ describe('computeReviewValue — numerator exactness', () => {
   test('claims exactness only when every review carries a cost', () => {
     const o = compute(mixedWindow(), spend({ reviewsMissingCost: 0 }));
     expect(o.spend.numeratorState).toBe('exact');
-    expect(o.spend.note).toContain('The numerator is exact');
+    expect(o.spend.note).toContain('has a recorded cost');
   });
 
-  test('a single review with no cost makes the numerator a FLOOR, and the note never claims exactness', () => {
+  test('a single review with no cost makes the numerator a floor, and the note never claims every review has a cost', () => {
     const o = compute(mixedWindow(), spend({ reviewCount: 65, reviewsMissingCost: 1 }));
     expect(o.spend.numeratorState).toBe('floor');
-    expect(o.spend.note).not.toContain('The numerator is exact');
-    expect(o.spend.note).toContain('FLOOR');
+    expect(o.spend.note).not.toContain('has a recorded cost');
+    expect(o.spend.note).toContain('has no recorded cost');
     expect(o.spend.note).toContain('1 of 65');
   });
 
-  test('a floor numerator and an unsettled denominator move the figure in OPPOSITE directions — so neither bound is claimed', () => {
+  test('a floor numerator and an unsettled denominator move the figure in opposite directions — so neither bound is claimed', () => {
     const o = compute(mixedWindow(), spend({ reviewsMissingCost: 2 }));
     expect(o.spend.numeratorState).toBe('floor');
     expect(o.spend.denominatorState).toBe('will-grow');
-    expect(o.spend.note).toContain('OPPOSITE directions');
+    expect(o.spend.note).toContain('opposite directions');
     // The contradiction this whole finding was about: claiming the figure can
     // only fall while also disclosing that backfilling cost raises it.
-    expect(o.spend.note).not.toContain('can only FALL');
-    expect(o.spend.note).toContain('neither an upper nor a lower bound');
+    expect(o.spend.note).not.toContain('brings this figure down');
+    expect(o.spend.note).toContain('rough reading, not a firm number');
   });
 
-  test('a floor numerator with a settled denominator is a LOWER bound, not an upper one', () => {
+  test('a floor numerator with a settled denominator is a claim the figure is AT LEAST this much, not an upper one', () => {
     const o = compute([finding({ did: 'ADDRESSED' })], spend({ reviewsMissingCost: 1 }));
     expect(o.spend.denominatorState).toBe('settled');
-    expect(o.spend.note).toContain('lower bound, not an upper one');
+    expect(o.spend.note).toContain('at least this much');
   });
 });
 
@@ -1365,11 +1430,11 @@ describe('describeSpend', () => {
   test('the per-item branch states the missing-cost fact ONCE, in the caveat, not also in the detail', () => {
     const o = compute(mixedWindow(), spend({ totalCostUsd: 200, reviewCount: 65, reviewsMissingCost: 1 }));
     const line = describeSpend(o.spend, o.addressed, o);
-    expect(line.caveat).toContain('FLOOR');
-    expect(line.caveat).not.toContain('The numerator is exact');
+    expect(line.caveat).toContain('has no recorded cost');
+    expect(line.caveat).not.toContain('has a recorded cost');
     // Said once, not twice: the detail no longer repeats it.
-    expect(line.detail).not.toContain('FLOOR');
-    const occurrences = (`${line.detail} ${line.caveat}`.match(/carr(?:y|ies) no recorded cost/g) ?? []).length;
+    expect(line.detail).not.toContain('has no recorded cost');
+    const occurrences = (`${line.detail} ${line.caveat}`.match(/\b(?:has|have) no recorded cost\b/g) ?? []).length;
     expect(occurrences).toBe(1);
   });
 });

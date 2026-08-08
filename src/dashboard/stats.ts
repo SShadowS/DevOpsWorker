@@ -1539,28 +1539,27 @@ export interface ReviewValueSpend extends ReviewValueSpendInput {
  *  inlined in `computeReviewValue`) purely so the four state combinations are
  *  readable side by side. */
 function buildSpendNote(numerator: NumeratorState, denominator: DenominatorState, missing: number, reviewCount: number): string {
-  const numeratorClause =
+  const core =
     numerator === 'exact'
       ? reviewCount === 0
-        ? 'No review on these PRs carries a recorded cost, so the numerator is zero rather than exact.'
-        : 'The numerator is exact: every review on these PRs carries a recorded cost.'
-      : `The numerator is a FLOOR, not an exact sum — ${missing} of ${countOf(reviewCount, 'review')} on these PRs ` +
-        `${agree(missing, 'carries', 'carry')} no recorded cost, and backfilling ${itThem(missing)} can only RAISE it.`;
-
-  const movementClause =
-    denominator === 'settled'
-      ? numerator === 'exact'
-        ? 'The denominator is settled: every finding in this window has been judged, so this figure will not move as classification proceeds.'
-        : 'The denominator is settled — every finding here has been judged — so the only unsettled input is the missing cost above, which can only push this figure UP. It is a lower bound, not an upper one.'
-      : numerator === 'exact'
-        ? 'The denominator is not settled: only judged rows can contribute to `addressed`, so it grows as classification coverage rises and this figure can only FALL from where it stands at the coverage stated beside it. Treat it as an upper bound at the current coverage.'
-        : 'Both inputs are unsettled and they move this figure in OPPOSITE directions — the missing cost above pushes it up, judging more findings pushes it down. It is neither an upper nor a lower bound; it is a reading at the current coverage and cost completeness, and nothing more.';
+        ? 'No review on these pull requests has a recorded cost, so this shows zero rather than a real figure.'
+        : denominator === 'settled'
+          ? 'This figure is reliable. Every review on these pull requests has a recorded cost, and every problem has ' +
+            'been checked, so it will not move as more checking happens.'
+          : 'The real figure is at most this much. Every review has a recorded cost, but not every problem has been ' +
+            'checked yet, and each one confirmed acted on brings this figure down.'
+      : denominator === 'settled'
+        ? `The real figure is at least this much. ${missing} of ${countOf(reviewCount, 'review')} ${agree(missing, 'has', 'have')} ` +
+          'no recorded cost, so the spend shown is lower than what was actually spent. Every problem has been ' +
+          'checked, so that side will not change.'
+        : `Treat this as a rough reading, not a firm number. Two things are still incomplete and they pull in opposite ` +
+          `directions: ${missing} of ${countOf(reviewCount, 'review')} ${agree(missing, 'has', 'have')} no recorded cost, ` +
+          'which makes the figure look low, and not every problem has been checked yet, which makes it look high.';
 
   return (
-    `${numeratorClause} ${movementClause} It is also NOT comparable with the Cost panel's "cost per read-band item": ` +
-    'that divides by findings RAISED, this divides by findings CONFIRMED ACTED ON, so the two are different ' +
-    'measurements and the difference between them is not a trend. Spend counts every review on these PRs, ' +
-    'including re-reviews that raised none of the findings counted here.'
+    `${core} This is not the same measurement as the Cost panel, which divides by every problem raised rather than ` +
+    'by the problems confirmed acted on, so the gap between the two numbers is not a trend. Spend here counts ' +
+    'every review on these pull requests, including repeat reviews.'
   );
 }
 
