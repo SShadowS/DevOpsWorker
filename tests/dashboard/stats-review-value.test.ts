@@ -27,7 +27,7 @@ import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 // ---------------------------------------------------------------------------
 
 function finding(overrides: Partial<ReviewValueFindingRow> = {}): ReviewValueFindingRow {
-  return { did: null, didConfidence: null, said: null, saidEvidence: 'none', leadTimeMins: 60, ...overrides };
+  return { did: null, didConfidence: null, said: null, saidConfidence: null, saidEvidence: 'none', leadTimeMins: 60, ...overrides };
 }
 
 function spend(overrides: Partial<ReviewValueSpendInput> = {}): ReviewValueSpendInput {
@@ -321,20 +321,93 @@ describe('computeReviewValue — disputed as factually wrong', () => {
   });
 
   // ENTAILMENT, and the subtler one: WHOSE limitation is it? `saidRecorded ===
-  // 0` establishes what THIS COMPUTATION saw — it selects `f.said` alone — not
-  // what the table can resolve. The table separates all three states: the
-  // columns added two commits before this one exist for precisely that, and the
-  // sweep's own upsert guard depends on the discrimination. Saying "this table
-  // cannot tell them apart" got that backwards, in the one sentence whose whole
-  // subject is what a null means.
-  test('the reason blames the CARD for the ambiguity, not the table that can resolve it', () => {
-    const reason = compute(mixedWindow(), spend()).disputedAsWrong.reason!;
-    expect(reason).toContain('THIS CARD cannot tell them apart, because it reads only `said`');
-    expect(reason).not.toContain('this table cannot tell them apart');
-    // ...and it names the columns that DO separate them, so the claim is
-    // checkable rather than an assurance.
-    expect(reason).toContain('`said_confidence` is null when no ballot was cast and `split` on a tie');
-    expect(reason).toContain('a limit of the question asked here, not of what was recorded');
+  // 0` establishes what THIS COMPUTATION saw. `said_confidence` is now part of
+  // that — the computation reads it, not just `said` — so it can genuinely
+  // separate "a ballot was cast and it tied" from "no ballot was cast at all",
+  // and the reason must say WHICH ONE the window is actually in rather than
+  // claim it cannot tell (the previous round's defect on this exact line: it
+  // said the opposite of what the columns it went on to name already let it
+  // do). Four states below, printed verbatim — see task-8-report.md for the
+  // same output produced by a standalone script, not just this suite.
+  describe('state taxonomy — said_confidence resolves tie vs no-ballot', () => {
+    test('no finding has any said ballot: said_confidence is null throughout (the common empty window)', () => {
+      const rows = [finding(), finding(), finding(), finding(), finding()];
+      const reason = compute(rows, spend()).disputedAsWrong.reason!;
+      expect(reason).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. No said ballot was cast ' +
+        'for any finding in this window — `said_confidence` is null throughout, which rules out a tie: either the ' +
+        'outcome sweep has not classified these findings for `said` yet, or nobody wrote anything for it to read ' +
+        '(a said ballot is only spent on a finding with a thread reply or PR discussion behind it). Reported as ' +
+        'not measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+      );
+    });
+
+    test('every said ballot in the window tied: said_confidence is split throughout, said null throughout', () => {
+      const rows = [
+        finding({ saidConfidence: 'split' }),
+        finding({ saidConfidence: 'split' }),
+        finding({ saidConfidence: 'split' }),
+      ];
+      const reason = compute(rows, spend()).disputedAsWrong.reason!;
+      expect(reason).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. 3 findings in this ' +
+        'window were balloted, and they tied — `said_confidence` is `split` throughout, which is why `said` ' +
+        'itself stores null: `SaidLabel` has no value for a tie. Reported as not measured rather than as zero: a ' +
+        'zero would assert nobody disputed a finding, which nothing here checked.',
+      );
+    });
+
+    test('a mixture: some rows tied, some never balloted', () => {
+      const rows = [
+        finding({ saidConfidence: 'split' }),
+        finding({ saidConfidence: 'split' }),
+        finding(),
+        finding(),
+        finding(),
+      ];
+      const reason = compute(rows, spend()).disputedAsWrong.reason!;
+      expect(reason).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. Of the 5 findings in ' +
+        'this window, 2 findings were balloted and tied, and 3 findings never received a ballot at all — ' +
+        '`said_confidence` separates them: `split` where a ballot tied, null where none was cast. Reported as ' +
+        'not measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+      );
+    });
+
+    test('exactly one finding, and it tied (the count-of-1 case)', () => {
+      const rows = [finding({ saidConfidence: 'split' })];
+      const reason = compute(rows, spend()).disputedAsWrong.reason!;
+      expect(reason).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding in this ' +
+        'window was balloted, and it tied — `said_confidence` is `split` throughout, which is why `said` itself ' +
+        'stores null: `SaidLabel` has no value for a tie. Reported as not measured rather than as zero: a zero ' +
+        'would assert nobody disputed a finding, which nothing here checked.',
+      );
+    });
+
+    // Not one of the four required states, but reachable (a window with rows
+    // traced but none of them said-relevant is not how zero findings happens
+    // in practice — `rows.length === 0` — and the string must not crash or
+    // divide by a zero denominator it never actually names).
+    test('zero findings at all does not crash and still reads as "no ballot cast"', () => {
+      const reason = compute([], spend(), { readBandRaised: 0, noFileAnchor: 0 }).disputedAsWrong.reason!;
+      expect(reason).toContain('No said ballot was cast for any finding in this window');
+    });
+
+    // The removed claim: the previous round asserted THIS CARD could not tell
+    // a tie from "no ballot" apart. That was false the moment `said_confidence`
+    // was selected, so it must not reappear in any of the four states above.
+    test('none of the four states claims the card cannot tell tie from no-ballot apart', () => {
+      const reasons = [
+        compute([finding()], spend()).disputedAsWrong.reason!,
+        compute([finding({ saidConfidence: 'split' })], spend()).disputedAsWrong.reason!,
+        compute([finding({ saidConfidence: 'split' }), finding()], spend()).disputedAsWrong.reason!,
+      ];
+      for (const reason of reasons) {
+        expect(reason).not.toContain('cannot tell them apart');
+        expect(reason).not.toContain('THIS CARD');
+      }
+    });
   });
 
   test('starts measuring on its own once `said` is populated — no code change needed', () => {

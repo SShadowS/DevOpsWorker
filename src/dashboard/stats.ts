@@ -1360,6 +1360,12 @@ export interface ReviewValueFindingRow {
   did: string | null;
   didConfidence: string | null;
   said: string | null;
+  /** Null when no said ballot was ever cast, `'split'` when one was cast and
+   *  tied (`said` has no `SaidLabel` value for a tie, so both leave `said`
+   *  null — see the column comment in src/db/postgres.ts). Read only by the
+   *  not-measured `reason` in `disputedAsWrong`, to say WHICH null-`said`
+   *  state a window is actually in instead of listing all of them. */
+  saidConfidence: string | null;
   saidEvidence: string | null;
   leadTimeMins: number | null;
 }
@@ -1706,6 +1712,44 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
   return head + cause;
 }
 
+/** The `disputedAsWrong.reason` string for a not-measured window — call ONLY
+ *  where `saidRecorded === 0`, i.e. every row in `findings` has `said` null.
+ *  Per the column comment in src/db/postgres.ts, a null `said` splits cleanly
+ *  on `said_confidence`: `'split'` is a ballot that was cast and tied, and
+ *  null is no ballot at all. That is exactly two of the three states a null
+ *  `said` can mean, so this says which one the window is actually in instead
+ *  of listing all three as equally possible — the "sweep hasn't classified
+ *  this yet" / "nobody wrote anything to read" pair stays a disjunction,
+ *  because both leave `said_confidence` null and telling them apart needs
+ *  `said_evidence`, which this function does not use for this line. */
+function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): string {
+  const tied = findings.filter((f) => f.saidConfidence === 'split').length;
+  const noBallot = findings.length - tied;
+
+  const state =
+    tied === 0
+      ? 'No said ballot was cast for any finding in this window — `said_confidence` is null throughout, which ' +
+        'rules out a tie: either the outcome sweep has not classified these findings for `said` yet, or nobody ' +
+        'wrote anything for it to read (a said ballot is only spent on a finding with a thread reply or PR ' +
+        'discussion behind it).'
+      : noBallot === 0
+        ? `${countOf(tied, 'finding')} in this window ` +
+          `${agree(tied, 'was balloted, and it tied', 'were balloted, and they tied')} — ` +
+          '`said_confidence` is `split` throughout, which is why `said` itself stores null: `SaidLabel` has no ' +
+          'value for a tie.'
+        : `Of the ${countOf(findings.length, 'finding')} in this window, ${countOf(tied, 'finding')} ` +
+          `${agree(tied, 'was balloted and tied', 'were balloted and tied')}, and ${countOf(noBallot, 'finding')} ` +
+          'never received a ballot at all — `said_confidence` separates them: `split` where a ballot tied, null ' +
+          'where none was cast.';
+
+  return (
+    'No finding in this window carries a `said` label, so there is nothing to count. ' +
+    state +
+    ' Reported as not measured rather than as zero: a zero would assert nobody disputed a finding, which ' +
+    'nothing here checked.'
+  );
+}
+
 function median(sorted: number[]): number | null {
   if (sorted.length === 0) return null;
   const mid = Math.floor(sorted.length / 2);
@@ -1828,24 +1872,21 @@ export function computeReviewValue(
       // rather than left to the card returning before it reads this.
       //
       // Every clause is scoped to what `saidRecorded === 0` establishes: that
-      // no finding here carries a label. It must not say WHY beyond listing
-      // the possibilities, or it makes the same unestablished-cause claim the
-      // coverage line was corrected for. It must not say the said phase is
-      // unbuilt: it is built and it has run. And it must not say THE TABLE
-      // cannot separate the three states — the table can, via the columns two
-      // commits before this one added for exactly that; what cannot is this
-      // computation, which selects `f.said` alone. That distinction is the
-      // whole subject of the sentence, so getting it backwards was worse here
-      // than it would be anywhere else on the card.
-      reason: saidRecorded > 0 ? null :
-        'No finding in this window carries a `said` label, so there is nothing to count. Three different states ' +
-        'store the same null and THIS CARD cannot tell them apart, because it reads only `said`: the outcome sweep ' +
-        'has not classified these findings for `said` yet, or nobody wrote anything for it to read (a said ballot ' +
-        'is only spent on a finding with a thread reply or PR discussion behind it), or the ballots tied. The TABLE ' +
-        'can separate them — `said_confidence` is null when no ballot was cast and `split` on a tie, and ' +
-        '`said_evidence` says whether there was anything to read — so this is a limit of the question asked here, ' +
-        'not of what was recorded. Reported as not measured rather than as zero: a zero would assert nobody ' +
-        'disputed a finding, which nothing here checked.',
+      // no finding here carries a label. `said_confidence` is read alongside
+      // `said` now, so this computation CAN separate two of the three states
+      // that store the same null — "a ballot was cast and it tied" (`split`)
+      // from "no ballot was cast at all" (null) — and `buildDisputedNotMeasuredReason`
+      // says which one the window is actually in, instead of listing all three
+      // as equally possible. It must not say WHY beyond that, or it makes the
+      // same unestablished-cause claim the coverage line was corrected for: the
+      // "sweep hasn't classified this yet" vs "nobody wrote anything to read"
+      // pair both leave `said_confidence` null, and telling them apart needs
+      // `said_evidence`, which is not read for this line. It must not say the
+      // said phase is unbuilt: it is built and it has run. And it must NOT say
+      // this computation cannot tell a tie from "no ballot" apart — it can,
+      // now that `said_confidence` is selected, and saying otherwise would be
+      // the exact stale claim this comment exists to keep from recurring.
+      reason: saidRecorded > 0 ? null : buildDisputedNotMeasuredReason(findings),
     },
     leadTime: {
       beforeSettleCount: beforeSettle.length,
@@ -1908,10 +1949,11 @@ export async function getReviewValueStats(sql: postgres.Sql, window: StatsWindow
     did: string | null;
     did_confidence: string | null;
     said: string | null;
+    said_confidence: string | null;
     said_evidence: string | null;
     lead_time_mins: number | null;
   }>>`
-    SELECT f.did, f.did_confidence, f.said, f.said_evidence, f.lead_time_mins
+    SELECT f.did, f.did_confidence, f.said, f.said_confidence, f.said_evidence, f.lead_time_mins
     FROM finding_outcomes f
     WHERE f.first_raised_at > now() - (${days}::int * interval '1 day')
       AND EXISTS (
@@ -2020,6 +2062,7 @@ export async function getReviewValueStats(sql: postgres.Sql, window: StatsWindow
         did: r.did,
         didConfidence: r.did_confidence,
         said: r.said,
+        saidConfidence: r.said_confidence,
         saidEvidence: r.said_evidence,
         leadTimeMins: r.lead_time_mins == null ? null : Number(r.lead_time_mins),
       })),
