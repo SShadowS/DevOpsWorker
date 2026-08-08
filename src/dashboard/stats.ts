@@ -1720,7 +1720,8 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
 }
 
 /** `finding.saidEvidence` counts as a reply on record — same test the
- *  engagement computation above already applies to the same column. */
+ *  engagement computation below (`engaged`/`silent`, ~stats.ts:1890) already
+ *  applies to the same column. */
 function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
   return f.saidEvidence != null && (ENGAGED_EVIDENCE as readonly string[]).includes(f.saidEvidence);
 }
@@ -1733,9 +1734,9 @@ function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
  *  three states below) — `said_evidence` is needed too:
  *    - `said_confidence = 'split'`: a ballot WAS cast and it tied.
  *    - `said_confidence` null AND `said_evidence` is an engaged value
- *      (`hasEngagedEvidence`, the same test the engagement line above
- *      applies): there is a thread reply or PR discussion on record, but the
- *      sweep has not classified it for `said` yet.
+ *      (`hasEngagedEvidence`, the same test the engagement computation below
+ *      applies, ~stats.ts:1890): there is a thread reply or PR discussion on
+ *      record, but the sweep has not classified it for `said` yet.
  *    - `said_confidence` null AND `said_evidence` is not engaged: no ballot
  *      was ever cast, because a said ballot is only spent where there is a
  *      reply to read. `'none'`, `'stale-signal'`, and unset are folded
@@ -1744,9 +1745,10 @@ function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
  *  Every bucket is a POSITIVE test on `saidConfidence` (`=== 'split'` or
  *  `== null`), never a complement — `findings.length - tied` would only
  *  prove "not split", and this file already has one doc comment (on
- *  `unanimous`, ~20 lines above) that was corrected for exactly that
- *  over-read once the column's fuller domain was written down. Any row that
- *  matches neither positive test lands in an explicit, honestly-worded
+ *  `unanimous`'s domain, ~stats.ts:1630 — documenting `did_confidence`, which
+ *  `said_confidence` mirrors, not this column directly) that was corrected
+ *  for exactly that over-read once the fuller domain was written down. Any
+ *  row that matches neither positive test lands in an explicit, honestly-worded
  *  residual bucket (`unrecognized`, below — see the comment there for why
  *  this is defensive rather than speculative) rather than being silently
  *  absorbed into "no ballot was ever cast", which it would not earn.
@@ -1816,17 +1818,23 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
         ? `${parts[0]} and ${parts[1]}`
         : `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
 
-  // The reason NOT to print zero differs by state. "Nothing here checked" is
-  // true only where `tied === 0`: a tied ballot DID check — three ballots
-  // were cast and asked exactly this question — it just settled nothing, so
-  // "nothing checked" would contradict the "was balloted" clause two clauses
-  // earlier in the same sentence. Where a tie is part of the mix, the
-  // stronger and still-true fact is that the check ran and produced no
-  // verdict either way.
+  // The reason NOT to print zero differs by state, and `tied === 0` is a
+  // NECESSARY condition for "nothing here checked", not a sufficient one —
+  // an earlier version of this gate used it as sufficient and leaked the
+  // claim into windows containing an `unrecognized` row too. A row lands in
+  // `unrecognized` because its `saidConfidence` is neither `'split'` nor
+  // null, which — per the comment on `unrecognized` above — is exactly the
+  // signature a stale pre-guard writer leaves on a row it graded three
+  // ballots for. This line cannot tell whether that check happened, so it
+  // must not claim either way, and takes priority over the tied-only wording
+  // below: "cannot confirm" is the one true statement across every mix that
+  // includes it, tied or not.
   const zeroWouldMisstate =
-    tied === 0
-      ? 'a zero would assert nobody disputed a finding, which nothing here checked'
-      : 'a zero would assert nobody disputed a finding, and a tied ballot settled no verdict either way';
+    unrecognized > 0
+      ? 'a zero would assert nobody disputed a finding, and this line cannot confirm whether anything here was checked'
+      : tied === 0
+        ? 'a zero would assert nobody disputed a finding, which nothing here checked'
+        : 'a zero would assert nobody disputed a finding, and a tied ballot settled no verdict either way';
 
   return (
     'No finding in this window carries a `said` label, so there is nothing to count. ' +

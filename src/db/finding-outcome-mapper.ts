@@ -29,8 +29,11 @@ export interface FindingOutcome {
   prSettledAt: string | null;
   /** Finding posted → PR merged. The strongest predictor of engagement found so far. */
   leadTimeMins: number | null;
-  /** Null both when nothing was judged AND when the ballots tied — `saidConfidence`
-   *  is what tells those apart ('none' vs 'split'). */
+  /** Null both when no said ballot was ever cast AND when the ballots tied —
+   *  `saidConfidence` is what tells those apart: the writer stores NULL for
+   *  no ballot, `'split'` for a tie (see the column comment in
+   *  src/db/postgres.ts — never the string `'none'`, which this field's
+   *  own doc used to say and which nothing here writes). */
   said: SaidLabel | null;
   /** A span copied verbatim from a human comment. Only ever written from a ballot
    *  whose quote was checked against the human text, so it is never a sentence the

@@ -416,20 +416,27 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     });
 
     // POSITIVE counting. `saidConfidence` mirrors `did_confidence`, whose
-    // fuller domain (documented at `unanimous`, ~stats.ts:1623) is
+    // fuller domain (documented at `unanimous`'s domain, ~stats.ts:1630) is
     // 'unanimous'/'majority'/'split'/'single-vote'/'none' — more than the two
     // values {null, 'split'} this line's fast path assumes for a null `said`.
     // A row that matches neither positive test must not be silently absorbed
     // into "no ballot was ever cast", which it has not earned: it goes to an
     // explicit residual bucket instead, so the total never silently drops
     // findings the way `findings.length - tied` would have.
+    //
+    // The closing clause here is "cannot confirm", NOT "nothing here
+    // checked" — a prior round left the tail gated on `tied === 0` alone,
+    // which let it leak into exactly this state: a `saidConfidence` of
+    // `'unanimous'` means three ballots WERE graded (a stale pre-guard
+    // writer's signature, per the comment on `unrecognized`), so "nothing
+    // checked" would be false, not merely unproven.
     test('a said_confidence value outside {null, split} lands in an explicit residual bucket, not "no ballot"', () => {
       const rows = [finding({ saidConfidence: 'unanimous', saidEvidence: 'none' })];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No finding in this window carries a `said` label, so there is nothing to count. 1 finding carries a ' +
         '`said_confidence` value this line does not recognize. Reported as not measured rather than as zero: a ' +
-        'zero would assert nobody disputed a finding, which nothing here checked.',
+        'zero would assert nobody disputed a finding, and this line cannot confirm whether anything here was checked.',
       );
     });
 
@@ -448,8 +455,27 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         'balloted and tied (`said_confidence` = `split`), 1 carries no thread reply or PR discussion on record ' +
         'at all, so no ballot was ever cast for it, and 2 carry a `said_confidence` value this line does not ' +
         'recognize. Reported as not measured rather than as zero: a zero would assert nobody disputed a ' +
-        'finding, and a tied ballot settled no verdict either way.',
+        'finding, and this line cannot confirm whether anything here was checked.',
       );
+    });
+
+    // The residual "cannot confirm" tail takes priority over the tied-aware
+    // tail whenever BOTH are present in the same window — the mix above pins
+    // this with a tied row present, this test isolates the priority claim
+    // itself: unrecognized wins even though a tie is also in the mix, because
+    // "a tied ballot settled no verdict either way" would silently drop the
+    // caveat the unrecognized row needs.
+    test('unrecognized takes priority over the tied-aware closing clause when both are present', () => {
+      const withTie = compute(
+        [
+          finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
+          finding({ saidConfidence: 'unanimous', saidEvidence: 'none' }),
+        ],
+        spend(),
+      ).disputedAsWrong.reason!;
+      expect(withTie).toContain('this line cannot confirm whether anything here was checked');
+      expect(withTie).not.toContain('a tied ballot settled no verdict either way');
+      expect(withTie).not.toContain('which nothing here checked');
     });
 
     // Bare numerals after the first fragment — "2 findings…and 3 findings…"
@@ -558,6 +584,41 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const noTie = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
       expect(noTie).toContain('nothing here checked');
       expect(noTie).not.toContain('settled no verdict');
+    });
+
+    // The three closing-clause states are mutually exclusive: exactly one of
+    // {"nothing here checked", "settled no verdict", "cannot confirm"} may
+    // appear, gated on `tied === 0 && unrecognized === 0` /
+    // `tied > 0 && unrecognized === 0` / `unrecognized > 0` respectively. This
+    // is the necessary-vs-sufficient defect a prior round shipped: gating
+    // solely on `tied === 0` made "nothing checked" render for an
+    // unrecognized-only window too.
+    test('the three closing-clause states never overlap, across all four bucket combinations', () => {
+      const NOTHING_CHECKED = 'which nothing here checked';
+      const TIED_SETTLED = 'and a tied ballot settled no verdict either way';
+      const CANNOT_CONFIRM = 'and this line cannot confirm whether anything here was checked';
+      const allClauses = [NOTHING_CHECKED, TIED_SETTLED, CANNOT_CONFIRM];
+
+      const cases: Array<[string, ReturnType<typeof finding>[], string]> = [
+        ['no ballot only', [finding({ saidConfidence: null, saidEvidence: 'none' })], NOTHING_CHECKED],
+        ['tied only', [finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' })], TIED_SETTLED],
+        ['unrecognized only', [finding({ saidConfidence: 'unanimous', saidEvidence: 'none' })], CANNOT_CONFIRM],
+        [
+          'tied + unrecognized',
+          [
+            finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
+            finding({ saidConfidence: 'unanimous', saidEvidence: 'none' }),
+          ],
+          CANNOT_CONFIRM, // priority over "settled no verdict" — see the dedicated priority test above
+        ],
+      ];
+      for (const [label, rows, expectedClause] of cases) {
+        const reason = compute(rows, spend()).disputedAsWrong.reason!;
+        expect(reason, label).toContain(expectedClause);
+        for (const clause of allClauses) {
+          if (clause !== expectedClause) expect(reason, `${label}: must not also contain "${clause}"`).not.toContain(clause);
+        }
+      }
     });
   });
 
