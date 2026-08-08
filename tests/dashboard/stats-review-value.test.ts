@@ -321,87 +321,170 @@ describe('computeReviewValue — disputed as factually wrong', () => {
   });
 
   // ENTAILMENT, and the subtler one: WHOSE limitation is it? `saidRecorded ===
-  // 0` establishes what THIS COMPUTATION saw. `said_confidence` is now part of
-  // that — the computation reads it, not just `said` — so it can genuinely
-  // separate "a ballot was cast and it tied" from "no ballot was cast at all",
-  // and the reason must say WHICH ONE the window is actually in rather than
-  // claim it cannot tell (the previous round's defect on this exact line: it
-  // said the opposite of what the columns it went on to name already let it
-  // do). Four states below, printed verbatim — see task-8-report.md for the
-  // same output produced by a standalone script, not just this suite.
-  describe('state taxonomy — said_confidence resolves tie vs no-ballot', () => {
-    test('no finding has any said ballot: said_confidence is null throughout (the common empty window)', () => {
-      const rows = [finding(), finding(), finding(), finding(), finding()];
+  // 0` establishes what THIS COMPUTATION saw. `said_confidence` ALONE only
+  // resolves a tie; production data (2026-08-08: 63/63 not-yet-measured rows
+  // carry `said_confidence` null) showed it cannot separate "no ballot" from
+  // "not yet classified" on its own — both leave that column null — so
+  // `said_evidence` is read too, and the reason names whichever of the three
+  // states the window is actually in rather than claim it cannot tell (the
+  // earlier round's defect on this exact line: it said the opposite of what
+  // the columns it went on to name already let it do). Every state below,
+  // printed verbatim — see task-8-report.md for the same output produced by
+  // a standalone script, not just this suite. Two of the three states below
+  // (not-yet-classified, tied) have NO live example as of 2026-08-08 — they
+  // are pinned here from forced fixtures precisely because they can't be
+  // eyeballed against production.
+  describe('state taxonomy — said_confidence + said_evidence resolve all three states', () => {
+    test('PURE: no engaged evidence — the only state observed in production (63/63 live rows)', () => {
+      const rows = Array.from({ length: 5 }, () => finding({ saidConfidence: null, saidEvidence: 'none' }));
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. No said ballot was cast ' +
-        'for any finding in this window — `said_confidence` is null throughout, which rules out a tie: either the ' +
-        'outcome sweep has not classified these findings for `said` yet, or nobody wrote anything for it to read ' +
-        '(a said ballot is only spent on a finding with a thread reply or PR discussion behind it). Reported as ' +
-        'not measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+        'No finding in this window carries a `said` label, so there is nothing to count. 5 findings carry no ' +
+        'thread reply or PR discussion on record at all, so no ballot was ever cast for them. Reported as not ' +
+        'measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
       );
     });
 
-    test('every said ballot in the window tied: said_confidence is split throughout, said null throughout', () => {
+    // NO LIVE EXAMPLE as of 2026-08-08 — every finding with a reply on record
+    // has, live, already been balloted. Forced here because this is exactly
+    // the state the previous round got backwards on: it read a null
+    // `said_confidence` alone as license to say "nobody wrote anything",
+    // which is false whenever `said_evidence` is engaged.
+    test('PURE: has a reply on record but not yet classified — no live example, forced fixture', () => {
       const rows = [
-        finding({ saidConfidence: 'split' }),
-        finding({ saidConfidence: 'split' }),
-        finding({ saidConfidence: 'split' }),
+        finding({ saidConfidence: null, saidEvidence: 'thread-reply' }),
+        finding({ saidConfidence: null, saidEvidence: 'pr-discussion' }),
+        finding({ saidConfidence: null, saidEvidence: 'thread-reply' }),
+        finding({ saidConfidence: null, saidEvidence: 'thread-reply' }),
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 3 findings in this ' +
-        'window were balloted, and they tied — `said_confidence` is `split` throughout, which is why `said` ' +
-        'itself stores null: `SaidLabel` has no value for a tie. Reported as not measured rather than as zero: a ' +
-        'zero would assert nobody disputed a finding, which nothing here checked.',
+        'No finding in this window carries a `said` label, so there is nothing to count. 4 findings have a ' +
+        'thread reply or PR discussion on record but no said ballot yet (`said_confidence` is null despite ' +
+        'that). Reported as not measured rather than as zero: a zero would assert nobody disputed a finding, ' +
+        'which nothing here checked.',
       );
     });
 
-    test('a mixture: some rows tied, some never balloted', () => {
+    // NO LIVE EXAMPLE as of 2026-08-08 (0 of 72 said-labelled rows are a
+    // tie) — reachable in principle (`SaidLabel` has no tie value, so a tie
+    // stores `said = null, said_confidence = 'split'`), forced here.
+    test('PURE: tied — no live example, forced fixture', () => {
       const rows = [
-        finding({ saidConfidence: 'split' }),
-        finding({ saidConfidence: 'split' }),
-        finding(),
-        finding(),
-        finding(),
+        finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
+        finding({ saidConfidence: 'split', saidEvidence: 'pr-discussion' }),
+        finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. Of the 5 findings in ' +
-        'this window, 2 findings were balloted and tied, and 3 findings never received a ballot at all — ' +
-        '`said_confidence` separates them: `split` where a ballot tied, null where none was cast. Reported as ' +
-        'not measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
-      );
-    });
-
-    test('exactly one finding, and it tied (the count-of-1 case)', () => {
-      const rows = [finding({ saidConfidence: 'split' })];
-      const reason = compute(rows, spend()).disputedAsWrong.reason!;
-      expect(reason).toBe(
-        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding in this ' +
-        'window was balloted, and it tied — `said_confidence` is `split` throughout, which is why `said` itself ' +
-        'stores null: `SaidLabel` has no value for a tie. Reported as not measured rather than as zero: a zero ' +
+        'No finding in this window carries a `said` label, so there is nothing to count. 3 findings were ' +
+        'balloted and tied (`said_confidence` = `split`). Reported as not measured rather than as zero: a zero ' +
         'would assert nobody disputed a finding, which nothing here checked.',
       );
     });
 
-    // Not one of the four required states, but reachable (a window with rows
-    // traced but none of them said-relevant is not how zero findings happens
-    // in practice — `rows.length === 0` — and the string must not crash or
-    // divide by a zero denominator it never actually names).
-    test('zero findings at all does not crash and still reads as "no ballot cast"', () => {
+    test('count-of-1 for each pure state', () => {
+      const noEngaged = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
+      expect(noEngaged).toContain('1 finding carries no thread reply or PR discussion on record at all, so no ballot was ever cast for it.');
+
+      const notYetClassified = compute([finding({ saidConfidence: null, saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
+      expect(notYetClassified).toContain('1 finding has a thread reply or PR discussion on record but no said ballot yet');
+
+      const tied = compute([finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
+      expect(tied).toContain('1 finding was balloted and tied (`said_confidence` = `split`).');
+    });
+
+    // `said_evidence` values that are NOT engaged (`'none'`, `'stale-signal'`,
+    // and unset) must all fold into the SAME "no engaged evidence" bucket —
+    // none of the three is a reply on record, and none licenses "not yet
+    // classified" (that state requires a reply to classify). Getting this
+    // fold wrong — e.g. reading `null` `said_evidence` as "has a reply
+    // pending classification" — is exactly the kind of unearned claim this
+    // line exists to avoid.
+    test('stale-signal and unset said_evidence fold into "no engaged evidence", not "not yet classified"', () => {
+      const rows = [
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+        finding({ saidConfidence: null, saidEvidence: 'stale-signal' }),
+        finding({ saidConfidence: null, saidEvidence: null }),
+      ];
+      const reason = compute(rows, spend()).disputedAsWrong.reason!;
+      expect(reason).toContain('3 findings carry no thread reply or PR discussion on record at all');
+      expect(reason).not.toContain('has a thread reply or PR discussion on record but no said ballot yet');
+    });
+
+    test('mixture: tied + no engaged evidence', () => {
+      const rows = [
+        finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
+        finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+      ];
+      const reason = compute(rows, spend()).disputedAsWrong.reason!;
+      expect(reason).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. 2 findings were ' +
+        'balloted and tied (`said_confidence` = `split`) and 3 findings carry no thread reply or PR discussion ' +
+        'on record at all, so no ballot was ever cast for them. Reported as not measured rather than as zero: a ' +
+        'zero would assert nobody disputed a finding, which nothing here checked.',
+      );
+    });
+
+    test('mixture: not-yet-classified + no engaged evidence', () => {
+      const rows = [
+        finding({ saidConfidence: null, saidEvidence: 'pr-discussion' }),
+        finding({ saidConfidence: null, saidEvidence: 'pr-discussion' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+      ];
+      const reason = compute(rows, spend()).disputedAsWrong.reason!;
+      expect(reason).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. 2 findings have a ' +
+        'thread reply or PR discussion on record but no said ballot yet (`said_confidence` is null despite ' +
+        'that) and 3 findings carry no thread reply or PR discussion on record at all, so no ballot was ever ' +
+        'cast for them. Reported as not measured rather than as zero: a zero would assert nobody disputed a ' +
+        'finding, which nothing here checked.',
+      );
+    });
+
+    test('mixture: all three states present at once', () => {
+      const rows = [
+        finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
+        finding({ saidConfidence: null, saidEvidence: 'pr-discussion' }),
+        finding({ saidConfidence: null, saidEvidence: 'pr-discussion' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+        finding({ saidConfidence: null, saidEvidence: 'none' }),
+      ];
+      const reason = compute(rows, spend()).disputedAsWrong.reason!;
+      expect(reason).toBe(
+        'No finding in this window carries a `said` label, so there is nothing to count. 1 finding was ' +
+        'balloted and tied (`said_confidence` = `split`), 2 findings have a thread reply or PR discussion on ' +
+        'record but no said ballot yet (`said_confidence` is null despite that), and 3 findings carry no ' +
+        'thread reply or PR discussion on record at all, so no ballot was ever cast for them. Reported as not ' +
+        'measured rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+      );
+    });
+
+    // Reachable (a window with reviews but nothing traced yet) and must not
+    // crash on an empty `parts` list.
+    test('zero findings traced at all does not crash', () => {
       const reason = compute([], spend(), { readBandRaised: 0, noFileAnchor: 0 }).disputedAsWrong.reason!;
-      expect(reason).toContain('No said ballot was cast for any finding in this window');
+      expect(reason).toBe(
+        'No finding was traced in this window at all, so there is nothing to count. Reported as not measured ' +
+        'rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.',
+      );
     });
 
     // The removed claim: the previous round asserted THIS CARD could not tell
-    // a tie from "no ballot" apart. That was false the moment `said_confidence`
-    // was selected, so it must not reappear in any of the four states above.
-    test('none of the four states claims the card cannot tell tie from no-ballot apart', () => {
+    // the three states apart. That was false the moment both columns were
+    // selected, so it must not reappear in any state, pure or mixed.
+    test('no state claims the card cannot tell the three states apart', () => {
       const reasons = [
-        compute([finding()], spend()).disputedAsWrong.reason!,
-        compute([finding({ saidConfidence: 'split' })], spend()).disputedAsWrong.reason!,
-        compute([finding({ saidConfidence: 'split' }), finding()], spend()).disputedAsWrong.reason!,
+        compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!,
+        compute([finding({ saidConfidence: null, saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!,
+        compute([finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!,
+        compute(mixedWindow(), spend()).disputedAsWrong.reason!,
       ];
       for (const reason of reasons) {
         expect(reason).not.toContain('cannot tell them apart');

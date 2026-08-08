@@ -1714,38 +1714,73 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
 
 /** The `disputedAsWrong.reason` string for a not-measured window — call ONLY
  *  where `saidRecorded === 0`, i.e. every row in `findings` has `said` null.
- *  Per the column comment in src/db/postgres.ts, a null `said` splits cleanly
- *  on `said_confidence`: `'split'` is a ballot that was cast and tied, and
- *  null is no ballot at all. That is exactly two of the three states a null
- *  `said` can mean, so this says which one the window is actually in instead
- *  of listing all three as equally possible — the "sweep hasn't classified
- *  this yet" / "nobody wrote anything to read" pair stays a disjunction,
- *  because both leave `said_confidence` null and telling them apart needs
- *  `said_evidence`, which this function does not use for this line. */
+ *  `said_confidence` ALONE is not enough to resolve which of the three states
+ *  a null `said` means (verified against production: live rows in this
+ *  branch all carry `said_confidence` null, and that value is shared by two
+ *  of the three states) — `said_evidence` is needed too, to separate them:
+ *    - `said_confidence = 'split'`: a ballot WAS cast and it tied.
+ *    - `said_confidence` null AND `said_evidence` is an engaged value
+ *      (`ENGAGED_EVIDENCE`, same set the engagement line above classifies):
+ *      there is a thread reply or PR discussion on record, but the sweep has
+ *      not classified it for `said` yet.
+ *    - `said_confidence` null AND `said_evidence` is not engaged: no ballot
+ *      was ever cast, because a said ballot is only spent where there is a
+ *      reply to read. `'none'`, `'stale-signal'`, and unset are folded
+ *      together here — none of the three is a reply on record, which is the
+ *      only thing this bucket claims.
+ *  Names every bucket that is non-empty (there can be more than one — e.g. a
+ *  window with both a tie and an unclassified reply) rather than picking one.
+ *  Live at 2026-08-08, only the third bucket has ever been observed (63 of 63
+ *  not-yet-measured rows carry `said_evidence = 'none'`) — the other two are
+ *  unverifiable against production today and are pinned by forced fixtures in
+ *  the test suite instead. */
 function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): string {
-  const tied = findings.filter((f) => f.saidConfidence === 'split').length;
-  const noBallot = findings.length - tied;
+  if (findings.length === 0) {
+    return (
+      'No finding was traced in this window at all, so there is nothing to count. Reported as not measured ' +
+      'rather than as zero: a zero would assert nobody disputed a finding, which nothing here checked.'
+    );
+  }
 
+  const tied = findings.filter((f) => f.saidConfidence === 'split').length;
+  const notYetClassified = findings.filter(
+    (f) => f.saidConfidence !== 'split' && f.saidEvidence != null && (ENGAGED_EVIDENCE as readonly string[]).includes(f.saidEvidence),
+  ).length;
+  const noEngagedEvidence = findings.length - tied - notYetClassified;
+
+  const parts: string[] = [];
+  if (tied > 0) {
+    parts.push(
+      `${countOf(tied, 'finding')} ${agree(tied, 'was balloted and tied', 'were balloted and tied')} ` +
+      '(`said_confidence` = `split`)',
+    );
+  }
+  if (notYetClassified > 0) {
+    parts.push(
+      `${countOf(notYetClassified, 'finding')} ${agree(notYetClassified, 'has', 'have')} a thread reply or PR ` +
+      'discussion on record but no said ballot yet (`said_confidence` is null despite that)',
+    );
+  }
+  if (noEngagedEvidence > 0) {
+    parts.push(
+      `${countOf(noEngagedEvidence, 'finding')} ${agree(noEngagedEvidence, 'carries', 'carry')} no thread reply ` +
+      `or PR discussion on record at all, so no ballot was ever cast for ${itThem(noEngagedEvidence)}`,
+    );
+  }
+
+  // `parts` cannot be empty here: tied + notYetClassified + noEngagedEvidence
+  // === findings.length, and findings.length > 0 is checked above.
   const state =
-    tied === 0
-      ? 'No said ballot was cast for any finding in this window — `said_confidence` is null throughout, which ' +
-        'rules out a tie: either the outcome sweep has not classified these findings for `said` yet, or nobody ' +
-        'wrote anything for it to read (a said ballot is only spent on a finding with a thread reply or PR ' +
-        'discussion behind it).'
-      : noBallot === 0
-        ? `${countOf(tied, 'finding')} in this window ` +
-          `${agree(tied, 'was balloted, and it tied', 'were balloted, and they tied')} — ` +
-          '`said_confidence` is `split` throughout, which is why `said` itself stores null: `SaidLabel` has no ' +
-          'value for a tie.'
-        : `Of the ${countOf(findings.length, 'finding')} in this window, ${countOf(tied, 'finding')} ` +
-          `${agree(tied, 'was balloted and tied', 'were balloted and tied')}, and ${countOf(noBallot, 'finding')} ` +
-          'never received a ballot at all — `said_confidence` separates them: `split` where a ballot tied, null ' +
-          'where none was cast.';
+    parts.length === 1
+      ? parts[0]!
+      : parts.length === 2
+        ? `${parts[0]} and ${parts[1]}`
+        : `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
 
   return (
     'No finding in this window carries a `said` label, so there is nothing to count. ' +
     state +
-    ' Reported as not measured rather than as zero: a zero would assert nobody disputed a finding, which ' +
+    '. Reported as not measured rather than as zero: a zero would assert nobody disputed a finding, which ' +
     'nothing here checked.'
   );
 }
@@ -1872,20 +1907,20 @@ export function computeReviewValue(
       // rather than left to the card returning before it reads this.
       //
       // Every clause is scoped to what `saidRecorded === 0` establishes: that
-      // no finding here carries a label. `said_confidence` is read alongside
-      // `said` now, so this computation CAN separate two of the three states
-      // that store the same null — "a ballot was cast and it tied" (`split`)
-      // from "no ballot was cast at all" (null) — and `buildDisputedNotMeasuredReason`
-      // says which one the window is actually in, instead of listing all three
-      // as equally possible. It must not say WHY beyond that, or it makes the
-      // same unestablished-cause claim the coverage line was corrected for: the
-      // "sweep hasn't classified this yet" vs "nobody wrote anything to read"
-      // pair both leave `said_confidence` null, and telling them apart needs
-      // `said_evidence`, which is not read for this line. It must not say the
-      // said phase is unbuilt: it is built and it has run. And it must NOT say
-      // this computation cannot tell a tie from "no ballot" apart — it can,
-      // now that `said_confidence` is selected, and saying otherwise would be
-      // the exact stale claim this comment exists to keep from recurring.
+      // no finding here carries a label. `said_confidence` alone only
+      // resolves ONE of the three states that share that null (a tie); the
+      // other two — "sweep hasn't classified this yet" vs "nobody wrote
+      // anything to read" — both leave `said_confidence` null and are told
+      // apart only by `said_evidence`, which is why that column is read here
+      // too (see `buildDisputedNotMeasuredReason`). The reason names every
+      // state the window actually shows instead of listing all three as
+      // equally possible. It must not say WHY beyond what those two columns
+      // establish, or it makes the same unestablished-cause claim the
+      // coverage line was corrected for. It must not say the said phase is
+      // unbuilt: it is built and it has run. And it must NOT say this
+      // computation cannot tell the three states apart — it can, now that
+      // both columns are selected, and saying otherwise would be the exact
+      // stale claim this comment exists to keep from recurring.
       reason: saidRecorded > 0 ? null : buildDisputedNotMeasuredReason(findings),
     },
     leadTime: {
