@@ -182,6 +182,21 @@ export interface ReviewThread {
 export const STALE_NOTICE_PREFIX = '_Not detected in review of ';
 
 /**
+ * Heading text of the pr-reviewer's own comments — the in-progress placeholder
+ * ("## Code Review In Progress") and the final summary ("## Code Review — ..."),
+ * both templated in `src/agents/pr-reviewer/CLAUDE.md`. Consumers that read PR
+ * discussion (e.g. `private/scripts/sweep-outcomes.ts`,
+ * `private/scripts/review-outcomes.ts`) match on `# ${BOT_SUMMARY_HEADING_TEXT}`
+ * or `## ${BOT_SUMMARY_HEADING_TEXT}` to drop the bot's own comment out of the
+ * human-discussion stream. Deliberately the bare heading text, not `## ` +
+ * text: the heading-level tolerance belongs to the callers, this constant only
+ * pins the wording to the prompt that produces it. Bump this if that heading
+ * text changes — `tests/agents/pr-reviewer/bot-summary-heading.test.ts` fails
+ * if it drifts out of sync.
+ */
+export const BOT_SUMMARY_HEADING_TEXT = 'Code Review';
+
+/**
  * Fetch PR threads preserving raw comment content.
  *
  * Deliberately separate from `fetchPRReviewComments`, which strips every HTML
