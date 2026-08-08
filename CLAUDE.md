@@ -157,6 +157,23 @@ When a `/rerun-plan` or `/fix` comment is detected, the checkpoint sets `revisio
 
 Follow TDD, SOLID, and DRY — all within reason. Write tests before implementation where practical, keep responsibilities separated, and extract shared logic when duplication is real (not hypothetical). Don't over-engineer: three similar lines are fine if an abstraction would obscure intent.
 
+## Writing
+
+Write in plain English.
+
+Use common words and short sentences. Avoid jargon when a simpler term exists. If a technical
+term is necessary, define it the first time you use it. Assume the reader is intelligent but
+unfamiliar with the terminology. Be concise, but do not remove details needed for correctness.
+
+This applies to everything a person reads: dashboard text, log lines, error messages, comments,
+and docs. Dashboard text has the least forgiving audience — someone reading a card has no access
+to the code that produced it, so a column name or a maths term on screen is a dead end for them.
+Name the thing, not the field it lives in: "the team disputed the finding", not
+`said = 'rejected-wrong'`.
+
+Plain does not mean vague. A sentence still may not claim more than the code establishes, and
+shortening one is the easiest way to break that.
+
 ## Error Hierarchy
 
 All pipeline errors extend `PipelineError` in `src/sdk/errors.ts`. Key types: `AgentExecutionError`, `AgentValidationError`, `ExternalServiceError`, `CheckpointTimeoutError`, `RevisionExhaustedError`. The REST client throws `AzureDevOpsError` (plain `Error`, not `PipelineError`) — the orchestrator wraps it with the correct stage name. On error, state is persisted with the error details; `pipeline continue` retries from the failed stage.
