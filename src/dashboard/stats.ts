@@ -1746,10 +1746,10 @@ function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
  *  prove "not split", and this file already has one doc comment (on
  *  `unanimous`, ~20 lines above) that was corrected for exactly that
  *  over-read once the column's fuller domain was written down. Any row that
- *  matches neither positive test (`saidConfidence` is neither `'split'` nor
- *  null — not expected to occur, but not disproven for this column either)
- *  lands in an explicit, honestly-worded residual bucket rather than being
- *  silently absorbed into "no ballot was ever cast", which it would not earn.
+ *  matches neither positive test lands in an explicit, honestly-worded
+ *  residual bucket (`unrecognized`, below — see the comment there for why
+ *  this is defensive rather than speculative) rather than being silently
+ *  absorbed into "no ballot was ever cast", which it would not earn.
  *  Names every bucket that is non-empty (there can be more than one — e.g. a
  *  window with both a tie and an unclassified reply) rather than picking one.
  *  Live at 2026-08-08, only the "no ballot" bucket has ever been observed (63
@@ -1768,6 +1768,14 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   const noBallotAtAll = findings.filter((f) => f.saidConfidence == null);
   const notYetClassified = noBallotAtAll.filter(hasEngagedEvidence).length;
   const noEngagedEvidence = noBallotAtAll.length - notYetClassified;
+  // Defensive, not speculative. The current writer cannot leave `saidConfidence`
+  // outside {null, 'split'} on a null-`said` row, so in normal operation this
+  // bucket is expected to stay empty. It exists because a writer running code
+  // older than the said-guard HAS produced exactly that combination in
+  // production — `said` null beside a non-`split` confidence, on rows whose
+  // ballots were still recorded in `said_votes` — and folding those into "no
+  // ballot was ever cast" would have been false. Nobody has verified this
+  // column's domain beyond what the current writer can produce.
   const unrecognized = findings.length - tied - noBallotAtAll.length;
 
   // Bare numerals after the first fragment — repeating "finding(s)" once per
