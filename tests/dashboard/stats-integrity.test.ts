@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   buildModelUsageSectionView,
   buildContaminationSectionView,
@@ -12,6 +14,7 @@ import {
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { IntegrityStats, EffortMix, SubAgentModelAttributionEntry } from '../../src/dashboard/stats.ts';
 import type { ConfigReport } from '../../src/dashboard/config-report.ts';
+import { NO_MODEL_ACTIVITY_TEXT, FLAGGED_MODEL_KEY_TOOLTIP } from '../../src/dashboard/client/assessors.ts';
 
 // No test in this file may open a database connection or render a component
 // tree (repo convention — see tests/dashboard/tool-breakdown.test.ts). Every
@@ -302,22 +305,33 @@ describe('formatEffortMix', () => {
 
 describe('assessFindingsIntegrity', () => {
   test('zero compared rows -> ok, states there is nothing to compare', () => {
+    // Task 8 (I12): both DB column names removed from rendered prose — the
+    // record-scoping is unchanged ("have both ... recorded"), only the
+    // identifiers naming them are gone.
     const view = assessFindingsIntegrity({ comparedRows: 0, mismatchCount: 0, mismatchRate: null });
     expect(view.status).toBe('ok');
-    expect(view.text).toContain('No rows');
+    expect(view.text).toBe('No rows in this window have both a findings count and a findings list recorded, so there is nothing to compare here.');
+    expect(view.text).not.toContain('findings_count');
+    expect(view.text).not.toContain('findings_list');
   });
 
-  test('zero mismatches among compared rows -> ok', () => {
+  test('zero mismatches among compared rows -> ok (printed at 0 mismatches)', () => {
     const view = assessFindingsIntegrity({ comparedRows: 100, mismatchCount: 0, mismatchRate: 0 });
     expect(view.status).toBe('ok');
-    expect(view.text).toContain('0/100');
+    expect(view.text).toBe('0/100 rows disagree — 0.0% (comparing the stored findings count against the stored findings list)');
   });
 
-  test('even a single mismatch -> attention (not a known caveat like dispatch)', () => {
+  test('even a single mismatch -> attention (not a known caveat like dispatch) (printed at 1 mismatch)', () => {
     const view = assessFindingsIntegrity({ comparedRows: 100, mismatchCount: 1, mismatchRate: 0.01 });
     expect(view.status).toBe('attention');
-    expect(view.text).toContain('1/100');
-    expect(view.text).toContain('1.0%');
+    expect(view.text).toBe('1/100 rows disagree — 1.0% (comparing the stored findings count against the stored findings list)');
+  });
+
+  test('two mismatches (printed at 2) -> the parenthetical never leaks the raw column names', () => {
+    const view = assessFindingsIntegrity({ comparedRows: 50, mismatchCount: 2, mismatchRate: 0.04 });
+    expect(view.text).toContain('2/50 rows disagree');
+    expect(view.text).not.toContain('findings_count');
+    expect(view.text).not.toContain('findings_list');
   });
 });
 
@@ -340,7 +354,20 @@ describe('buildErrorRateSectionView', () => {
 
   test('note names error_max_turns explicitly, not just "errors"', () => {
     const view = buildErrorRateSectionView({ count: 0, total: 10, rate: 0 }, false);
-    expect(view.note).toContain('error_max_turns');
+    expect(view.note).toBe('"Error" here includes every kind of pipeline failure recorded on the row, including error_max_turns — not narrowed to one cause.');
+  });
+
+  // Task 8 (I6): dropped the three internal TS class names in rendered prose
+  // (PipelineError, RevisionExhaustedError, ExternalServiceError) — same
+  // defect class Task 6's review found in a returned string elsewhere. The
+  // pinned error_max_turns substring above still carries the "not narrowed
+  // to one cause" claim; these three carried no distinct information for a
+  // reader with no code access.
+  test('the note no longer names internal PipelineError subtypes', () => {
+    const view = buildErrorRateSectionView({ count: 0, total: 10, rate: 0 }, false);
+    expect(view.note).not.toContain('PipelineError');
+    expect(view.note).not.toContain('RevisionExhaustedError');
+    expect(view.note).not.toContain('ExternalServiceError');
   });
 });
 
@@ -409,5 +436,49 @@ describe('buildIntegrityPanelView', () => {
     const view = buildIntegrityPanelView(state, noPinsReady);
     expect(view.lowSample).toBe(true);
     expect(view.sampleSize).toBe(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 8 — schema/internal names removed from rendered prose, and the two
+// strings shared with stats-costquality.tsx pulled from ONE constant. Flat
+// literals with no count and no branch (S1 ruling) — a source-text pin is
+// adequate; there is no rendering logic to exercise.
+// ---------------------------------------------------------------------------
+
+describe('Task 8 — integrity prose: schema names gone, shared constants imported', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../../src/dashboard/client/components/stats-integrity.tsx', import.meta.url)),
+    'utf-8',
+  );
+
+  test('imports the two constants shared with stats-costquality.tsx from assessors.ts, rather than hand-copying them', () => {
+    expect(src).toMatch(/import\s*\{[^}]*NO_MODEL_ACTIVITY_TEXT[^}]*\}\s*from\s*['"]\.\.\/assessors\.ts['"]/);
+    expect(src).toMatch(/import\s*\{[^}]*FLAGGED_MODEL_KEY_TOOLTIP[^}]*\}\s*from\s*['"]\.\.\/assessors\.ts['"]/);
+  });
+
+  test('the two shared constants are actually used, not just imported', () => {
+    expect(src).toMatch(/\{NO_MODEL_ACTIVITY_TEXT\}/);
+    expect(src).toMatch(/title=\{FLAGGED_MODEL_KEY_TOOLTIP\}/);
+  });
+
+  test('this file\'s copy is identical in VALUE to stats-costquality.tsx\'s — proven by both importing the same binding', () => {
+    expect(NO_MODEL_ACTIVITY_TEXT).toBe('No model activity recorded in this window.');
+    expect(FLAGGED_MODEL_KEY_TOOLTIP).toBe('Matches the [1m] premium long-context contamination pattern');
+  });
+
+  test('the literal DB field name model_usage no longer appears in rendered prose (comments describing behaviour are fine)', () => {
+    expect(src).not.toMatch(/<p[^>]*>[^<]*model_usage/);
+    expect(src).not.toMatch(/title="[^"]*model_usage/);
+  });
+
+  test('the ContaminationTable empty state names data, not "attribution"', () => {
+    expect(src).toContain('No sub-agent model data recorded in this window.');
+    expect(src).not.toContain('No sub-agent model attribution recorded');
+  });
+
+  test('the Dispatch section title no longer embeds the tool_calls schema name or the cryptic authoritative-column shorthand', () => {
+    expect(src).toContain('Dispatch (recorded tool activity vs. the agent roster)');
+    expect(src).not.toMatch(/title="Dispatch \(tool_calls/);
   });
 });

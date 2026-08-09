@@ -3,7 +3,7 @@ import type { FetchState } from '../stats-store.ts';
 import type { IntegrityStats, ModelUsageEntry, EffortMix, SubAgentModelAttributionEntry } from '../../stats.ts';
 import type { ConfigReport } from '../../config-report.ts';
 import { formatPct, formatCost } from '../format.ts';
-import { assessFlaggedModelKeys, assessErrorRate } from '../assessors.ts';
+import { assessFlaggedModelKeys, assessErrorRate, NO_MODEL_ACTIVITY_TEXT, FLAGGED_MODEL_KEY_TOOLTIP } from '../assessors.ts';
 import { buildContaminationAvailability, formatObservedBreakdown } from '../model-contamination.ts';
 import type { AgentModelRow } from '../model-contamination.ts';
 
@@ -243,9 +243,9 @@ export interface FindingsIntegritySectionView {
 export function assessFindingsIntegrity(findingsIntegrity: IntegrityStats['findingsIntegrity']): FindingsIntegritySectionView {
   const { comparedRows, mismatchCount, mismatchRate } = findingsIntegrity;
   if (comparedRows === 0) {
-    return { status: 'ok', text: 'No rows in this window have both findings_count and findings_list recorded.' };
+    return { status: 'ok', text: 'No rows in this window have both a findings count and a findings list recorded, so there is nothing to compare here.' };
   }
-  const text = `${mismatchCount}/${comparedRows} rows disagree — ${formatPct(mismatchRate)} (findings_count vs findings_list length)`;
+  const text = `${mismatchCount}/${comparedRows} rows disagree — ${formatPct(mismatchRate)} (comparing the stored findings count against the stored findings list)`;
   return { status: mismatchCount > 0 ? 'attention' : 'ok', text };
 }
 
@@ -264,8 +264,8 @@ export function buildErrorRateSectionView(errorRate: IntegrityStats['errorRate']
   return {
     status: a.severity,
     text: a.text,
-    note: '"Error" here is any pipeline error recorded on the row — including error_max_turns and every '
-      + 'other PipelineError subtype (RevisionExhaustedError, ExternalServiceError, …) — not narrowed to one cause.',
+    note: '"Error" here includes every kind of pipeline failure recorded on the row, including error_max_turns'
+      + ' — not narrowed to one cause.',
   };
 }
 
@@ -363,7 +363,7 @@ function IntegritySection({ title, status, badge, children }: IntegritySectionPr
 
 function ModelUsageTable({ rows }: { rows: ModelUsageEntry[] }) {
   if (rows.length === 0) {
-    return <p class="integrity-section__empty">No model_usage recorded in this window.</p>;
+    return <p class="integrity-section__empty">{NO_MODEL_ACTIVITY_TEXT}</p>;
   }
   return (
     <table class="integrity-table">
@@ -376,7 +376,7 @@ function ModelUsageTable({ rows }: { rows: ModelUsageEntry[] }) {
             <td class="integrity-table__model">
               {r.model}
               {r.flagged && (
-                <span class="integrity-table__flag" title="Matches the [1m] premium long-context contamination pattern"> ⚠ flagged</span>
+                <span class="integrity-table__flag" title={FLAGGED_MODEL_KEY_TOOLTIP}> ⚠ flagged</span>
               )}
             </td>
             <td>{r.rows}</td>
@@ -404,7 +404,7 @@ function ModelUsageSection({ view }: { view: ModelUsageSectionView }) {
 
 function ContaminationTable({ rows }: { rows: AgentModelRow[] }) {
   if (rows.length === 0) {
-    return <p class="integrity-section__empty">No sub-agent model attribution recorded in this window.</p>;
+    return <p class="integrity-section__empty">No sub-agent model data recorded in this window.</p>;
   }
   return (
     <table class="integrity-table">
@@ -472,7 +472,7 @@ function ContaminationSection({ view }: { view: ContaminationSectionView }) {
 
 function DispatchSection({ view }: { view: DispatchSectionView }) {
   return (
-    <IntegritySection title="Dispatch (tool_calls -> 'Agent' is authoritative)" status="neutral">
+    <IntegritySection title="Dispatch (recorded tool activity vs. the agent roster)" status="neutral">
       <p class="integrity-section__summary">
         median <strong>{view.medianText}</strong> · p90 <strong>{view.p90Text}</strong> · avg roster size <strong>{view.avgRosterText}</strong>
       </p>
