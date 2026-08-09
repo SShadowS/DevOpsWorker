@@ -971,7 +971,10 @@ describe('stats.ts SQL shape', () => {
     // wiring does. The undercount direction ("more models... never fewer", stated
     // as a one-way bias per fix round 1) is pinned against the evaluated constant
     // by "each note keeps the caveat it exists to carry" below.
-    expect(body).toMatch(/note:\s*SUB_AGENT_MODEL_ATTRIBUTION_NOTE\b/);
+    //
+    // Anchored on the TRAILING COMMA at end of line, not on a word boundary. See
+    // the sibling pin below for the leak that taught us the difference.
+    expect(body).toMatch(/note:\s*SUB_AGENT_MODEL_ATTRIBUTION_NOTE,\s*$/m);
   });
 
   // Fix round 1 (task-6, this round): the sibling wiring pin above has no
@@ -981,10 +984,29 @@ describe('stats.ts SQL shape', () => {
   // `inferredEffort.note` to an inline string (or wiring in the wrong
   // constant) would go unnoticed here AND in card-prose-sweep.test.ts's
   // SERVER_NOTES check, which reads the same now-orphaned constant.
+  //
+  // Fix round 3: both pins now require the constant to BE the value, not merely
+  // to be MENTIONED after `note:`. The earlier `\b`-terminated version closed
+  // only the inline-REPLACEMENT case and left APPENDING wide open:
+  //
+  //   note: INFERRED_EFFORT_NOTE + ' …sub_agents… read-band… PR… review(s)…',
+  //
+  // renders four denied tokens verbatim on the Integrity card, and the whole
+  // dashboard suite stayed at 858 pass / 0 fail. Neither guard could see it:
+  // this one asserts a MENTION, and card-prose-sweep.test.ts's SERVER_NOTES
+  // check reads the CONSTANT, so it never sees the appended half. Two guards
+  // written to cover each other, both stopping at the same place — neither read
+  // the string the card actually renders.
+  //
+  // The trailing comma anchored to end-of-line is what makes the assertion say
+  // "is the value": any `+ …` after the constant, any prefix before it, a
+  // renamed `_OLD` constant, and a fully inlined string all fail. The one
+  // legitimate shape it also rejects is a trailing `// comment` on that same
+  // line — put the comment on its own line above, as this file does.
   test("getIntegrityStats' inferredEffort block reuses the exported note", () => {
     const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
-    expect(fn![0]).toMatch(/note:\s*INFERRED_EFFORT_NOTE\b/);
+    expect(fn![0]).toMatch(/note:\s*INFERRED_EFFORT_NOTE,\s*$/m);
   });
 
   // Task 4 (dashboard follow-ups): these two notes are rendered VERBATIM by the
