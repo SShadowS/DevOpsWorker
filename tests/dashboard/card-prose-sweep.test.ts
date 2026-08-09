@@ -392,11 +392,19 @@ describe('rendered-text extraction', () => {
       // the four files added to FILES sit at or below 10 (card-glossary.tsx 3,
       // telemetry-table.tsx 9, tool-usage.tsx 10, against 16-62 for the rest).
       // Keeping 10 would have meant either dropping those files from the sweep
-      // or padding them with blank lines to satisfy a test — both worse than
-      // planting at the three points card-glossary.tsx really has. Nothing is
-      // weakened by the lower floor: the substance is `blind` being empty, and
-      // the end-of-file plant below is a second, independent site that runs
-      // whatever this count is.
+      // or padding them with blank lines to satisfy a test.
+      //
+      // What licenses the lower floor is a MEASUREMENT, not the argument above.
+      // Blank lines are a sample, and a clean sample is not the same as a
+      // representative one — so the extractor was re-run planting at EVERY line
+      // of all ten files, not just the blank ones: 3,939 plants, 512 of them
+      // blind, and every single blind point inside a comment, a JSDoc block or a
+      // template-literal interior, where a plant is genuinely not rendered text.
+      // ZERO blind outside those. The blank-line sample is therefore not hiding
+      // a region, which is the property the old floor of 10 was a crude proxy
+      // for. Re-run that measurement if the extractor changes; the count here is
+      // not what protects the sweep, `blind` being empty is, and the end-of-file
+      // plant below is a second independent site that runs whatever this is.
       expect(points.length, `${basename(f)}: no plant points`).toBeGreaterThan(0);
 
       const blind = points.filter((i) => !caught([...lines.slice(0, i), PLANT, ...lines.slice(i)].join('\n')));

@@ -1059,6 +1059,14 @@ describe('stats.ts SQL shape', () => {
     expect(INFERRED_EFFORT_NOTE).toContain("Nothing records a review's effort level");
     expect(INFERRED_EFFORT_NOTE.toLowerCase()).toContain('overestimate');
     expect(SUB_AGENT_MODEL_ATTRIBUTION_NOTE).toContain('never fewer');
+    // The pointer at the Contamination table, which REPLACED an instruction to
+    // do that comparison by hand — printed directly under the table that already
+    // does it. Without this line the whole substance of that change reverts
+    // silently: dropping "never fewer" fails, and moving the note above the
+    // table fails (stats-integrity.test.ts pins the order), but restoring the
+    // old by-hand sentence left the suite at 865 pass / 0 fail. The order pin
+    // would then have been guarding a pointer that no longer existed.
+    expect(SUB_AGENT_MODEL_ATTRIBUTION_NOTE).toContain('the table above makes that comparison');
   });
 
   // Fix-round-1 regression pin: the cost split previously exposed a plain
