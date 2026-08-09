@@ -3,6 +3,7 @@ import type { FetchState } from '../stats-store.ts';
 import type { CostStats, QualityStats, SubAgentCoverage, CostPerReadBandItem, ModelUsageEntry } from '../../stats.ts';
 import { formatCost, formatPct } from '../format.ts';
 import { MIN_RELIABLE_COVERAGE_PCT } from '../../coverage-thresholds.ts';
+import { countOf } from '../../count-phrase.ts';
 import { worstStatus, NO_MODEL_ACTIVITY_TEXT, FLAGGED_MODEL_KEY_TOOLTIP } from '../assessors.ts';
 
 // ---------------------------------------------------------------------------
@@ -137,12 +138,12 @@ export interface ModelCostAssessment {
 export function assessModelBreakdownCost(modelBreakdown: ModelUsageEntry[]): ModelCostAssessment {
   const flagged = modelBreakdown.filter((m) => m.flagged);
   if (flagged.length === 0) {
-    return { status: 'ok', text: `${modelBreakdown.length} model(s) billed in this window, no flagged keys` };
+    return { status: 'ok', text: `${countOf(modelBreakdown.length, 'model')} billed in this window, none flagged` };
   }
   const flaggedCost = flagged.reduce((s, m) => s + m.totalCostUsd, 0);
   return {
     status: 'attention',
-    text: `${flagged.length} flagged model(s) costing ${formatCost(flaggedCost)}: ${flagged.map((m) => m.model).join(', ')} — see the Integrity panel's Model usage section`,
+    text: `${countOf(flagged.length, 'flagged model')} costing ${formatCost(flaggedCost)}: ${flagged.map((m) => m.model).join(', ')} — see the Integrity panel's Model usage section`,
   };
 }
 
@@ -445,6 +446,22 @@ function CostSplitSection({ data }: { data: CostStats }) {
   );
 }
 
+/** The Cost card's sampling note.
+ *
+ *  `monthlyProjection.basis` is a NOUN PHRASE ("linear extrapolation of the 30d
+ *  window total") and has other call sites, so it stays a noun phrase; the sentence
+ *  is built HERE. Appending it after a full stop rendered a subjectless lowercase
+ *  fragment — "…150 total rows. linear extrapolation of the 30d window total." */
+export function describeCostSampleNote(d: {
+  costSampleSize: number;
+  sampleSize: number;
+  monthlyProjection: { basis: string };
+}): string {
+  return `Median, P90 and average are computed over ${countOf(d.costSampleSize, 'row')} with cost ` +
+    `recorded, which may differ from this window's ${countOf(d.sampleSize, 'row')} in total. ` +
+    `Monthly projection is a ${d.monthlyProjection.basis}.`;
+}
+
 function CostOverviewSection({ data }: { data: CostStats }) {
   return (
     <CostSection title="Cost overview" status="neutral">
@@ -460,10 +477,7 @@ function CostOverviewSection({ data }: { data: CostStats }) {
         <dt>Monthly projection</dt>
         <dd>{formatCostOrNA(data.monthlyProjection.value)}</dd>
       </dl>
-      <p class="cost-section__note">
-        Median/P90/average computed over {data.costSampleSize} row(s) with cost recorded — may differ from this
-        window's {data.sampleSize} total row(s). {data.monthlyProjection.basis}.
-      </p>
+      <p class="cost-section__note">{describeCostSampleNote(data)}</p>
     </CostSection>
   );
 }
@@ -752,7 +766,7 @@ function BelowBandRowsSection({ data }: { data: QualityStats }) {
   return (
     <QualitySection title="Reviews with zero critical/major findings" status="neutral">
       <p class="quality-section__summary">
-        {data.belowBandCount} of {data.readBandSampleSize} review(s) with findings recorded surfaced zero critical/major
+        {data.belowBandCount} of {countOf(data.readBandSampleSize, 'review')} with findings recorded surfaced zero critical or major
         findings ({formatPctValue(data.belowBandPct)}).
       </p>
       <p class="quality-section__note">
@@ -763,6 +777,11 @@ function BelowBandRowsSection({ data }: { data: QualityStats }) {
   );
 }
 
+// Named `verdictDistribution` in the payload, headed "Recommendation" on screen.
+// The values are `pr_reviews.recommendation` (free text, z.string()), and the
+// Review-value card's own "Verdict" column heads an unrelated quantity — the
+// `did` outcome. One word for two quantities in mono font on two cards read as
+// one thing. The empty state below already said "No recommendations recorded".
 function VerdictTable({ dist }: { dist: Record<string, number> }) {
   const total = Object.values(dist).reduce((s, n) => s + n, 0);
   const rows = Object.entries(dist).sort((a, b) => b[1] - a[1]);
@@ -771,7 +790,7 @@ function VerdictTable({ dist }: { dist: Record<string, number> }) {
     <table class="quality-table">
       <thead>
         <tr>
-          <th>Verdict</th>
+          <th>Recommendation</th>
           <th>Count</th>
           <th>Share</th>
         </tr>
@@ -791,7 +810,7 @@ function VerdictTable({ dist }: { dist: Record<string, number> }) {
 
 function VerdictDistributionSection({ data }: { data: QualityStats }) {
   return (
-    <QualitySection title="Verdict distribution" status="neutral">
+    <QualitySection title="Recommendation distribution" status="neutral">
       <VerdictTable dist={data.verdictDistribution} />
     </QualitySection>
   );

@@ -99,14 +99,16 @@ describe('flagged model wording is shared with the Cost card', () => {
 
   const settledNoPins = { status: 'ready', rows: [] } as unknown as SettledContaminationAvailability;
 
-  test('both Integrity-side assessors say "flagged model(s)", never "model key(s)"', () => {
+  test('both Integrity-side assessors say "flagged model", never "model key(s)"', () => {
     const one = assessFlaggedModelKeys(integrity(['claude-opus-5[1m]']));
-    expect(one.text).toContain('1 flagged model(s): claude-opus-5[1m]');
+    expect(one.text).toContain('1 flagged model: claude-opus-5[1m]');
     expect(one.text).not.toContain('key');
+    expect(one.text).not.toContain('(s)');
 
     const combined = assessModelIntegrity(integrity(['claude-opus-5[1m]']), settledNoPins);
-    expect(combined.text).toContain('1 flagged model(s): claude-opus-5[1m]');
+    expect(combined.text).toContain('1 flagged model: claude-opus-5[1m]');
     expect(combined.text).not.toContain('model key');
+    expect(combined.text).not.toContain('(s)');
   });
 
   // The clean branches too. Leaving them at "no flagged model keys" would have
@@ -121,15 +123,11 @@ describe('flagged model wording is shared with the Cost card', () => {
   // each card uses for a flagged row, it must be the same noun. `assessors.ts`
   // is the only file this repo can change to keep that true, which is why the
   // guard lives here and not beside either card.
-  // The shared noun still carries a hand-written "(s)" placeholder. That is
-  // known-remaining and not settled — see the note on `assessModelBreakdownCost`
-  // in tests/dashboard/stats-costquality.test.ts. Whatever replaces it has to
-  // replace it on all three call sites at once, which is what this pins.
   test('the Cost card and the Integrity card name a flagged row identically', () => {
     const costText = assessModelBreakdownCost([
       { model: 'claude-opus-5[1m]', rows: 1, totalCostUsd: 3.75, totalOutputTokens: 500, flagged: true },
     ]);
-    const NOUN = /\d+ flagged model\(s\)/;
+    const NOUN = /\d+ flagged models?\b/;
     expect(costText.text).toMatch(NOUN);
     expect(assessFlaggedModelKeys(integrity(['claude-opus-5[1m]'])).text).toMatch(NOUN);
     expect(assessModelIntegrity(integrity(['claude-opus-5[1m]']), settledNoPins).text).toMatch(NOUN);

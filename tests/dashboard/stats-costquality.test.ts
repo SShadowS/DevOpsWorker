@@ -7,6 +7,7 @@ import {
   buildLowCoverageHeadline,
   formatCostPerReadBandItem,
   assessModelBreakdownCost,
+  describeCostSampleNote,
   classifyReadBandLevel,
   describeReadBandLevel,
   readBandGaugePosition,
@@ -199,6 +200,47 @@ describe('formatCostPerReadBandItem', () => {
 });
 
 // ---------------------------------------------------------------------------
+// describeCostSampleNote — the Cost Overview card's sampling note. Extracted
+// from inline JSX (Task 3, follow-up) because a sentence assembled in JSX
+// cannot be asserted without rendering — see the doc comment at its
+// definition for the defect this closes: appending a noun-phrase field after
+// a period rendered a subjectless lowercase fragment.
+// ---------------------------------------------------------------------------
+
+describe('describeCostSampleNote', () => {
+  test('the cost-sample note is one sentence, not a sentence and a fragment', () => {
+    const text = describeCostSampleNote({ costSampleSize: 87, sampleSize: 150,
+      monthlyProjection: { basis: 'linear extrapolation of the 30d window total' } });
+    expect(text).not.toMatch(/\.\s+[a-z]/);
+    expect(text).toContain('Monthly projection is a linear extrapolation of the 30d window total.');
+  });
+
+  test('the cost-sample note agrees with its counts at one', () => {
+    const text = describeCostSampleNote({ costSampleSize: 1, sampleSize: 1,
+      monthlyProjection: { basis: 'linear extrapolation of the 30d window total' } });
+    expect(text).toContain('1 row with cost recorded');
+    expect(text).not.toContain('1 rows');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The recommendation table — headed "Verdict" until this round, the same
+// word the Review-value card uses for its own, unrelated `did` outcome.
+// ---------------------------------------------------------------------------
+
+describe('the recommendation table', () => {
+  test('is not headed with the other card\'s word for a different quantity', () => {
+    const src = readFileSync(
+      fileURLToPath(new URL('../../src/dashboard/client/components/stats-costquality.tsx', import.meta.url)),
+      'utf8',
+    );
+    expect(src).not.toContain('<th>Verdict</th>');
+    expect(src).toContain('<th>Recommendation</th>');
+    expect(src).toContain('title="Recommendation distribution"');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // assessModelBreakdownCost — reuses the server's own `flagged` field
 // ---------------------------------------------------------------------------
 
@@ -207,15 +249,10 @@ describe('assessModelBreakdownCost', () => {
     const rows: ModelUsageEntry[] = [{ model: 'claude-sonnet-5', rows: 10, totalCostUsd: 5, totalOutputTokens: 100, flagged: false }];
     const a = assessModelBreakdownCost(rows);
     expect(a.status).toBe('ok');
-    expect(a.text).toContain('1 model(s)');
+    expect(a.text).toContain('1 model billed');
+    expect(a.text).toContain('none flagged');
   });
 
-  // KNOWN-REMAINING, NOT SETTLED: this `toBe` pins `1 flagged model(s)` — a
-  // hand-written "(s)" placeholder — as required output. Elsewhere on these
-  // cards `countOf` makes the agreement unforgettable, and stats-operational's
-  // secondary net bans "(s)" outright in its own file. Left as-is here because
-  // it is what the Integrity side now matches (assessors.ts), so changing one
-  // without the other would reopen the very split this round closed.
   test('a flagged model -> attention, names the model and its cost', () => {
     const rows: ModelUsageEntry[] = [
       { model: 'claude-sonnet-5', rows: 10, totalCostUsd: 5, totalOutputTokens: 100, flagged: false },
@@ -223,23 +260,24 @@ describe('assessModelBreakdownCost', () => {
     ];
     const a = assessModelBreakdownCost(rows);
     expect(a.status).toBe('attention');
-    expect(a.text).toBe('1 flagged model(s) costing $3.75: claude-opus-4-8[1m] — see the Integrity panel\'s Model usage section');
+    expect(a.text).toBe('1 flagged model costing $3.75: claude-opus-4-8[1m] — see the Integrity panel\'s Model usage section');
   });
 
   // Task 8: dropped "key" — a flagged row is a MODEL, and "key" risked
   // reading as a database key rather than the [1m]-suffixed model name.
-  // Printed at 1 and 2 flagged models (the "(s)" convention doesn't
-  // pluralize the word itself, so there is no grammar to break at either
-  // count, but the substring must hold at both).
+  // Printed at 1 and 2 flagged models — now via countOf (Task 3, follow-up),
+  // so the plural is real grammar ("model"/"models"), not a hand-written
+  // "(s)" placeholder; both counts are checked to pin the agreement.
   test('two flagged models -> both named, "key" does not appear', () => {
     const rows: ModelUsageEntry[] = [
       { model: 'claude-opus-4-8[1m]', rows: 1, totalCostUsd: 3.75, totalOutputTokens: 500, flagged: true },
       { model: 'claude-sonnet-5[1m]', rows: 2, totalCostUsd: 1.25, totalOutputTokens: 200, flagged: true },
     ];
     const a = assessModelBreakdownCost(rows);
-    expect(a.text).toContain('2 flagged model(s)');
+    expect(a.text).toContain('2 flagged models');
     expect(a.text).toContain('claude-opus-4-8[1m], claude-sonnet-5[1m]');
     expect(a.text).not.toContain('key');
+    expect(a.text).not.toContain('(s)');
   });
 });
 

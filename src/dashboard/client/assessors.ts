@@ -55,14 +55,14 @@ export const FLAGGED_MODEL_KEY_TOOLTIP = 'Matches the [1m] premium long-context 
  *  directly, since that section is deliberately scoped to the `[1m]` pattern
  *  only (contamination has its own dedicated panel section).
  *
- *  The rendered text says "flagged model(s)", not "flagged model key(s)". It is
- *  the SAME server-computed `flagged` field the Cost card reports through
- *  `assessModelBreakdownCost`, whose summary ends by pointing the reader at
- *  this very section — two names for it put the same rows under two words on
- *  cards two slots apart. Both branches say "model", including the clean one:
- *  splitting the wording by branch is the same defect one level down. The
- *  function keeps its name — "key" is accurate about the `model_usage` object
- *  it reads, and an identifier is not on screen. */
+ *  The Cost card renders the same `flagged` rows and must use the same noun for
+ *  them — its own note says it is not a second measurement. A cross-card test in
+ *  tests/dashboard/assessors.test.ts pins the three call sites to one word rather
+ *  than to three literals that happen to agree today, so all three move together.
+ *  Both branches say "model", including the clean one: splitting the wording by
+ *  branch is the same defect one level down. The function keeps its name — "key"
+ *  is accurate about the `model_usage` object it reads, and an identifier is not
+ *  on screen. */
 export function assessFlaggedModelKeys(integrity: IntegrityStats): SimpleAssessment {
   const flagged = integrity.modelUsage.flaggedKeys;
   if (flagged.length === 0) {
@@ -70,7 +70,7 @@ export function assessFlaggedModelKeys(integrity: IntegrityStats): SimpleAssessm
   }
   return {
     severity: 'attention',
-    text: `${flagged.length} flagged model(s): ${flagged.map((m) => m.model).join(', ')}`,
+    text: `${countOf(flagged.length, 'flagged model')}: ${flagged.map((m) => m.model).join(', ')}`,
   };
 }
 
@@ -118,7 +118,7 @@ export function assessModelIntegrity(integrity: IntegrityStats, contamination: S
   const flagged = integrity.modelUsage.flaggedKeys;
   const flaggedText = flagged.length === 0
     ? 'no flagged models'
-    : `${flagged.length} flagged model(s): ${flagged.map((m) => m.model).join(', ')}`;
+    : `${countOf(flagged.length, 'flagged model')}: ${flagged.map((m) => m.model).join(', ')}`;
 
   if (contamination.status === 'error') {
     return {
