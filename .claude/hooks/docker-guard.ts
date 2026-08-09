@@ -53,6 +53,28 @@ const cmd = input.tool_input?.command ?? "";
 // later, swallowing the real docker command in between. Fixing this needs comment
 // awareness (tracking `#` to end-of-line), which is a shell parser this hook does not
 // warrant. If this bites again, that is the edge to look at first (2026-08-09).
+//
+// KNOWN LIMIT, same class and same answer: a HEREDOC body is split as if it were a
+// command list. The splitter breaks on newlines and has no idea a `<<EOF` is open, so
+// every line of the message becomes its own segment. A line that starts with the word
+// `docker` is then a leading token, and the guard blocks a command that only DESCRIBES
+// a build. Confirmed:
+//
+//   git commit -F - <<EOF          ->  leading = ["git commit -F - <<EOF", "fix: something",
+//   fix: something                                "", "docker compose build now blocks
+//                                                 correctly", "EOF"]  -> exit 2
+//   docker compose build now blocks correctly
+//   EOF
+//
+// This blocked two commits while this hook was being verified — a commit message quoting
+// the very measurements that fixed the guard. WORKAROUND, no code change needed: write
+// the message to a file (with an editor, not a heredoc) and use `git commit -F <file>`,
+// whose command line carries no leading `docker` token at all.
+//
+// Not fixed for the same reason as the `#` case above: heredoc awareness means tracking
+// the delimiter to its terminator, which is the shell parser this hook does not warrant.
+// Recorded so the next person recognises it in one read instead of rediscovering it
+// (2026-08-09).
 function splitSegments(s: string): string[] {
   const out: string[] = [];
   let buf = '';
