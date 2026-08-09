@@ -179,18 +179,18 @@ describe('formatCostPerReadBandItem', () => {
   test('null value -> explicit n/a text, not a blank or $0.00', () => {
     const c: CostPerReadBandItem = { avgCostUsd: null, avgReadBandItems: null, value: null, sampleSize: 0 };
     expect(formatCostPerReadBandItem(c))
-      .toBe('n/a — no rows with both cost and findings recorded, or every eligible row had zero critical/major items');
+      .toBe('n/a — no rows with both cost and findings recorded, or every eligible row had zero critical or major items');
   });
 
   test('a real value renders cost, avg items, and sample size', () => {
     const c: CostPerReadBandItem = { avgCostUsd: 1.5, avgReadBandItems: 2.0, value: 0.75, sampleSize: 300 };
-    expect(formatCostPerReadBandItem(c)).toBe('$0.75 per critical/major item (avg cost $1.50 ÷ avg 2.00 items/review, n=300)');
+    expect(formatCostPerReadBandItem(c)).toBe('$0.75 per critical or major item (avg cost $1.50 ÷ avg 2.00 items/review, n=300)');
   });
 
-  // Task 8: "read-band item(s)" -> "critical/major item(s)" — the map's
+  // Task 8: "read-band item(s)" -> "critical or major item(s)" — the map's
   // "read-band finding" row names a FINDING, not this per-item count; the
-  // replacement matches the card's own established phrase instead
-  // (buildReadBandGaugeView's `text` already says "critical+major").
+  // replacement matches the card's own established phrase instead (the
+  // gauge's own summary text uses the same "critical or major" wording).
   test('neither branch leaks the "read-band" term any more', () => {
     expect(formatCostPerReadBandItem({ avgCostUsd: null, avgReadBandItems: null, value: null, sampleSize: 0 }))
       .not.toContain('read-band');
@@ -323,7 +323,7 @@ describe('classifyReadBandLevel', () => {
 describe('describeReadBandLevel', () => {
   test('danger', () => {
     expect(describeReadBandLevel('danger'))
-      .toBe('in the danger zone (below 2.5) — reviews are surfacing too few critical/major findings on average');
+      .toBe('in the danger zone (below 2.5) — reviews are surfacing too few critical or major findings on average');
   });
   test('watch', () => {
     expect(describeReadBandLevel('watch'))
@@ -516,8 +516,8 @@ describe('Task 8 — cost/quality prose: schema names gone, shared constants imp
     expect(src).toMatch(/Same model-cost breakdown as the Integrity panel's "Model usage" table/);
   });
 
-  test('the severity legend divider names critical\\/major, not the bare "read-band" term', () => {
-    expect(src).toContain('│ critical/major ends here');
+  test('the severity legend divider names critical or major, not the bare "read-band" term', () => {
+    expect(src).toContain('│ critical or major ends here');
     expect(src).not.toContain('│ read-band ends here');
   });
 
@@ -531,7 +531,7 @@ describe('Task 8 — cost/quality prose: schema names gone, shared constants imp
   // surviving "read-band" occurrence in a section C3/C4 otherwise scrubbed
   // of the term — title and body named the same thing two different ways.
   test('the "Cost per ..." section title matches the term its own body now uses (C3/C4), not "read-band"', () => {
-    expect(src).toContain('title="Cost per critical/major item"');
+    expect(src).toContain('title="Cost per critical or major item"');
     expect(src).not.toContain('title="Cost per read-band item"');
   });
 });
@@ -541,7 +541,7 @@ describe('Task 8 — cost/quality prose: schema names gone, shared constants imp
 // Task 8's ~35-string list (it named the severity legend divider and the
 // "Cost per ..." title only) and still said "read-band"/"below-band" in the
 // gauge title, its aria-label, its own summary text, the severity split
-// line, and the below-band section title. Same "critical/major" replacement
+// line, and the below-band section title. Same "critical or major" phrasing
 // Task 8 already applied elsewhere on this card, so the term has one name.
 // ---------------------------------------------------------------------------
 
@@ -551,36 +551,42 @@ describe('Task 9 sweep — read-band gauge and severity split, missed by Task 8'
     'utf-8',
   );
 
-  test('the read-band gauge title names critical/major, not "read-band"', () => {
-    expect(src).toContain('title="Critical/major findings per review"');
+  test('the read-band gauge title names critical or major, not "read-band"', () => {
+    expect(src).toContain('title="Critical or major findings per review"');
     expect(src).not.toMatch(/title="Read-band health/);
     expect(src).not.toMatch(/title="Findings health/);
   });
 
-  test("the gauge's own summary text and aria-label both say critical/major, not \"read-band items\"", () => {
+  test("the gauge's own summary text and aria-label both say critical or major, not \"read-band items\"", () => {
     // Scoped to the actual template literals, not the file at large — the
     // section-header comment above (line ~150) still says "read-band gauge"
     // and that is fine (comments, not rendered prose, are out of scope).
-    expect(src).toContain('text: `avg critical/major findings per review:');
+    expect(src).toContain('text: `avg critical or major findings per review:');
     expect(src).not.toContain('text: `avg read-band items');
-    expect(src).toContain('aria-label={`Average critical/major findings per review:');
+    expect(src).toContain('aria-label={`Average critical or major findings per review:');
     expect(src).not.toContain('aria-label={`Average read-band items');
   });
 
-  test('the severity-split summary line says critical/major and minor/nitpick, not "read-band"/"below-band"', () => {
+  test('the severity-split summary line says critical or major and minor/nitpick, not "read-band"/"below-band"', () => {
     // Scoped to the JSX summary line, not the chart-choices comment near the
     // top of the file, which legitimately still explains the read-band/
     // below-band split by name for a developer reading the source.
-    expect(src).toContain('Critical/major: <strong>{split.readBandCount}</strong>');
+    expect(src).toContain('Critical or major: <strong>{split.readBandCount}</strong>');
     expect(src).toContain('minor/nitpick:');
     expect(src).not.toContain('Read-band (critical+major): <strong>{split.readBandCount}</strong>');
     expect(src).not.toContain('· below-band');
   });
 
-  test('the below-band section title and its note say critical/major, not "read-band"/"below-band"', () => {
-    expect(src).toContain('title="Reviews with zero critical/major findings"');
+  test('the below-band section title and its note say critical or major, not "read-band"/"below-band"', () => {
+    expect(src).toContain('title="Reviews with zero critical or major findings"');
     expect(src).not.toMatch(/title="Reviews with zero read-band findings"/);
     expect(src).not.toContain('below-band reviews counted here');
+    // The title's own promise ("and its note") was unmet — the two checks
+    // above cover the title, not the note. Pinned here BEFORE the note's
+    // wording changed (fix round, Minor 6), so this positive match proved it
+    // could see the string before it was asked to protect it.
+    expect(src).toContain('toward the critical or major total above');
+    expect(src).toContain('one of the reviews with zero critical or major findings counted here');
   });
 });
 

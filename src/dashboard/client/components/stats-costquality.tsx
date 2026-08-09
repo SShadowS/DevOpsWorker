@@ -121,9 +121,9 @@ export function buildLowCoverageHeadline(coverage: SubAgentCoverage): string | n
 
 export function formatCostPerReadBandItem(c: CostPerReadBandItem): string {
   if (c.value == null) {
-    return 'n/a — no rows with both cost and findings recorded, or every eligible row had zero critical/major items';
+    return 'n/a — no rows with both cost and findings recorded, or every eligible row had zero critical or major items';
   }
-  return `${formatCost(c.value)} per critical/major item (avg cost ${formatCost(c.avgCostUsd!)} ÷ avg ${c.avgReadBandItems!.toFixed(2)} items/review, n=${c.sampleSize})`;
+  return `${formatCost(c.value)} per critical or major item (avg cost ${formatCost(c.avgCostUsd!)} ÷ avg ${c.avgReadBandItems!.toFixed(2)} items/review, n=${c.sampleSize})`;
 }
 
 export interface ModelCostAssessment {
@@ -268,7 +268,7 @@ export interface ReadBandGaugeView {
 export function describeReadBandLevel(level: ReadBandLevel): string {
   switch (level) {
     case 'danger':
-      return 'in the danger zone (below 2.5) — reviews are surfacing too few critical/major findings on average';
+      return 'in the danger zone (below 2.5) — reviews are surfacing too few critical or major findings on average';
     case 'watch':
       return 'below the healthy band (3.5-4) and approaching the danger zone (below 2.5)';
     case 'healthy':
@@ -291,7 +291,7 @@ export function buildReadBandGaugeView(quality: QualityStats): ReadBandGaugeView
     sampleSize: readBandSampleSize,
     lowSample,
     coverage: computeReadBandCoverage(readBandSampleSize, sampleSize),
-    text: `avg critical/major findings per review: ${valueText} — ${levelText} (n=${readBandSampleSize})`,
+    text: `avg critical or major findings per review: ${valueText} — ${levelText} (n=${readBandSampleSize})`,
   };
 }
 
@@ -499,7 +499,7 @@ function CostPerItemSection({ data }: { data: CostStats }) {
   const coverage = computeReadBandCoverage(c.sampleSize, data.sampleSize);
   const lowCoverageHeadline = buildReadBandLowCoverageHeadline(coverage);
   return (
-    <CostSection title="Cost per critical/major item" status="neutral">
+    <CostSection title="Cost per critical or major item" status="neutral">
       <p class="cost-section__summary">{formatCostPerReadBandItem(c)}</p>
       <p class="cost-section__note">Eligible rows carry both cost and findings ({c.sampleSize} in this window).</p>
       <p class="cost-section__summary">Coverage: {describeReadBandCoverage(coverage)}</p>
@@ -657,7 +657,7 @@ function QualitySection({ title, status, children }: { title: string; status: Se
 function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
   const lowCoverageHeadline = buildReadBandLowCoverageHeadline(view.coverage);
   return (
-    <QualitySection title="Critical/major findings per review" status={view.level === 'danger' ? 'attention' : 'neutral'}>
+    <QualitySection title="Critical or major findings per review" status={view.level === 'danger' ? 'attention' : 'neutral'}>
       {view.value == null ? (
         <p class="quality-section__empty">No findings data recorded in this window.</p>
       ) : (
@@ -665,7 +665,7 @@ function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
           <div
             class="read-band-gauge__track"
             role="img"
-            aria-label={`Average critical/major findings per review: ${view.value.toFixed(2)}, ${describeReadBandLevel(view.level)}`}
+            aria-label={`Average critical or major findings per review: ${view.value.toFixed(2)}, ${describeReadBandLevel(view.level)}`}
           >
             <div
               class="read-band-gauge__zone read-band-gauge__zone--danger"
@@ -735,7 +735,7 @@ function SeverityLegend({ segments }: { segments: SeveritySegmentView[] }) {
               here (unlike the split summary below, where the two rates are
               the whole point of the sentence). */}
           {s.key} {s.count} ({s.pct == null ? 'n/a' : `${(s.pct * 100).toFixed(0)}%`})
-          {i === 1 && <span class="severity-bar__legend-divider-note"> │ critical/major ends here</span>}
+          {i === 1 && <span class="severity-bar__legend-divider-note"> │ critical or major ends here</span>}
         </span>
       ))}
     </p>
@@ -754,7 +754,7 @@ function SeverityDistributionSection({ data }: { data: QualityStats }) {
           <SeverityBar segments={segments} />
           <SeverityLegend segments={segments} />
           <p class="quality-section__summary">
-            Critical/major: <strong>{split.readBandCount}</strong> ({formatPct(split.readBandRate)}) · minor/nitpick:{' '}
+            Critical or major: <strong>{split.readBandCount}</strong> ({formatPct(split.readBandRate)}) · minor/nitpick:{' '}
             <strong>{split.belowBandCount}</strong> ({formatPct(split.belowBandRate)})
           </p>
         </>
@@ -765,14 +765,14 @@ function SeverityDistributionSection({ data }: { data: QualityStats }) {
 
 function BelowBandRowsSection({ data }: { data: QualityStats }) {
   return (
-    <QualitySection title="Reviews with zero critical/major findings" status="neutral">
+    <QualitySection title="Reviews with zero critical or major findings" status="neutral">
       <p class="quality-section__summary">
         {data.belowBandCount} of {countOf(data.readBandSampleSize, 'review')} with findings recorded surfaced zero critical or major
         findings ({formatPctValue(data.belowBandPct)}).
       </p>
       <p class="quality-section__note">
         Counted by review, not by individual problem: a review with one critical problem and five minor ones counts
-        toward the critical/major total above, but is not one of the zero-critical/major reviews counted here.
+        toward the critical or major total above, but is not one of the reviews with zero critical or major findings counted here.
       </p>
     </QualitySection>
   );
