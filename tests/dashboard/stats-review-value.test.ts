@@ -1485,7 +1485,8 @@ describe('describeSpend', () => {
   test('the missing-cost floor is disclosed on the no-per-item branch too, beside the total it qualifies', () => {
     const o = compute([finding({ did: null })], spend({ totalCostUsd: 40, reviewCount: 65, reviewsMissingCost: 1 }));
     const line = describeSpend(o.spend, o.addressed, o);
-    expect(line.detail).toContain('at least the figure shown');
+    expect(line.detail).toContain('the sum shown is not complete');
+    expect(line.detail).toContain('at least this much');
     expect(line.detail).toContain('1 of 65');
   });
 
@@ -1722,12 +1723,12 @@ describe('count agreement across every rendered string', () => {
   }
 
   test('the regex actually catches a bad string — a guard that matches nothing proves nothing', () => {
-    expect(BAD_AGREEMENT.test('1 of 65 reviews carry no recorded cost')).toBe(true);
+    expect(BAD_AGREEMENT.test('1 of 65 reviews have no recorded cost')).toBe(true);
     expect(BAD_AGREEMENT.test('1 finding are excluded')).toBe(true);
     expect(BAD_AGREEMENT.test('The remaining 1 are not explained')).toBe(true);
     expect(BAD_AGREEMENT.test('1 of them were recorded')).toBe(true);
     // ...and does not fire on the corrected forms.
-    expect(BAD_AGREEMENT.test('1 of 65 reviews carries no recorded cost')).toBe(false);
+    expect(BAD_AGREEMENT.test('1 of 65 reviews has no recorded cost')).toBe(false);
     expect(BAD_AGREEMENT.test('The remaining 1 is not explained')).toBe(false);
     expect(BAD_AGREEMENT.test('2 findings are excluded')).toBe(false);
   });
@@ -1846,7 +1847,7 @@ describe('no clause points at a figure that does not exist', () => {
     );
     expect(unreconciled.traceability.reconciled).toBe(false);
     const text = describeJudgedCoverage(unreconciled);
-    expect(text).not.toContain('no comment thread in the pull request');
+    expect(text).not.toContain('comment thread');
     expect(text).toContain('reason not established');
 
     // ...and when it DOES reconcile, the cause is stated.
@@ -2031,6 +2032,30 @@ describe('review-value structure', () => {
     expect(cardSrc).toContain('review-value-figure--${line.status}');
   });
 
+  // `describeJudgedCoverage`'s zero-raised branch dropped the "read-band"
+  // qualifier ("No findings were raised…", not "No read-band findings…").
+  // The ONLY thing still scoping that sentence to critical/major problems is
+  // the `a finding` glossary entry — nothing in `glossaryText`'s own test
+  // suite (`tests/dashboard/card-glossary.test.ts`) knows this card declares
+  // it or renders it, so deleting `TERMS` here would leave the suite green
+  // on an unscoped false claim. Both pinned, source-text, same style as the
+  // `ScorecardLine.status` guard above.
+  test('the glossary term list still defines "a finding" — the word the zero-raised sentence relies on', () => {
+    const cardSrc = readFileSync(
+      fileURLToPath(new URL('../../src/dashboard/client/components/stats-review-value.tsx', import.meta.url)),
+      'utf-8',
+    );
+    expect(cardSrc).toContain("term: 'a finding'");
+  });
+
+  test('the glossary is not just declared but actually rendered on the panel', () => {
+    const cardSrc = readFileSync(
+      fileURLToPath(new URL('../../src/dashboard/client/components/stats-review-value.tsx', import.meta.url)),
+      'utf-8',
+    );
+    expect(cardSrc).toContain('<CardGlossary terms={TERMS} />');
+  });
+
   test('every status a builder emits has a CSS rule — an unstyled modifier renders identically to none', () => {
     const cardSrc = readFileSync(
       fileURLToPath(new URL('../../src/dashboard/client/components/stats-review-value.tsx', import.meta.url)),
@@ -2108,16 +2133,16 @@ describe('plain-English rewrite pins', () => {
     );
   });
 
-  test('disputed: a measured zero is scoped to the problems that were checked, at denominators 1 and 2', () => {
+  test('disputed: a measured zero is scoped to the problems the team gave an answer on, at denominators 1 and 2', () => {
     const one = compute([finding({ said: 'fixed' })], spend());
     expect(describeDisputed(one.disputedAsWrong, one).detail).toBe(
-      'This is a real zero, not a gap in the data: none of the problems that were checked was disputed as ' +
-        'wrong. Reported as a count, not a rate: the denominator is the 1 finding carrying a said label.',
+      'This is a real zero, not a gap in the data: none of the problem the team gave an answer on was disputed ' +
+        'as wrong. Reported as a count, not a rate: the denominator is the 1 finding carrying a said label.',
     );
     const two = compute([finding({ said: 'fixed' }), finding({ said: 'ignored' })], spend());
     expect(describeDisputed(two.disputedAsWrong, two).detail).toBe(
-      'This is a real zero, not a gap in the data: none of the problems that were checked was disputed as ' +
-        'wrong. Reported as a count, not a rate: the denominator is the 2 findings carrying a said label.',
+      'This is a real zero, not a gap in the data: none of the problems the team gave an answer on was disputed ' +
+        'as wrong. Reported as a count, not a rate: the denominator is the 2 findings carrying a said label.',
     );
   });
 
@@ -2201,14 +2226,14 @@ describe('plain-English rewrite pins', () => {
     const one = compute([finding({ did: null })], spend({ totalCostUsd: 40, reviewCount: 65, reviewsMissingCost: 1 }));
     expect(describeSpend(one.spend, one.addressed, one).detail).toBe(
       '$40.00 across 65 reviews on the PRs these findings came from. Nothing is confirmed acted on in this window, ' +
-        'so there is no per-item figure to report. 1 of 65 reviews has no recorded cost, so the real total is at ' +
-        'least the figure shown, not a complete sum.',
+        'so there is no per-item figure to report. 1 of 65 reviews has no recorded cost, so the sum shown is not ' +
+        'complete: the real total is at least this much.',
     );
     const two = compute([finding({ did: null })], spend({ totalCostUsd: 40, reviewCount: 65, reviewsMissingCost: 2 }));
     expect(describeSpend(two.spend, two.addressed, two).detail).toBe(
       '$40.00 across 65 reviews on the PRs these findings came from. Nothing is confirmed acted on in this window, ' +
-        'so there is no per-item figure to report. 2 of 65 reviews have no recorded cost, so the real total is at ' +
-        'least the figure shown, not a complete sum.',
+        'so there is no per-item figure to report. 2 of 65 reviews have no recorded cost, so the sum shown is not ' +
+        'complete: the real total is at least this much.',
     );
   });
 });

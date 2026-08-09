@@ -282,10 +282,14 @@ export function describeDisputed(d: ReviewValueDisputed, o: ReviewValueOutcome):
   // earlier in this same function. The value string already differs ("0 of 2
   // said-labelled findings" vs "not yet measured"), but the distinction is the
   // whole point of the line, so it is said in words too.
+  // "Checked" is reserved for a `did` verdict elsewhere on this card (the
+  // `describeAddressed` contrast, `describeJudgedCoverage`, the empty-panel
+  // scope note) — reusing it here for the SAID-labelled population would
+  // teach the reader "checked" means two different things a paragraph apart.
   const zeroClause =
     count === 0
-      ? 'This is a real zero, not a gap in the data: none of the problems that were checked was disputed as ' +
-        'wrong. '
+      ? `This is a real zero, not a gap in the data: none of the ${agree(d.saidRecorded, 'problem', 'problems')} ` +
+        'the team gave an answer on was disputed as wrong. '
       : '';
 
   return {
@@ -345,7 +349,7 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
   // all and `s.note` (which is about the per-item figure) must not render.
   const floorClause =
     s.numeratorState === 'floor'
-      ? ` ${s.reviewsMissingCost} of ${countOf(s.reviewCount, 'review')} ${agree(s.reviewsMissingCost, 'has', 'have')} no recorded cost, so the real total is at least the figure shown, not a complete sum.`
+      ? ` ${s.reviewsMissingCost} of ${countOf(s.reviewCount, 'review')} ${agree(s.reviewsMissingCost, 'has', 'have')} no recorded cost, so the sum shown is not complete: the real total is at least this much.`
       : '';
 
   const noCostRecorded = s.reviewCount > 0 && s.reviewsMissingCost === s.reviewCount;
