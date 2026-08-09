@@ -303,7 +303,7 @@ describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin conta
   test('neither signal fires -> ok, both stated explicitly', () => {
     const result = assessModelIntegrity(integrityFixture(), readyContamination([]));
     expect(result.severity).toBe('ok');
-    expect(result.text).toContain('no flagged model keys');
+    expect(result.text).toContain('no flagged models');
     expect(result.text).toContain('no model contamination');
   });
 
@@ -317,10 +317,10 @@ describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin conta
     expect(result.text).toContain('no model contamination');
   });
 
-  test('contamination only -> attention; flagged-key half still says "no flagged model keys", not omitted', () => {
+  test('contamination only -> attention; flagged-key half still says "no flagged models", not omitted', () => {
     const result = assessModelIntegrity(integrityFixture(), readyContamination([agentModelRow()]));
     expect(result.severity).toBe('attention');
-    expect(result.text).toContain('no flagged model keys');
+    expect(result.text).toContain('no flagged models');
     expect(result.text).toContain('at least 9/95');
   });
 
@@ -335,7 +335,7 @@ describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin conta
     expect(result.severity).toBe('attention');
     expect(result.text).toContain('claude-opus-4-8[1m]');
     expect(result.text).toContain('at least 9/95');
-    expect(result.text).not.toContain('no flagged model keys');
+    expect(result.text).not.toContain('no flagged models');
     expect(result.text).not.toContain('no model contamination');
   });
 
@@ -477,7 +477,7 @@ describe('buildModelIntegrityCard / buildErrorRateCard', () => {
 
   test('model integrity ready + no declared pins registered -> delegates to assessModelIntegrity, both signals clean', () => {
     const state: FetchState<IntegrityStats> = { status: 'ready', data: integrityFixture() };
-    expect(buildModelIntegrityCard(state, noPinsConfig)).toEqual({ status: 'ok', text: 'n=100 · no flagged model keys · no model contamination' });
+    expect(buildModelIntegrityCard(state, noPinsConfig)).toEqual({ status: 'ok', text: 'n=100 · no flagged models · no model contamination' });
   });
 
   test('model integrity ready + a real contamination match in the declared config -> attention', () => {
