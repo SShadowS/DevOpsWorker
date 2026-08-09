@@ -47,77 +47,120 @@ const basename = (f: string) => f.slice(f.lastIndexOf('/') + 1);
 // Extraction
 // ---------------------------------------------------------------------------
 
+/** What the scanner is looking at. A STACK, not a single state: `${…}` inside a
+ *  template returns to real code, which may open another template. */
+type Frame = { kind: 'top' } | { kind: 'template' } | { kind: 'expr'; braces: number };
+
+interface ScanResult {
+  /** The source with comments removed. */
+  code: string;
+  /** Literal bodies: whole string literals, and each template's text between
+   *  its `${…}` expressions. */
+  literals: string[];
+  /** The source again, with every literal body blanked. JSX text is read off
+   *  this, so a quoted phrase inside prose cannot be mistaken for prose. */
+  skeleton: string;
+  /** False when the scanner did not return to the top frame — an unterminated
+   *  string, template or expression. Always a bug in the scanner, never in the
+   *  file (these files compile), so it is asserted rather than tolerated: a
+   *  desync silently swallows the rest of the file. */
+  balanced: boolean;
+}
+
 /**
  * One pass over the source, tracking whether each character sits in code, a
- * comment, or a string. A regex cannot do this: `//` appears inside string
- * literals (URLs) and quotes appear inside comments, so either kind of naive
- * match mis-classifies the other's contents.
+ * comment, a string, or a template. A regex cannot do this: `//` appears inside
+ * string literals (URLs) and quotes appear inside comments, so either kind of
+ * naive match mis-classifies the other's contents.
  *
- * Returns the source with comments removed, the literals it found (their SOURCE
- * text, `${...}` included), and a skeleton with every literal's contents
- * blanked — the skeleton is what JSX text is read off, so an apostrophe in
- * prose cannot open a phantom string.
+ * THE APOSTROPHE RULE, which the first version of this file got wrong: a quote
+ * opens a literal only when the character immediately before it is not a word
+ * character. Rendered prose is full of possessives — "the panel's note", "this
+ * window's rows" — and treating those as string openers flips quote parity for
+ * the whole rest of the file. It did: `stats-costquality.tsx` desynced at its
+ * first possessive and 34% of that file, including its own `CostOverview` note,
+ * was invisible to the sweep. An apostrophe in prose always follows a letter; a
+ * string literal never does (`return 'x'`, `+ 'x'`, `{ k: 'x' }` are all
+ * preceded by a space or a punctuator).
  */
-function scan(src: string): { code: string; literals: string[]; skeleton: string } {
+function scan(src: string): ScanResult {
   let code = '';
   let skeleton = '';
   const literals: string[] = [];
-  let literal = '';
-  let state: 'code' | 'line' | 'block' | "'" | '"' | '`' = 'code';
+  const stack: Frame[] = [{ kind: 'top' }];
+  let chunk = '';
+  let unterminated = false;
   let i = 0;
 
+  const isWordChar = (ch: string | undefined) => ch !== undefined && /[A-Za-z0-9_$]/.test(ch);
+  const keep = (text: string) => { if (text.trim() !== '') literals.push(text); };
+
   while (i < src.length) {
+    const frame = stack[stack.length - 1]!;
     const c = src[i]!;
     const d = src[i + 1];
 
-    if (state === 'code') {
-      if (c === '/' && d === '/') { state = 'line'; i += 2; continue; }
-      if (c === '/' && d === '*') { state = 'block'; i += 2; continue; }
-      if (c === "'" || c === '"' || c === '`') {
-        state = c;
-        literal = '';
-        code += c;
-        skeleton += c;
-        i++;
+    if (frame.kind === 'template') {
+      if (c === '\\') { chunk += src.slice(i, i + 2); code += src.slice(i, i + 2); i += 2; continue; }
+      if (c === '`') { keep(chunk); chunk = ''; stack.pop(); code += c; skeleton += c; i++; continue; }
+      // An interpolation is code, not text — so `${data.model_usage}` is an
+      // identifier the sweep must not read as a rendered word.
+      if (c === '$' && d === '{') {
+        keep(chunk); chunk = '';
+        stack.push({ kind: 'expr', braces: 0 });
+        code += '${'; skeleton += '${'; i += 2;
         continue;
       }
-      code += c;
-      skeleton += c;
+      chunk += c; code += c; if (c === '\n') skeleton += c;
       i++;
       continue;
     }
 
-    if (state === 'line') {
-      // Newlines survive comment removal so reported line numbers stay usable.
-      if (c === '\n') { state = 'code'; code += c; skeleton += c; }
-      i++;
+    // 'top' or 'expr' — real code.
+    if (c === '/' && d === '/') { while (i < src.length && src[i] !== '\n') i++; continue; }
+    if (c === '/' && d === '*') {
+      i += 2;
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+        // Newlines survive comment removal so reported positions stay usable.
+        if (src[i] === '\n') { code += '\n'; skeleton += '\n'; }
+        i++;
+      }
+      if (i >= src.length) unterminated = true;
+      i += 2;
       continue;
     }
 
-    if (state === 'block') {
-      if (c === '*' && d === '/') { state = 'code'; i += 2; continue; }
-      if (c === '\n') { code += c; skeleton += c; }
-      i++;
+    if ((c === "'" || c === '"') && !isWordChar(src[i - 1])) {
+      const quote = c;
+      let j = i + 1;
+      let body = '';
+      while (j < src.length && src[j] !== quote) {
+        if (src[j] === '\\') { body += src.slice(j, j + 2); j += 2; continue; }
+        body += src[j]!;
+        j++;
+      }
+      if (j >= src.length) unterminated = true;
+      keep(body);
+      code += src.slice(i, j + 1);
+      skeleton += quote + quote;
+      i = j + 1;
       continue;
     }
 
-    // Inside a literal.
-    if (c === '\\') { literal += src.slice(i, i + 2); code += src.slice(i, i + 2); i += 2; continue; }
-    if (c === state) {
-      literals.push(literal);
-      state = 'code';
-      code += c;
-      skeleton += c;
-      i++;
-      continue;
+    if (c === '`') { stack.push({ kind: 'template' }); chunk = ''; code += c; skeleton += c; i++; continue; }
+
+    if (frame.kind === 'expr') {
+      if (c === '{') frame.braces++;
+      else if (c === '}') {
+        if (frame.braces === 0) { stack.pop(); code += c; skeleton += c; i++; continue; }
+        frame.braces--;
+      }
     }
-    literal += c;
-    code += c;
-    if (c === '\n') skeleton += c;
-    i++;
+
+    code += c; skeleton += c; i++;
   }
 
-  return { code, literals, skeleton };
+  return { code, literals, skeleton, balanced: !unterminated && stack.length === 1 };
 }
 
 /** A CSS class is markup, not prose. Blanked before extraction rather than
@@ -129,30 +172,49 @@ function blankClassAttributes(src: string): string {
     .replace(/\bclass=\{`(?:\\.|[^`])*`\}/g, 'class={``}');
 }
 
-/** Text a reader sees: literals plus JSX text nodes. */
+/** Text a reader sees: literal bodies plus JSX text nodes. */
 function renderedText(src: string): string[] {
   const withoutComments = scan(src).code;
   const { literals, skeleton } = scan(blankClassAttributes(withoutComments));
   const out = [...literals];
-  // A JSX text node runs from a tag's closing `>` to the next `<` or `{`.
-  // Generic closings and arrow functions also match, but only ever yield short
-  // code fragments — harmless, since the deny list holds no operator.
-  for (const m of skeleton.matchAll(/>([^<>{}]+)[<{]/g)) out.push(m[1]!);
+  // A JSX text run ends at the next `<` or `{`, and starts either at a tag's
+  // closing `>` or at the `}` that closed an interpolation — "…{n} total
+  // row(s)." is two runs, and only reading the first would miss the second.
+  // Generic closings, arrow functions and ordinary block braces also match, but
+  // yield code fragments made of camelCase identifiers and operators, which no
+  // pattern on the deny list can match. If one ever does, the exact-set check
+  // below fails loudly rather than hiding it.
+  for (const m of skeleton.matchAll(/[>}]([^<>{}]+)[<{]/g)) out.push(m[1]!);
   return out.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/** Every swept file, scanned end to end without losing sync. */
+function scansCleanly(src: string): boolean {
+  const first = scan(src);
+  return first.balanced && scan(blankClassAttributes(first.code)).balanced;
 }
 
 // ---------------------------------------------------------------------------
 // The deny list
 // ---------------------------------------------------------------------------
 
+// Case-insensitive wherever a token's case can vary in prose. "read-band" is
+// the one that bit: it reached the page as "Read-band" in two section titles
+// ("Read-band findings raised", "Read-band health"), which Tasks 8 and 9 fixed
+// by hand — a case-sensitive pattern would not have caught either, and would
+// not catch them coming back at the start of a sentence or heading.
+//
+// `PR` stays case-SENSITIVE on purpose. It is an initialism, so its case does
+// not vary, and `/\bpr\b/i` would start matching ordinary lowercase fragments
+// that are not the initialism at all.
 const DENIED: ReadonlyArray<{ name: string; pattern: RegExp }> = [
-  { name: 'tool_calls', pattern: /tool_calls/ },
-  { name: 'model_usage', pattern: /model_usage/ },
-  { name: 'sub_agents', pattern: /sub_agents/ },
-  { name: 'findings_list', pattern: /findings_list/ },
-  { name: 'said_confidence', pattern: /said_confidence/ },
-  { name: 'error_max_turns', pattern: /error_max_turns/ },
-  { name: 'read-band', pattern: /read-band/ },
+  { name: 'tool_calls', pattern: /tool_calls/i },
+  { name: 'model_usage', pattern: /model_usage/i },
+  { name: 'sub_agents', pattern: /sub_agents/i },
+  { name: 'findings_list', pattern: /findings_list/i },
+  { name: 'said_confidence', pattern: /said_confidence/i },
+  { name: 'error_max_turns', pattern: /error_max_turns/i },
+  { name: 'read-band', pattern: /read-band/i },
   { name: 'PR', pattern: /\bPRs?\b/ },
 ];
 
@@ -184,7 +246,7 @@ const KNOWN_REMAINING: ReadonlyArray<{ file: string; text: string; why: string }
   },
   {
     file: 'assessors.ts',
-    text: 'runs off declared pin across ${contaminatedRows.length} sub-agent(s) (floor — sub_agents undercounts, see Integrity panel)${notObservedText}',
+    text: 'sub-agent(s) (floor — sub_agents undercounts, see Integrity panel)',
     why: 'Known and deferred: the ribbon\'s contamination text, which also says "floor" where this branch settled on "at least this much".',
   },
 ];
@@ -207,7 +269,12 @@ describe('rendered-text extraction', () => {
     ].join('\n');
     const found = renderedText(sample);
     expect(found).toContain('the visible sentence');
-    expect(found).toContain('a ${count} template');
+    // A template contributes its TEXT, one chunk per gap between `${…}`. The
+    // interpolations themselves are code and are deliberately not read: an
+    // expression naming `data.model_usage` is an identifier, not a word on
+    // screen.
+    expect(found).toContain('a');
+    expect(found).toContain('template');
     expect(found).toContain('visible node');
     expect(found).toContain('another node');
     expect(found.some((s) => s.includes('tool_calls'))).toBe(false);
@@ -224,9 +291,57 @@ describe('rendered-text extraction', () => {
     expect(renderedText("const u = 'https://example.test/tool_calls';")).toContain('https://example.test/tool_calls');
   });
 
-  test('every swept file yields text — an extractor returning nothing would pass every check below', () => {
+  test('a possessive in rendered prose is an apostrophe, not a string opener', () => {
+    const sample = "const a = <p>this window's rows and the panel's note</p>;\nconst b = 'still a literal';";
+    const found = renderedText(sample);
+    expect(found).toContain("this window's rows and the panel's note");
+    expect(found).toContain('still a literal');
+  });
+
+  test('text after an interpolation is read, not only the run before it', () => {
+    const found = renderedText('const a = <p>before {n} after the tool_calls table</p>;');
+    expect(found.some((s) => s.includes('after the tool_calls table'))).toBe(true);
+  });
+
+  test('a nested template does not end its parent early', () => {
+    const found = renderedText('const a = `outer ${x ? `inner` : y} tail`;');
+    expect(found).toContain('outer');
+    expect(found).toContain('inner');
+    expect(found).toContain('tail');
+  });
+
+  // ---- Coverage, measured rather than assumed -----------------------------
+  //
+  // The first version of this file checked only that each file yielded "more
+  // than 10" rendered strings. Every file passed that while one of them was
+  // 34% blind: a yield count cannot see a region, only a total. These two tests
+  // plant a known leak and check it is found, which is the only question that
+  // matters.
+
+  test('every swept file scans end to end without losing sync', () => {
     for (const f of FILES) {
-      expect(renderedText(read(f)).length, `${basename(f)} yielded no rendered text`).toBeGreaterThan(10);
+      expect(scansCleanly(read(f)), `${basename(f)}: scanner did not return to the top frame`).toBe(true);
+    }
+  });
+
+  test('a leak planted ANYWHERE in a swept file is caught — every blank line, and the end of file', () => {
+    const PLANT = "const planted = 'PLANTED leak on the PR from tool_calls';";
+    const caught = (src: string) =>
+      renderedText(src).some((t) => t.includes('PLANTED') && DENIED.some((d) => d.pattern.test(t)));
+
+    for (const f of FILES) {
+      const lines = read(f).split('\n');
+      const points: number[] = [];
+      for (let i = 0; i < lines.length; i++) if (lines[i]!.trim() === '') points.push(i);
+      // A file with nowhere to plant would make this test vacuous.
+      expect(points.length, `${basename(f)}: no plant points`).toBeGreaterThan(10);
+
+      const blind = points.filter((i) => !caught([...lines.slice(0, i), PLANT, ...lines.slice(i)].join('\n')));
+      expect(blind, `${basename(f)}: leak invisible at ${blind.length}/${points.length} points, first at line ${blind[0]! + 1}`)
+        .toEqual([]);
+      // End of file is its own case: a scanner that desyncs part-way through
+      // swallows everything after, and the tail is what it swallows last.
+      expect(caught(`${read(f)}\n${PLANT}\n`), `${basename(f)}: leak at end of file invisible`).toBe(true);
     }
   });
 
@@ -236,10 +351,37 @@ describe('rendered-text extraction', () => {
     expect(hit('across 3 PRs')).toEqual(['PR']);
     expect(hit('read-band items per review')).toEqual(['read-band']);
     expect(hit('no rows in tool_calls')).toEqual(['tool_calls']);
+    // Title case reaches the page — these are the two real titles Tasks 8 and 9
+    // fixed by hand, and a case-sensitive pattern caught neither.
+    expect(hit('Read-band findings raised')).toEqual(['read-band']);
+    expect(hit('Read-band health (avg critical+major findings per review)')).toEqual(['read-band']);
     // ...and does not fire on the words that replaced them.
     expect(hit('across 3 pull requests')).toEqual([]);
     expect(hit('critical or major items per review')).toEqual([]);
     expect(hit('No tool activity recorded in this window.')).toEqual([]);
+  });
+
+  // The reviewer's decisive measurement, kept as a test: real strings that were
+  // on these cards before this branch, replanted at their own sites. Two of the
+  // six were invisible — one to the apostrophe desync, one to the case
+  // sensitivity — which is how both holes were found.
+  test('every pre-branch string that this branch removed would be caught if it came back', () => {
+    const REPLANTED: Array<[string, string]> = [
+      ['stats-costquality.tsx', 'Same model_usage breakdown as the Integrity panel'],
+      ['stats-costquality.tsx', 'Read-band findings raised'],
+      ['stats-costquality.tsx', 'Read-band health (avg critical+major findings per review)'],
+      ['stats-operational.tsx', 'No tool_calls recorded'],
+      ['stats-integrity.tsx', 'the sub_agents roster'],
+      ['stats-review-value.tsx', 'across 3 PRs these findings came from'],
+    ];
+    for (const [file, text] of REPLANTED) {
+      const path = FILES.find((f) => basename(f) === file)!;
+      // Planted as JSX text, which is where three of these six really lived.
+      const planted = `${read(path)}\nconst Replanted = () => <p>${text}</p>;\n`;
+      const found = renderedText(planted).filter((t) => t.includes(text));
+      expect(found.length, `${file}: replanted string not extracted at all — "${text}"`).toBeGreaterThan(0);
+      expect(found.some((t) => DENIED.some((d) => d.pattern.test(t))), `${file}: extracted but not denied — "${text}"`).toBe(true);
+    }
   });
 });
 
