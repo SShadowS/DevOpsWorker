@@ -1,6 +1,7 @@
 import type { IntegrityStats } from '../stats.ts';
 import type { LeverStatus } from '../config-report.ts';
 import type { SettledContaminationAvailability } from './model-contamination.ts';
+import { countOf } from '../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
 // Shared assessors (Task 3, follow-up) — pure severity/status logic consumed
@@ -137,12 +138,13 @@ export function assessModelIntegrity(integrity: IntegrityStats, contamination: S
   const contaminatedRows = evaluatedRows.filter((r) => r.status === 'attention');
   const totalPins = evaluatedRows.length + notObservedRows.length;
   const notObservedText = notObservedRows.length > 0
-    ? ` (${notObservedRows.length} of ${totalPins} declared pin(s) never observed this window)`
+    ? ` (${notObservedRows.length} of ${countOf(totalPins, 'declared pin')} never observed this window)`
     : '';
   const contaminationText = contaminatedRows.length === 0
     ? `no model contamination${notObservedText}`
     : `at least ${contaminatedRows.reduce((s, r) => s + r.offPinRuns, 0)}/${evaluatedRows.reduce((s, r) => s + r.totalRuns, 0)} ` +
-      `runs off declared pin across ${contaminatedRows.length} sub-agent(s) (floor — sub_agents undercounts, see Integrity panel)${notObservedText}`;
+      `runs off declared pin across ${countOf(contaminatedRows.length, 'sub-agent')} ` +
+      `(at least this many — the record of which sub-agents ran is incomplete, see the Integrity panel)${notObservedText}`;
 
   return {
     severity: flagged.length > 0 || contaminatedRows.length > 0 ? 'attention' : 'ok',

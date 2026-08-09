@@ -135,3 +135,47 @@ describe('flagged model wording is shared with the Cost card', () => {
     expect(assessModelIntegrity(integrity(['claude-opus-5[1m]']), settledNoPins).text).toMatch(NOUN);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The ribbon's contamination clause (dashboard-followups, Task 2). It used to
+// read "runs off declared pin across N sub-agent(s) (floor — sub_agents
+// undercounts, see Integrity panel)": a raw schema name, "floor" (the rest of
+// the page settled on "at least this much"/"at least this many" instead), and
+// a hand-written "(s)" placeholder where the rest of the page uses countOf().
+// ---------------------------------------------------------------------------
+
+describe("the ribbon's contamination clause", () => {
+  const cleanIntegrity = (): IntegrityStats =>
+    ({ sampleSize: 100, modelUsage: { breakdown: [], flaggedKeys: [] } }) as unknown as IntegrityStats;
+
+  /** `n` contaminated sub-agent rows, one off-pin run each. */
+  const contaminatedRows = (n: number): SettledContaminationAvailability =>
+    ({
+      status: 'ready',
+      rows: Array.from({ length: n }, (_, i) => ({
+        agent: `sub-agent-${i}`,
+        declaredModel: 'claude-sonnet-5',
+        observed: [{ model: 'claude-opus-5', count: 1 }],
+        totalRuns: 1,
+        offPinRuns: 1,
+        status: 'attention' as const,
+      })),
+    }) as unknown as SettledContaminationAvailability;
+
+  const ribbonText = (contamination: SettledContaminationAvailability) =>
+    assessModelIntegrity(cleanIntegrity(), contamination).text;
+
+  test('the ribbon states the undercount without naming a database column', () => {
+    const text = ribbonText(contaminatedRows(2));
+    expect(text).not.toContain('sub_agents');
+    expect(text).not.toContain('floor');
+    expect(text).not.toContain('(s)');
+    expect(text).toContain('at least this many');
+  });
+
+  test('the ribbon agrees with its own count at one and at three', () => {
+    expect(ribbonText(contaminatedRows(1))).toContain('1 sub-agent');
+    expect(ribbonText(contaminatedRows(1))).not.toContain('1 sub-agents');
+    expect(ribbonText(contaminatedRows(3))).toContain('3 sub-agents');
+  });
+});

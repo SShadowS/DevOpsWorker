@@ -238,18 +238,7 @@ const DENIED: ReadonlyArray<{ name: string; pattern: RegExp }> = [
  * its whole non-rendered surface, so they are recorded here rather than
  * guarded.
  */
-const KNOWN_REMAINING: ReadonlyArray<{ file: string; text: string; why: string }> = [
-  {
-    file: 'stats-integrity.tsx',
-    text: '"Error" here includes every kind of pipeline failure recorded on the row, including error_max_turns',
-    why: 'Known and deferred: names the stored value for one failure mode, and no plain wording yet identifies it as precisely.',
-  },
-  {
-    file: 'assessors.ts',
-    text: 'sub-agent(s) (floor — sub_agents undercounts, see Integrity panel)',
-    why: 'Known and deferred: the ribbon\'s contamination text, which also says "floor" where this branch settled on "at least this much".',
-  },
-];
+const KNOWN_REMAINING: ReadonlyArray<{ file: string; text: string; why: string }> = [];
 
 // ---------------------------------------------------------------------------
 // The extractor's own tests. A sweep that silently extracts nothing passes

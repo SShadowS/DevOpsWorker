@@ -339,10 +339,11 @@ describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin conta
     expect(result.text).not.toContain('no model contamination');
   });
 
-  test('contamination count is phrased as a FLOOR ("at least"), never an exact figure', () => {
+  test('contamination count is phrased as an "at least" floor, never an exact figure, and names no schema column', () => {
     const result = assessModelIntegrity(integrityFixture(), readyContamination([agentModelRow()]));
     expect(result.text.toLowerCase()).toContain('at least');
-    expect(result.text.toLowerCase()).toContain('floor');
+    expect(result.text).not.toContain('floor');
+    expect(result.text).not.toContain('sub_agents');
   });
 
   test('an unpinned-only row does not count as contamination', () => {
@@ -380,7 +381,7 @@ describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin conta
     );
     expect(result.severity).toBe('ok');
     expect(result.text).toContain('no model contamination');
-    expect(result.text).toContain('1 of 1 declared pin(s) never observed this window');
+    expect(result.text).toContain('1 of 1 declared pin never observed this window');
   });
 
   test('a real contaminated pin AND a never-observed pin at once -> attention text discloses both', () => {
@@ -393,7 +394,7 @@ describe('assessModelIntegrity (combined: [1m]-flagged keys + declared-pin conta
     );
     expect(result.severity).toBe('attention');
     expect(result.text).toContain('at least 9/95');
-    expect(result.text).toContain('1 of 2 declared pin(s) never observed this window');
+    expect(result.text).toContain('1 of 2 declared pins never observed this window');
   });
 });
 

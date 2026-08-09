@@ -6,6 +6,7 @@ import { formatPct, formatCost } from '../format.ts';
 import { assessFlaggedModelKeys, assessErrorRate, NO_MODEL_ACTIVITY_TEXT, FLAGGED_MODEL_KEY_TOOLTIP } from '../assessors.ts';
 import { buildContaminationAvailability, formatObservedBreakdown } from '../model-contamination.ts';
 import type { AgentModelRow } from '../model-contamination.ts';
+import { countOf } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
 // Integrity panel (Task 6, fix round 1) — "is the machinery reporting the
@@ -157,14 +158,14 @@ export function buildContaminationSectionView(
       const totalEvaluatedRuns = evaluated.reduce((s, r) => s + r.totalRuns, 0);
       const totalPins = evaluated.length + notObserved.length;
       const notObservedClause = notObserved.length > 0
-        ? ` — ${notObserved.length} of ${totalPins} declared pin(s) produced zero observed runs this window and could not be evaluated`
+        ? ` — ${notObserved.length} of ${countOf(totalPins, 'declared pin')} produced zero observed runs this window and could not be evaluated`
         : '';
       const summary =
         evaluated.length === 0
-          ? `No pinned sub-agent runs recorded in this window${notObserved.length > 0 ? ` (${notObserved.length} declared pin(s) produced zero observed runs)` : ''}.`
+          ? `No pinned sub-agent runs recorded in this window${notObserved.length > 0 ? ` (${countOf(notObserved.length, 'declared pin')} produced zero observed runs)` : ''}.`
           : contaminated.length === 0
-            ? `n=${totalEvaluatedRuns} · all ${evaluated.length} pinned sub-agent(s) ran only on their declared model${notObservedClause}`
-            : `${totalOffPinRuns}/${totalEvaluatedRuns} runs across ${contaminated.length} of ${evaluated.length} pinned sub-agent(s) ran on a model other than their declared pin${notObservedClause}`;
+            ? `n=${totalEvaluatedRuns} · all ${countOf(evaluated.length, 'pinned sub-agent')} ran only on their declared model${notObservedClause}`
+            : `${totalOffPinRuns}/${totalEvaluatedRuns} runs across ${contaminated.length} of ${countOf(evaluated.length, 'pinned sub-agent')} ran on a model other than their declared pin${notObservedClause}`;
       return { status: contaminated.length > 0 ? 'attention' : 'ok', message: null, summary, rows, undercountNote };
     }
   }
@@ -264,7 +265,7 @@ export function buildErrorRateSectionView(errorRate: IntegrityStats['errorRate']
   return {
     status: a.severity,
     text: a.text,
-    note: '"Error" here includes every kind of pipeline failure recorded on the row, including error_max_turns'
+    note: '"Error" here includes every kind of pipeline failure recorded on the row'
       + ' — not narrowed to one cause.',
   };
 }

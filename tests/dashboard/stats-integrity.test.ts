@@ -181,7 +181,7 @@ describe('buildContaminationSectionView', () => {
       const view = buildContaminationSectionView(matchedOnly, 'note', configReady(twoFilesConfig));
       expect(view.status).toBe('ok');
       expect(view.summary).toContain('ran only on their declared model');
-      expect(view.summary).toContain('1 of 2 declared pin(s) produced zero observed runs');
+      expect(view.summary).toContain('1 of 2 declared pins produced zero observed runs');
       // The unobserved pin still gets its own row, not silence.
       expect(view.rows).toHaveLength(2);
       expect(view.rows!.find((r) => r.agent === 'al-integration-analyzer')?.status).toBe('not-observed');
@@ -191,14 +191,14 @@ describe('buildContaminationSectionView', () => {
       const view = buildContaminationSectionView(pinnedEntries, 'note', configReady(twoFilesConfig));
       expect(view.status).toBe('attention');
       expect(view.summary).toContain('9/95');
-      expect(view.summary).toContain('1 of 2 declared pin(s) produced zero observed runs');
+      expect(view.summary).toContain('1 of 2 declared pins produced zero observed runs');
     });
 
     test('zero pinned runs at all still discloses the unobserved pin count, not a bare "no runs" message', () => {
       const view = buildContaminationSectionView([], 'note', configReady(twoFilesConfig));
       expect(view.status).toBe('ok');
       expect(view.summary).toContain('No pinned sub-agent runs recorded');
-      expect(view.summary).toContain('2 declared pin(s) produced zero observed runs');
+      expect(view.summary).toContain('2 declared pins produced zero observed runs');
     });
 
     test('when every declared pin was observed, no disclosure clause is added (nothing to disclose)', () => {
@@ -352,13 +352,15 @@ describe('buildErrorRateSectionView', () => {
     expect(view.status).toBe('attention');
   });
 
-  // KNOWN-REMAINING, NOT SETTLED: this `toBe` pins `error_max_turns` — a stored
-  // value, on screen — as required output. It is listed in
-  // tests/dashboard/card-prose-sweep.test.ts's known-remaining set, and stays
-  // only until a plain wording identifies that failure mode as precisely.
-  test('note names error_max_turns explicitly, not just "errors"', () => {
+  test('note states the error category is broad, without naming a stored value', () => {
     const view = buildErrorRateSectionView({ count: 0, total: 10, rate: 0 }, false);
-    expect(view.note).toBe('"Error" here includes every kind of pipeline failure recorded on the row, including error_max_turns — not narrowed to one cause.');
+    expect(view.note).toBe('"Error" here includes every kind of pipeline failure recorded on the row — not narrowed to one cause.');
+  });
+
+  test('the error caveat does not name a database value', () => {
+    const view = buildErrorRateSectionView({ count: 0, total: 10, rate: 0 }, false);
+    expect(view.note).not.toContain('error_max_turns');
+    expect(view.note).toContain('every kind of pipeline failure recorded on the row');
   });
 
   // Task 8 (I6): dropped the three internal TS class names in rendered prose
