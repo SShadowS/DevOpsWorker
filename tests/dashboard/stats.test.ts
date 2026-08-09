@@ -1024,7 +1024,12 @@ describe('stats.ts SQL shape', () => {
     const inferredEffortBlock = body.slice(body.indexOf('inferredEffort: {'), body.indexOf('findingsIntegrity: {'));
     const subAgentModelAttributionBlock = body.slice(body.indexOf('subAgentModelAttribution: {'));
 
-    expect(inferredEffortBlock).toContain('effort level');
+    // Round 2: 'effort level' pins a noun phrase, not the claim — a future
+    // rewrite could keep the words and drop the warning ("the effort level
+    // shown here is approximate" would still pass). 'Nothing records' pins
+    // the "not recorded at all" half, which is the actual caveat; unique
+    // within this block (checked: the only occurrence in stats.ts).
+    expect(inferredEffortBlock).toContain('Nothing records');
     expect(inferredEffortBlock.toLowerCase()).toContain('overestimate');
     expect(subAgentModelAttributionBlock).toContain('never fewer');
   });
