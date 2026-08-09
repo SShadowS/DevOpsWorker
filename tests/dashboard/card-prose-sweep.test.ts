@@ -374,14 +374,14 @@ describe('rendered-text extraction', () => {
 
   // The pattern is a plain substring match — `/\(s\)/` fires on ANY text
   // containing that literal three characters, including `.map((s) => ...)`'s
-  // arrow-function parameter, which every swept file uses. That is not a
-  // false positive to guard against in the pattern itself (a raw string like
+  // arrow-function parameter, which two of the six swept files use
+  // (stats-costquality.tsx:717,719 and stats-operational.tsx:140). That is not
+  // a false positive to guard against in the pattern itself (a raw string like
   // 'rows.map((s) => s.name)' legitimately matches — it really does contain
   // "(s)"); the guarantee has to come from the EXTRACTOR never handing that
   // code fragment to the pattern as rendered text in the first place. This
   // pins that property the way it is actually exercised: through
-  // `renderedText()`, on the same code shape stats-costquality.tsx and
-  // stats-view.tsx both use (`.map((s) => ...)`), not through `hit()` on a
+  // `renderedText()`, on that same code shape, not through `hit()` on a
   // hand-picked string.
   test('an arrow-function parameter named `s` is code, not a rendered plural placeholder', () => {
     const sample = "return <ul>{items.map((s) => <li key={s.id}>{s.label} entries</li>)}</ul>;";

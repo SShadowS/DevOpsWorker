@@ -971,7 +971,7 @@ describe('stats.ts SQL shape', () => {
     // wiring does. The undercount direction ("more models... never fewer", stated
     // as a one-way bias per fix round 1) is pinned against the evaluated constant
     // by "each note keeps the caveat it exists to carry" below.
-    expect(body).toMatch(/note:\s*SUB_AGENT_MODEL_ATTRIBUTION_NOTE/);
+    expect(body).toMatch(/note:\s*SUB_AGENT_MODEL_ATTRIBUTION_NOTE\b/);
   });
 
   // Fix round 1 (task-6, this round): the sibling wiring pin above has no
@@ -984,7 +984,7 @@ describe('stats.ts SQL shape', () => {
   test("getIntegrityStats' inferredEffort block reuses the exported note", () => {
     const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
-    expect(fn![0]).toMatch(/note:\s*INFERRED_EFFORT_NOTE/);
+    expect(fn![0]).toMatch(/note:\s*INFERRED_EFFORT_NOTE\b/);
   });
 
   // Task 4 (dashboard follow-ups): these two notes are rendered VERBATIM by the
