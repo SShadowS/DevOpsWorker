@@ -340,9 +340,9 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
-        '5 findings have no reply on record, so the team never gave an answer for them. Reported as not ' +
-        'measured rather than as zero: counting this as zero would say nobody disputed these, and nobody here ' +
-        'ever gave an answer on whether anyone did.',
+        '5 findings have no reply on record, so no answer was ever recorded for them. Reported as not ' +
+        'measured rather than as zero: counting this as zero would say nobody disputed these, and nothing here ' +
+        'recorded an answer on whether anyone did.',
       );
     });
 
@@ -363,7 +363,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
         '4 findings have a reply on the thread or in the pull request discussion, but have not had an answer ' +
         'recorded yet. Reported as not measured rather than as zero: counting this as zero would say nobody ' +
-        'disputed these, and nobody here ever gave an answer on whether anyone did.',
+        'disputed these, and nothing here recorded an answer on whether anyone did.',
       );
     });
 
@@ -391,7 +391,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
 
     test('count-of-1 for each pure state', () => {
       const noEngaged = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
-      expect(noEngaged).toContain('1 finding has no reply on record, so the team never gave an answer for it.');
+      expect(noEngaged).toContain('1 finding has no reply on record, so no answer was ever recorded for it.');
 
       const notYetClassified = compute([finding({ saidConfidence: null, saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
       expect(notYetClassified).toContain('1 finding has a reply on the thread or in the pull request discussion, but has not had an answer recorded yet');
@@ -415,7 +415,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         finding({ saidConfidence: null, saidEvidence: null }),
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
-      expect(reason).toContain('3 findings have no reply on record, so the team never gave an answer for them');
+      expect(reason).toContain('3 findings have no reply on record, so no answer was ever recorded for them');
       expect(reason).not.toContain('a reply on the thread or in the pull request discussion');
     });
 
@@ -461,8 +461,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = o.disputedAsWrong.reason!;
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
-        '1 finding was voted on and the votes did not agree, 1 has no reply on record, so the team never gave ' +
-        'an answer for it, and 2 have a stored result this card cannot read. Reported as not measured rather ' +
+        '1 finding was voted on and the votes did not agree, 1 has no reply on record, so no answer was ever ' +
+        'recorded for it, and 2 have a stored result this card cannot read. Reported as not measured rather ' +
         'than as zero: counting this as zero would say nobody disputed these; the votes this card can read did ' +
         'not agree on an answer, and this card cannot tell what answer the team gave for the ones whose stored ' +
         'result it cannot read.',
@@ -517,8 +517,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
-        '2 findings were voted on and the votes did not agree and 3 have no reply on record, so the team never ' +
-        'gave an answer for them. Reported as not measured rather than as zero: counting this as zero would ' +
+        '2 findings were voted on and the votes did not agree and 3 have no reply on record, so no answer was ' +
+        'ever recorded for them. Reported as not measured rather than as zero: counting this as zero would ' +
         'say nobody disputed these, and the votes that ran did not agree on an answer.',
       );
     });
@@ -535,9 +535,9 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
         '2 findings have a reply on the thread or in the pull request discussion, but have not had an answer ' +
-        'recorded yet and 3 have no reply on record, so the team never gave an answer for them. Reported as ' +
-        'not measured rather than as zero: counting this as zero would say nobody disputed these, and nobody ' +
-        'here ever gave an answer on whether anyone did.',
+        'recorded yet and 3 have no reply on record, so no answer was ever recorded for them. Reported as ' +
+        'not measured rather than as zero: counting this as zero would say nobody disputed these, and nothing ' +
+        'here recorded an answer on whether anyone did.',
       );
     });
 
@@ -554,8 +554,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
         '1 finding was voted on and the votes did not agree, 2 have a reply on the thread or in the pull ' +
-        'request discussion, but have not had an answer recorded yet, and 3 have no reply on record, so the ' +
-        'team never gave an answer for them. Reported as not measured rather than as zero: counting this as ' +
+        'request discussion, but have not had an answer recorded yet, and 3 have no reply on record, so no ' +
+        'answer was ever recorded for them. Reported as not measured rather than as zero: counting this as ' +
         'zero would say nobody disputed these, and the votes that ran did not agree on an answer.',
       );
     });
@@ -566,8 +566,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute([], spend(), { readBandRaised: 0, noFileAnchor: 0 }).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No finding was traced in this window at all, so there is nothing to count. Reported as not measured ' +
-        'rather than as zero: counting this as zero would say nobody disputed a finding, and nobody here ' +
-        'ever gave an answer on whether anyone did.',
+        'rather than as zero: counting this as zero would say nobody disputed a finding, and nothing here ' +
+        'recorded an answer on whether anyone did.',
       );
       // "a finding", not "these": there is no window contents for a
       // demonstrative to point at here.
@@ -590,19 +590,25 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       }
     });
 
-    // The closing "why not zero" clause must never deny that an answer was
-    // given here where a tie is in the mix — votes WERE cast and asked exactly
-    // this question, and the string says so in the sentence right before the
-    // denial. There are two ways to phrase that denial and this card has
-    // shipped both: "nobody here ever gave an answer on whether anyone did"
-    // outright, and "cannot tell whether the team EVER gave an answer", which
-    // denies the card's own knowledge of an answer it just reported. Both are
-    // barred wherever a tie is present, whatever else is in the window.
+    // The closing "why not zero" clause must never go silent about a tie in
+    // the mix. The two denials are different in kind, and neither is barred
+    // for the same reason a tied row is "checked and unanswered" — that
+    // wording is exactly the collision this rewrite exists to avoid:
+    //   - "nothing here recorded an answer on whether anyone did" stays TRUE
+    //     even with a tie present (a tied vote records no `said` value
+    //     either), but it would go silent about the one thing this card can
+    //     positively confirm — three votes ran and did not agree, stated in
+    //     the sentence right before this one. Barred for IMPLICATURE, not
+    //     falsehood.
+    //   - "cannot tell whether the team EVER gave an answer" IS false with a
+    //     tie present: this card is not uncertain about a tied row, it knows
+    //     the vote ran and produced no consensus. Barred because it is
+    //     wrong, not merely uninformative.
     // DENIALS below tracks the CURRENT wording — reword a tail and these
     // substrings stop matching anything, so they must be re-derived from the
     // new wording, not left to pass vacuously.
     test('the closing clause never denies a check happened where a tie is present', () => {
-      const DENIALS = ['nobody here ever gave an answer on whether anyone did', 'cannot tell whether the team ever gave an answer'];
+      const DENIALS = ['nothing here recorded an answer on whether anyone did', 'cannot tell whether the team ever gave an answer'];
       // Two forms, because the combined tail scopes the tie to the votes this
       // card can read (an unrecognized row in the window carries votes that ran
       // AND agreed, so the universal would over-claim). Exactly one must
@@ -633,7 +639,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       // ...and conversely, NEITHER form of "the votes did not agree" may appear
       // where there is no tie — it would assert a check that never happened.
       const noTie = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
-      expect(noTie).toContain('nobody here ever gave an answer on whether anyone did');
+      expect(noTie).toContain('nothing here recorded an answer on whether anyone did');
       for (const form of TIE_NAMED) {
         expect(noTie, `no tie: must not contain "${form}"`).not.toContain(form);
       }
@@ -661,8 +667,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // unrecognized row is present, the narrower "the votes this card can read"
     // where one is — see the constant below for why); an unrecognized row in the
     // mix ⇒ its doubt is voiced, window-wide where there is no tie for it to
-    // contradict and scoped to its own rows where there is; neither ⇒ nobody
-    // here answered. The two tie forms are DELIBERATE, not drift: do not
+    // contradict and scoped to its own rows where there is; neither ⇒ nothing
+    // here recorded an answer. The two tie forms are DELIBERATE, not drift: do not
     // "restore consistency" by collapsing them without reading that constant —
     // collapsing them to the universal is how this clause breaks.
     //
@@ -678,7 +684,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // table still passes.
     test('all fifteen non-empty bucket combinations render exactly one tail, and it is the true one', () => {
       const NO_ANSWER_GIVEN =
-        'counting this as zero would say nobody disputed these, and nobody here ever gave an answer on whether anyone did.';
+        'counting this as zero would say nobody disputed these, and nothing here recorded an answer on whether anyone did.';
       const TIED_SETTLED =
         'counting this as zero would say nobody disputed these, and the votes that ran did not agree on an answer.';
       const CANNOT_CONFIRM =
@@ -914,19 +920,24 @@ describe('computeReviewValue — spend', () => {
     );
   });
 
-  test('exact numerator + settled denominator: the note says the figure is final and will not move', () => {
-    // "final", not "settled": this card's glossary defines "settled" as "the
-    // pull request has been merged or closed" (TERMS in this component file),
-    // but `denominatorState === 'settled'` only requires every RAISED finding
-    // to be judged — reachable on a still-open PR. Reusing "settled" here
-    // would teach the glossary's PR-lifecycle meaning onto a figure that says
+  test('exact numerator + settled denominator: the note says both sides are complete and it will not move', () => {
+    // Not "settled": this card's glossary defines "settled" as "the pull
+    // request has been merged or closed" (TERMS in this component file), but
+    // `denominatorState === 'settled'` only requires every RAISED finding to
+    // be judged — reachable on a still-open PR. Reusing "settled" here would
+    // teach the glossary's PR-lifecycle meaning onto a figure that says
     // nothing about whether the PR itself has merged or closed.
+    // Also not "final": a rolling window gets new reviews tomorrow, so
+    // nothing about this figure is terminal — only the two flags the gate
+    // actually sets (every cost recorded, every problem checked) are true.
+    // "Both sides of this figure are complete" asserts exactly those two
+    // flags and nothing more.
     const o = compute([finding({ did: 'ADDRESSED' })], spend());
     expect(o.spend.numeratorState).toBe('exact');
     expect(o.spend.denominatorState).toBe('settled');
     expect(o.spend.note).toBe(
-      'This figure is final. Every review on these pull requests has a recorded cost, and every problem has ' +
-        `been checked, so it will not move as more checking happens. ${TRAILER}`,
+      'Both sides of this figure are complete. Every review on these pull requests has a recorded cost, and ' +
+        `every problem has been checked, so it will not move as more checking happens. ${TRAILER}`,
     );
   });
 
@@ -1338,7 +1349,7 @@ describe('describeDisputed', () => {
     expect(line.value).not.toBe('2');
     // Never over raised, which is the number sitting at the top of the card.
     expect(line.value).not.toContain('of 6');
-    expect(line.detail).toContain('it is counted against the 3 said-labelled findings');
+    expect(line.detail).toContain('it is out of the 3 said-labelled findings');
     // The raised total is still stated — just not as this figure's denominator.
     expect(line.detail).toContain('The other 3 raised findings have no said label at all');
   });
@@ -2145,12 +2156,12 @@ describe('plain-English rewrite pins', () => {
     const one = compute([finding({ said: 'fixed' })], spend());
     expect(describeDisputed(one.disputedAsWrong, one).detail).toBe(
       'This is a real zero, not a gap in the data: the one problem the team gave an answer on was not disputed ' +
-        'as wrong. Reported as a count, not a rate: it is counted against the 1 said-labelled finding.',
+        'as wrong. Reported as a count, not a rate: it is out of the 1 said-labelled finding.',
     );
     const two = compute([finding({ said: 'fixed' }), finding({ said: 'ignored' })], spend());
     expect(describeDisputed(two.disputedAsWrong, two).detail).toBe(
       'This is a real zero, not a gap in the data: none of the problems the team gave an answer on was disputed ' +
-        'as wrong. Reported as a count, not a rate: it is counted against the 2 said-labelled findings.',
+        'as wrong. Reported as a count, not a rate: it is out of the 2 said-labelled findings.',
     );
   });
 

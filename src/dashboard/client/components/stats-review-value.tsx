@@ -320,7 +320,7 @@ export function describeDisputed(d: ReviewValueDisputed, o: ReviewValueOutcome):
     // so the sentence states the policy and the denominator, and claims
     // nothing about how big n happens to be.
     detail:
-      `${zeroClause}Reported as a count, not a rate: it is counted against the ` +
+      `${zeroClause}Reported as a count, not a rate: it is out of the ` +
       `${countOf(d.saidRecorded, 'said-labelled finding')}.${contrast}`,
     // The `did` cross-tab, disclosed only when there is something to disclose.
     // At `unjudged === 0` there is no limitation to state and the clause would

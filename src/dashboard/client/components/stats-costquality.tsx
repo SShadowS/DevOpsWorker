@@ -642,7 +642,7 @@ function QualitySection({ title, status, children }: { title: string; status: Se
 function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
   const lowCoverageHeadline = buildReadBandLowCoverageHeadline(view.coverage);
   return (
-    <QualitySection title="Findings health (avg critical+major findings per review)" status={view.level === 'danger' ? 'attention' : 'neutral'}>
+    <QualitySection title="Critical/major findings per review" status={view.level === 'danger' ? 'attention' : 'neutral'}>
       {view.value == null ? (
         <p class="quality-section__empty">No findings data recorded in this window.</p>
       ) : (
@@ -757,7 +757,7 @@ function BelowBandRowsSection({ data }: { data: QualityStats }) {
       </p>
       <p class="quality-section__note">
         Counted by review, not by individual problem: a review with one critical problem and five minor ones counts
-        toward the critical/major total above, but is not one of the reviews counted here.
+        toward the critical/major total above, but is not one of the zero-critical/major reviews counted here.
       </p>
     </QualitySection>
   );

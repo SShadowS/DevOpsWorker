@@ -502,8 +502,9 @@ describe('Task 9 sweep — read-band gauge and severity split, missed by Task 8'
   );
 
   test('the read-band gauge title names critical/major, not "read-band"', () => {
-    expect(src).toContain('title="Findings health (avg critical+major findings per review)"');
+    expect(src).toContain('title="Critical/major findings per review"');
     expect(src).not.toMatch(/title="Read-band health/);
+    expect(src).not.toMatch(/title="Findings health/);
   });
 
   test("the gauge's own summary text and aria-label both say critical/major, not \"read-band items\"", () => {

@@ -315,7 +315,7 @@ export function describeToolMixAverageNote(sampleSize: number): string {
   return (
     `Average per review is divided by all ${countOf(sampleSize, 'review')} in this window, not just the reviews that ` +
     "called a given tool — a rarely-used tool reads as a correspondingly low average, never one inflated by " +
-    'dividing by a smaller count instead.'
+    'dividing only by the reviews that used it.'
   );
 }
 
