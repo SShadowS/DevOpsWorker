@@ -1067,9 +1067,10 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, 
       bands: { high: HIGH_EFFORT_RANGE, low: LOW_EFFORT_RANGE },
       drift: computeEffortDrift(effortEntries),
       note:
-        'No effort column exists. Bands are inferred from orchestrator output tokens (the total for all ' +
-        "models minus the sub-agent output we could measure), so they inherit the roster's undercount as an " +
-        'overestimate of the orchestrator share.',
+        "Nothing records a review's effort level, so these bands are inferred: they use the " +
+        "orchestrator's output tokens — the total for all models, minus the sub-agent output " +
+        "we could measure. The record of which sub-agents ran is incomplete, so the orchestrator's " +
+        'share here is an overestimate.',
     },
     findingsIntegrity: {
       comparedRows: comparedForFindings.length,
@@ -1084,11 +1085,11 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, 
     subAgentModelAttribution: {
       entries: subAgentModelAttribution,
       note:
-        'These are the models actually seen running. The record of which sub-agents ran is an incomplete ' +
-        'count, and it varies run to run: a dispatch missing from it has no model recorded here at all. So a ' +
-        'model running where it should not could be worse than these counts show, never better. This says ' +
-        'what ran, not whether it matched what was asked for — to find real deviations, compare it against ' +
-        'the model each agent declares in its own settings.',
+        'These are the models actually seen running. The record of which sub-agents ran is incomplete, and ' +
+        'how much it misses varies from run to run: a dispatch missing from it has no model recorded here at ' +
+        'all. So there could be more models running where they should not than these counts show, never fewer. ' +
+        'This says what ran, not whether it matched what was asked for — to find real deviations, compare it ' +
+        'against the model each agent declares in its own settings.',
     },
   };
 }

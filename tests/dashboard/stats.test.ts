@@ -964,12 +964,15 @@ describe('stats.ts SQL shape', () => {
     const body = fn![0];
     expect(body).toMatch(/aggregateSubAgentModelAttribution\(rows\.map\(\(r\) => r\.sub_agents\)\)/);
     expect(body).toMatch(/subAgentModelAttribution:\s*\{/);
-    // The undercount must be stated as a worse-not-better direction, not a
-    // vague "may be incomplete" — matching the fix round's explicit ask.
+    // The undercount must be stated as a one-way bias, not a vague "may be
+    // incomplete" — matching the fix round's explicit ask.
     // Task 4 (dashboard follow-ups) reworded this sentence to plain English
-    // and dropped the shouting-case emphasis along with the schema names —
-    // the direction itself is still pinned, just no longer shouted.
-    expect(body).toContain('worse than these counts show, never better');
+    // and dropped the shouting-case emphasis along with the schema names.
+    // Its own fix round 1 reworded it again: "a model running... worse than
+    // these counts show, never better" doesn't parse (a single model can't
+    // be "worse" than a count), so the direction is now stated as a count —
+    // "more models... never fewer" — same one-way bias, grammatical this time.
+    expect(body).toContain('than these counts show, never fewer');
   });
 
   // Task 4 (dashboard follow-ups): these two notes are rendered VERBATIM by the
@@ -984,10 +987,18 @@ describe('stats.ts SQL shape', () => {
     const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
     const body = fn![0];
+    // Fix round 1: `not.toBe('')` did not guard what it looked like it guarded
+    // — a renamed/missing marker makes `indexOf` return -1, and
+    // `body.slice(-1, ...)` (or `body.slice(-1)`) returns a ONE-CHARACTER
+    // string (the source's closing "}"), which is `not ''` and passes. Every
+    // `not.toContain` below would then pass against that single character too
+    // — checking nothing, while looking green. Assert each marker is actually
+    // found before trusting a slice built from its index.
+    expect(body.indexOf('inferredEffort: {')).toBeGreaterThan(-1);
+    expect(body.indexOf('findingsIntegrity: {')).toBeGreaterThan(-1);
+    expect(body.indexOf('subAgentModelAttribution: {')).toBeGreaterThan(-1);
     const inferredEffortBlock = body.slice(body.indexOf('inferredEffort: {'), body.indexOf('findingsIntegrity: {'));
     const subAgentModelAttributionBlock = body.slice(body.indexOf('subAgentModelAttribution: {'));
-    expect(inferredEffortBlock).not.toBe('');
-    expect(subAgentModelAttributionBlock).not.toBe('');
 
     const SCHEMA_NAMES = ['model_usage', 'sub_agents', 'dispatch.mismatchRate', '/api/config'];
     for (const name of SCHEMA_NAMES) {
@@ -997,10 +1008,15 @@ describe('stats.ts SQL shape', () => {
   });
 
   // The rewrite that drops the schema names must not drop the caveats those
-  // notes exist to carry: effort is INFERRED (no effort column exists) and the
-  // orchestrator share is an OVERESTIMATE (inferredEffort.note); a missing
-  // dispatch could make contamination look better than it is, NEVER the
-  // reverse (subAgentModelAttribution.note).
+  // notes exist to carry: no review carries a recorded effort LEVEL (fix
+  // round 1 — "no effort column exists" was itself schema vocabulary, and
+  // "nothing records how much effort a review took" overclaimed: turns,
+  // duration_ms and cost ARE recorded and shown on the Operational card, so
+  // the narrower, true claim is that no review carries a recorded effort
+  // LEVEL, the High/Low band this section shows), so bands are inferred, and
+  // the orchestrator share is an OVERESTIMATE (inferredEffort.note); a missing
+  // dispatch could mean MORE contamination than these counts show, NEVER
+  // fewer (subAgentModelAttribution.note).
   test('each note keeps the caveat it exists to carry', () => {
     const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
@@ -1008,9 +1024,9 @@ describe('stats.ts SQL shape', () => {
     const inferredEffortBlock = body.slice(body.indexOf('inferredEffort: {'), body.indexOf('findingsIntegrity: {'));
     const subAgentModelAttributionBlock = body.slice(body.indexOf('subAgentModelAttribution: {'));
 
-    expect(inferredEffortBlock).toContain('No effort column exists');
+    expect(inferredEffortBlock).toContain('effort level');
     expect(inferredEffortBlock.toLowerCase()).toContain('overestimate');
-    expect(subAgentModelAttributionBlock).toContain('never better');
+    expect(subAgentModelAttributionBlock).toContain('never fewer');
   });
 
   // Fix-round-1 regression pin: the cost split previously exposed a plain

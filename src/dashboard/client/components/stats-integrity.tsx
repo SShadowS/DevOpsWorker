@@ -466,7 +466,10 @@ function ContaminationSection({ view }: { view: ContaminationSectionView }) {
         {view.summary}
       </p>
       <ContaminationTable rows={view.rows!} />
-      <p class="integrity-section__note">{view.undercountNote}</p>
+      <p class="integrity-section__note">
+        <strong class="integrity-section__tag integrity-section__tag--caveat">Known instrument caveat: </strong>
+        {view.undercountNote}
+      </p>
     </IntegritySection>
   );
 }
