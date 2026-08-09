@@ -974,14 +974,28 @@ describe('stats.ts SQL shape', () => {
     expect(body).toMatch(/note:\s*SUB_AGENT_MODEL_ATTRIBUTION_NOTE/);
   });
 
+  // Fix round 1 (task-6, this round): the sibling wiring pin above has no
+  // counterpart for inferredEffort — every other test in this file asserts on
+  // INFERRED_EFFORT_NOTE's own evaluated value, which stays the same whether
+  // or not the return object actually uses it. Without this, reverting
+  // `inferredEffort.note` to an inline string (or wiring in the wrong
+  // constant) would go unnoticed here AND in card-prose-sweep.test.ts's
+  // SERVER_NOTES check, which reads the same now-orphaned constant.
+  test("getIntegrityStats' inferredEffort block reuses the exported note", () => {
+    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toMatch(/note:\s*INFERRED_EFFORT_NOTE/);
+  });
+
   // Task 4 (dashboard follow-ups): these two notes are rendered VERBATIM by the
   // Integrity card (stats-integrity.tsx), and until this fix both named raw
   // schema — `model_usage`, `sub_agents`, `dispatch.mismatchRate`, `/api/config`
-  // — on a card whose reader has no schema to resolve those against. They sit
-  // outside tests/dashboard/card-prose-sweep.test.ts's reach as literals (that
-  // sweep reads client card files only), so this is the one guard that holds
-  // them clean at the source. See the sweep's own comment for why it cannot
-  // reach the client-rendered copy of these two notes.
+  // — on a card whose reader has no schema to resolve those against. Task 6's
+  // SERVER_NOTES check in card-prose-sweep.test.ts now also holds `model_usage`
+  // and `sub_agents` clean on these two constants directly, so this test is no
+  // longer the ONLY guard for those two; it remains the only guard for
+  // `dispatch.mismatchRate` and `/api/config`, which are not in that file's
+  // DENIED list. See SERVER_NOTES's own comment for the full picture.
   //
   // Task 6 hoisted both notes to exported constants (INFERRED_EFFORT_NOTE,
   // SUB_AGENT_MODEL_ATTRIBUTION_NOTE) specifically so this file could assert on

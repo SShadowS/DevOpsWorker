@@ -253,8 +253,8 @@ const KNOWN_REMAINING: ReadonlyArray<{ file: string; text: string; why: string }
  * schema-name check ("the inferredEffort and subAgentModelAttribution notes
  * name no schema token") a partial subset of the check below — NOT fully
  * redundant, because two of its four tokens (`dispatch.mismatchRate`,
- * `/api/config`) are not in this file's 8-token DENIED list and so still need
- * their own guard.
+ * `/api/config`) are not in this file's `DENIED` list and so still need their
+ * own guard.
  */
 const SERVER_NOTES: ReadonlyArray<{ name: string; text: string }> = [
   { name: 'stats.ts: inferredEffort.note', text: INFERRED_EFFORT_NOTE },
@@ -365,10 +365,30 @@ describe('rendered-text extraction', () => {
     // fixed by hand, and a case-sensitive pattern caught neither.
     expect(hit('Read-band findings raised')).toEqual(['read-band']);
     expect(hit('Read-band health (avg critical+major findings per review)')).toEqual(['read-band']);
+    expect(hit('3 review(s) excluded')).toEqual(['(s) placeholder']);
     // ...and does not fire on the words that replaced them.
     expect(hit('across 3 pull requests')).toEqual([]);
     expect(hit('critical or major items per review')).toEqual([]);
     expect(hit('No tool activity recorded in this window.')).toEqual([]);
+  });
+
+  // The pattern is a plain substring match — `/\(s\)/` fires on ANY text
+  // containing that literal three characters, including `.map((s) => ...)`'s
+  // arrow-function parameter, which every swept file uses. That is not a
+  // false positive to guard against in the pattern itself (a raw string like
+  // 'rows.map((s) => s.name)' legitimately matches — it really does contain
+  // "(s)"); the guarantee has to come from the EXTRACTOR never handing that
+  // code fragment to the pattern as rendered text in the first place. This
+  // pins that property the way it is actually exercised: through
+  // `renderedText()`, on the same code shape stats-costquality.tsx and
+  // stats-view.tsx both use (`.map((s) => ...)`), not through `hit()` on a
+  // hand-picked string.
+  test('an arrow-function parameter named `s` is code, not a rendered plural placeholder', () => {
+    const sample = "return <ul>{items.map((s) => <li key={s.id}>{s.label} entries</li>)}</ul>;";
+    const found = renderedText(sample);
+    // Not vacuous: the list item's own text IS extracted.
+    expect(found.some((t) => t.includes('entries'))).toBe(true);
+    expect(found.some((t) => /\(s\)/.test(t))).toBe(false);
   });
 
   // The reviewer's decisive measurement, kept as a test: real strings that were
