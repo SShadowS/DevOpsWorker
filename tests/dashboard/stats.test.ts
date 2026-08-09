@@ -36,6 +36,8 @@ import {
   isPlausibleSha,
   resolveHeadSha,
   computeCommitsBehindHead,
+  INFERRED_EFFORT_NOTE,
+  SUB_AGENT_MODEL_ATTRIBUTION_NOTE,
 } from '../../src/dashboard/stats.ts';
 import type { PRFinding } from '../../src/agents/pr-reviewer/schema.ts';
 import type { GitInvocation } from '../../src/dashboard/stats.ts';
@@ -958,52 +960,45 @@ describe('stats.ts SQL shape', () => {
   // entirely — modelUsage only ever saw model_usage (keyed by model id, not by
   // sub-agent). This wires the OBSERVED half of contamination detection into
   // the payload; the declared-pin half is cross-referenced client-side.
-  test('getIntegrityStats wires subAgentModelAttribution from the same sub_agents column, and states the undercount direction', () => {
+  test('getIntegrityStats wires subAgentModelAttribution from the same sub_agents column, and reuses the exported note', () => {
     const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
     const body = fn![0];
     expect(body).toMatch(/aggregateSubAgentModelAttribution\(rows\.map\(\(r\) => r\.sub_agents\)\)/);
     expect(body).toMatch(/subAgentModelAttribution:\s*\{/);
-    // The undercount must be stated as a one-way bias, not a vague "may be
-    // incomplete" — matching the fix round's explicit ask.
-    // Task 4 (dashboard follow-ups) reworded this sentence to plain English
-    // and dropped the shouting-case emphasis along with the schema names.
-    // Its own fix round 1 reworded it again: "a model running... worse than
-    // these counts show, never better" doesn't parse (a single model can't
-    // be "worse" than a count), so the direction is now stated as a count —
-    // "more models... never fewer" — same one-way bias, grammatical this time.
-    expect(body).toContain('than these counts show, never fewer');
+    // Task 6 hoisted the note itself to the exported SUB_AGENT_MODEL_ATTRIBUTION_NOTE
+    // constant, so this function's source no longer carries the prose — only the
+    // wiring does. The undercount direction ("more models... never fewer", stated
+    // as a one-way bias per fix round 1) is pinned against the evaluated constant
+    // by "each note keeps the caveat it exists to carry" below.
+    expect(body).toMatch(/note:\s*SUB_AGENT_MODEL_ATTRIBUTION_NOTE/);
   });
 
   // Task 4 (dashboard follow-ups): these two notes are rendered VERBATIM by the
   // Integrity card (stats-integrity.tsx), and until this fix both named raw
   // schema — `model_usage`, `sub_agents`, `dispatch.mismatchRate`, `/api/config`
   // — on a card whose reader has no schema to resolve those against. They sit
-  // outside tests/dashboard/card-prose-sweep.test.ts's reach (that sweep reads
-  // client card files only; these strings are built server-side and reach the
-  // page through a variable, not a literal), so this is the one guard that
-  // holds them clean. See the sweep's own comment for why it cannot reach here.
+  // outside tests/dashboard/card-prose-sweep.test.ts's reach as literals (that
+  // sweep reads client card files only), so this is the one guard that holds
+  // them clean at the source. See the sweep's own comment for why it cannot
+  // reach the client-rendered copy of these two notes.
+  //
+  // Task 6 hoisted both notes to exported constants (INFERRED_EFFORT_NOTE,
+  // SUB_AGENT_MODEL_ATTRIBUTION_NOTE) specifically so this file could assert on
+  // the evaluated string instead of regex-extracting it out of
+  // getIntegrityStats's source text. The regex/slice approach had two failure
+  // modes: a line wrap splitting a phrase across two string literals defeated
+  // `toContain` (noisy — a reflow breaks a green test while the product is
+  // fine), and `toContain` on raw source also matches text inside comments, so
+  // a note could lose its caveat while an unrelated comment in the same sliced
+  // region kept the test green (silent — the `dispatch:` block's own comment
+  // sits inside that region). Asserting on the evaluated constant has neither
+  // failure mode.
   test('the inferredEffort and subAgentModelAttribution notes name no schema token', () => {
-    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
-    expect(fn).not.toBeNull();
-    const body = fn![0];
-    // Fix round 1: `not.toBe('')` did not guard what it looked like it guarded
-    // — a renamed/missing marker makes `indexOf` return -1, and
-    // `body.slice(-1, ...)` (or `body.slice(-1)`) returns a ONE-CHARACTER
-    // string (the source's closing "}"), which is `not ''` and passes. Every
-    // `not.toContain` below would then pass against that single character too
-    // — checking nothing, while looking green. Assert each marker is actually
-    // found before trusting a slice built from its index.
-    expect(body.indexOf('inferredEffort: {')).toBeGreaterThan(-1);
-    expect(body.indexOf('findingsIntegrity: {')).toBeGreaterThan(-1);
-    expect(body.indexOf('subAgentModelAttribution: {')).toBeGreaterThan(-1);
-    const inferredEffortBlock = body.slice(body.indexOf('inferredEffort: {'), body.indexOf('findingsIntegrity: {'));
-    const subAgentModelAttributionBlock = body.slice(body.indexOf('subAgentModelAttribution: {'));
-
     const SCHEMA_NAMES = ['model_usage', 'sub_agents', 'dispatch.mismatchRate', '/api/config'];
     for (const name of SCHEMA_NAMES) {
-      expect(inferredEffortBlock).not.toContain(name);
-      expect(subAgentModelAttributionBlock).not.toContain(name);
+      expect(INFERRED_EFFORT_NOTE).not.toContain(name);
+      expect(SUB_AGENT_MODEL_ATTRIBUTION_NOTE).not.toContain(name);
     }
   });
 
@@ -1017,21 +1012,17 @@ describe('stats.ts SQL shape', () => {
   // the orchestrator share is an OVERESTIMATE (inferredEffort.note); a missing
   // dispatch could mean MORE contamination than these counts show, NEVER
   // fewer (subAgentModelAttribution.note).
+  //
+  // Pinned against the full object (Task 6), not just the verb: 'Nothing
+  // records' alone holds the assertion of absence but not what is absent —
+  // "Nothing records which sub-agents ran" would also pass that substring
+  // while the effort caveat was gone, and that is the sentence the
+  // neighbouring note already makes. Substring pinning can't survive a
+  // trailing hedge ("…this precisely"); that is the ceiling of this technique.
   test('each note keeps the caveat it exists to carry', () => {
-    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
-    expect(fn).not.toBeNull();
-    const body = fn![0];
-    const inferredEffortBlock = body.slice(body.indexOf('inferredEffort: {'), body.indexOf('findingsIntegrity: {'));
-    const subAgentModelAttributionBlock = body.slice(body.indexOf('subAgentModelAttribution: {'));
-
-    // Round 2: 'effort level' pins a noun phrase, not the claim — a future
-    // rewrite could keep the words and drop the warning ("the effort level
-    // shown here is approximate" would still pass). 'Nothing records' pins
-    // the "not recorded at all" half, which is the actual caveat; unique
-    // within this block (checked: the only occurrence in stats.ts).
-    expect(inferredEffortBlock).toContain('Nothing records');
-    expect(inferredEffortBlock.toLowerCase()).toContain('overestimate');
-    expect(subAgentModelAttributionBlock).toContain('never fewer');
+    expect(INFERRED_EFFORT_NOTE).toContain("Nothing records a review's effort level");
+    expect(INFERRED_EFFORT_NOTE.toLowerCase()).toContain('overestimate');
+    expect(SUB_AGENT_MODEL_ATTRIBUTION_NOTE).toContain('never fewer');
   });
 
   // Fix-round-1 regression pin: the cost split previously exposed a plain

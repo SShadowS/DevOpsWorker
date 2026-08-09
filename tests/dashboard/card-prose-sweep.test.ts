@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { INFERRED_EFFORT_NOTE, SUB_AGENT_MODEL_ATTRIBUTION_NOTE } from '../../src/dashboard/stats.ts';
 
 // ---------------------------------------------------------------------------
 // The one cross-FILE prose guard.
@@ -26,7 +27,9 @@ import { fileURLToPath } from 'node:url';
 //   - identifiers (`modelUsage`, `READ_BAND_DANGER_MAX`);
 //   - CSS class names (`read-band-gauge__track` is a selector, not a word).
 // Same reasoning as stats-operational.test.ts's "find the return line" guards,
-// generalised from one line to every literal in six files.
+// generalised from one line to every literal in six files. Two more strings —
+// built server-side, not written as a literal in any of the six — are checked
+// against the same deny list directly; see SERVER_NOTES below.
 // ---------------------------------------------------------------------------
 
 const FILES = [
@@ -216,6 +219,10 @@ const DENIED: ReadonlyArray<{ name: string; pattern: RegExp }> = [
   { name: 'error_max_turns', pattern: /error_max_turns/i },
   { name: 'read-band', pattern: /read-band/i },
   { name: 'PR', pattern: /\bPRs?\b/ },
+  // `(s)` as a plural placeholder. The page has `countOf()` for this and used
+  // both conventions at once — 14 rendered sites against a helper built to
+  // replace them. Escaped: `/(s)/` is a capture group matching a bare `s`.
+  { name: '(s) placeholder', pattern: /\(s\)/ },
 ];
 
 /**
@@ -228,27 +235,31 @@ const DENIED: ReadonlyArray<{ name: string; pattern: RegExp }> = [
  * file, so a new occurrence of the same token anywhere else still fails. When a
  * site is fixed its entry must be deleted; the staleness check below fails
  * until it is.
- *
- * Two further sites sit permanently out of this sweep's reach, because they
- * are rendered verbatim by the Integrity panel from strings built in
- * `src/dashboard/stats.ts` (`inferredEffort.note` and
- * `subAgentModelAttribution.note`, ~stats.ts:1069 and ~:1085) — the sweep reads
- * literal and template text in the six client card files above; a note built
- * server-side and handed to a card through a variable never appears there as
- * a literal. Widening the sweep to stats.ts would pull in the server module
- * and its whole non-rendered surface, so this scope limit is permanent, not a
- * round-by-round gap like the list below.
- *
- * That does not mean those two notes are unguarded — they no longer carry a
- * schema name (fixed in the dashboard-followups round), and
- * `tests/dashboard/stats.test.ts`'s "the inferredEffort and
- * subAgentModelAttribution notes name no schema token" test is what holds
- * that, checking the exact four tokens (`model_usage`, `sub_agents`,
- * `dispatch.mismatchRate`, `/api/config`) these two notes used to carry — its
- * own deny list, not this file's DENIED, since these two strings never reach
- * this scanner to be checked against it.
  */
 const KNOWN_REMAINING: ReadonlyArray<{ file: string; text: string; why: string }> = [];
+
+/**
+ * Two more sites the extractor above cannot reach: `inferredEffort.note` and
+ * `subAgentModelAttribution.note`, rendered verbatim by the Integrity panel but
+ * built server-side in `src/dashboard/stats.ts`, not as a literal in any of the
+ * six client files above — a note handed to a card through a variable never
+ * appears there as source text, so `renderedText()` cannot see it no matter how
+ * the extractor is improved. Widening the sweep to read the whole of stats.ts
+ * would pull in that module's non-rendered surface for two strings; instead
+ * (Task 6) both notes were hoisted to exported constants, so the ALREADY
+ * EVALUATED string can be checked directly against the same DENIED list, no
+ * extraction needed. This closes the gap the comment above used to describe as
+ * permanent, and makes tests/dashboard/stats.test.ts's narrower 4-token
+ * schema-name check ("the inferredEffort and subAgentModelAttribution notes
+ * name no schema token") a partial subset of the check below — NOT fully
+ * redundant, because two of its four tokens (`dispatch.mismatchRate`,
+ * `/api/config`) are not in this file's 8-token DENIED list and so still need
+ * their own guard.
+ */
+const SERVER_NOTES: ReadonlyArray<{ name: string; text: string }> = [
+  { name: 'stats.ts: inferredEffort.note', text: INFERRED_EFFORT_NOTE },
+  { name: 'stats.ts: subAgentModelAttribution.note', text: SUB_AGENT_MODEL_ATTRIBUTION_NOTE },
+];
 
 // ---------------------------------------------------------------------------
 // The extractor's own tests. A sweep that silently extracts nothing passes
@@ -400,6 +411,17 @@ describe('no card renders a database name or the PR initialism', () => {
           if (pattern.test(text)) offences.push(`${token} — ${text}`);
         }
       }
+      expect(offences).toEqual([]);
+    });
+  }
+
+  // The two server-built notes (see SERVER_NOTES above): already-evaluated
+  // strings, not source text, so this checks them directly against DENIED —
+  // no extractor involved, and none needed, since there is no comment,
+  // identifier or class= to strip out of a plain string.
+  for (const { name, text } of SERVER_NOTES) {
+    test(name, () => {
+      const offences = DENIED.filter((d) => d.pattern.test(text)).map((d) => `${d.name} — ${text}`);
       expect(offences).toEqual([]);
     });
   }

@@ -978,6 +978,25 @@ export interface IntegrityStats extends WindowMeta, PopulationMeta {
   };
 }
 
+// Hoisted to constants (rather than written inline in the return object below)
+// so tests/dashboard/stats.test.ts and tests/dashboard/card-prose-sweep.test.ts
+// can both assert on the evaluated string instead of regex-extracting it out of
+// this function's source text. Both notes are rendered VERBATIM by the
+// Integrity card (stats-integrity.tsx) — see IntegrityStats.inferredEffort.note
+// and .subAgentModelAttribution.note above.
+export const INFERRED_EFFORT_NOTE =
+  "Nothing records a review's effort level, so these bands are inferred: they use the " +
+  "orchestrator's output tokens — the total for all models, minus the sub-agent output " +
+  "we could measure. The record of which sub-agents ran is incomplete, so the orchestrator's " +
+  'share here is an overestimate.';
+
+export const SUB_AGENT_MODEL_ATTRIBUTION_NOTE =
+  'These are the models actually seen running. The record of which sub-agents ran is incomplete, and ' +
+  'how much it misses varies from run to run: a dispatch missing from it has no model recorded here at ' +
+  'all. So there could be more models running where they should not than these counts show, never fewer. ' +
+  'This says what ran, not whether it matched what was asked for — to find real deviations, compare it ' +
+  'against the model each agent declares in its own settings.';
+
 export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, population: Population): Promise<IntegrityStats> {
   const days = getWindowDays(window);
   const testFlag = isTestFlag(population);
@@ -1066,11 +1085,7 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, 
       inferred: true,
       bands: { high: HIGH_EFFORT_RANGE, low: LOW_EFFORT_RANGE },
       drift: computeEffortDrift(effortEntries),
-      note:
-        "Nothing records a review's effort level, so these bands are inferred: they use the " +
-        "orchestrator's output tokens — the total for all models, minus the sub-agent output " +
-        "we could measure. The record of which sub-agents ran is incomplete, so the orchestrator's " +
-        'share here is an overestimate.',
+      note: INFERRED_EFFORT_NOTE,
     },
     findingsIntegrity: {
       comparedRows: comparedForFindings.length,
@@ -1084,12 +1099,7 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, 
     },
     subAgentModelAttribution: {
       entries: subAgentModelAttribution,
-      note:
-        'These are the models actually seen running. The record of which sub-agents ran is incomplete, and ' +
-        'how much it misses varies from run to run: a dispatch missing from it has no model recorded here at ' +
-        'all. So there could be more models running where they should not than these counts show, never fewer. ' +
-        'This says what ran, not whether it matched what was asked for — to find real deviations, compare it ' +
-        'against the model each agent declares in its own settings.',
+      note: SUB_AGENT_MODEL_ATTRIBUTION_NOTE,
     },
   };
 }
