@@ -15,10 +15,19 @@ import { INFERRED_EFFORT_NOTE, SUB_AGENT_MODEL_ATTRIBUTION_NOTE } from '../../sr
 // saying "flagged model(s)". Nothing in the suite would have failed on any of
 // them.
 //
-// So this file sweeps every card source for a deny-list of tokens that must
-// never reach a reader: names of database columns and JSON keys, and the "PR"
-// initialism. A reader of a card has no schema to resolve a column name
-// against, and no reason to know that `read-band` means critical-or-major.
+// So this file sweeps the card sources listed in FILES below for a deny-list of
+// tokens that must never reach a reader: names of database columns and JSON
+// keys, and the "PR" initialism. A reader of a card has no schema to resolve a
+// column name against, and no reason to know that `read-band` means
+// critical-or-major.
+//
+// FILES is a NAMED LIST, not "every card source" — that phrasing was here and
+// was wrong. It omitted stats-ribbon.tsx and stats-config.tsx, both imported by
+// the swept stats-view.tsx and both rendering on the same tab, so a leak planted
+// in either left the suite at 858 pass / 0 fail. The ribbon is the very surface
+// commit a7e5b0a was written to clean: the branch cleaned a card and then built
+// a guard that could not see it. Anything a reader sees on the Stats tab belongs
+// in FILES; the one deliberate omission is recorded in NOT_SWEPT below.
 //
 // It reads RENDERED text only — string and template literals, plus JSX text
 // nodes — because all three of these legitimately name every token below:
@@ -38,8 +47,31 @@ const FILES = [
   'components/stats-integrity.tsx',
   'components/stats-operational.tsx',
   'components/stats-view.tsx',
+  'components/stats-ribbon.tsx',
+  'components/telemetry-table.tsx',
+  'components/tool-usage.tsx',
+  'components/card-glossary.tsx',
   'assessors.ts',
 ] as const;
+
+/**
+ * Card sources deliberately NOT swept, and why. An omission with a reason
+ * written down is a known gap; an omission with nothing written down is the
+ * defect this list exists to stop repeating — FILES silently missed two
+ * surfaces for a whole branch.
+ *
+ * Nothing enforces this list (a test that asserted the file still leaks would
+ * pin the leak in place, which is backwards). It is documentation, and the fix
+ * is to make the wording decision and move the entry into FILES.
+ */
+const NOT_SWEPT: ReadonlyArray<{ file: string; why: string }> = [
+  {
+    file: 'components/stats-config.tsx',
+    why: 'Renders the section title "PR-review credential", which needs a wording decision ' +
+      'before the sweep can pass — "PR" is denied and no replacement has been agreed. ' +
+      'Everything else in the file scans clean, so this is one phrase, not a file-sized gap.',
+  },
+];
 
 const read = (f: string) =>
   readFileSync(fileURLToPath(new URL(`../../src/dashboard/client/${f}`, import.meta.url)), 'utf8');
@@ -343,8 +375,18 @@ describe('rendered-text extraction', () => {
       const lines = read(f).split('\n');
       const points: number[] = [];
       for (let i = 0; i < lines.length; i++) if (lines[i]!.trim() === '') points.push(i);
-      // A file with nowhere to plant would make this test vacuous.
-      expect(points.length, `${basename(f)}: no plant points`).toBeGreaterThan(10);
+      // A file with nowhere to plant would make this test vacuous. The floor is
+      // 1, not the 10 it was while FILES held only six large modules: a small
+      // presentational component legitimately has few blank lines, and three of
+      // the four files added to FILES sit at or below 10 (card-glossary.tsx 3,
+      // telemetry-table.tsx 9, tool-usage.tsx 10, against 16-62 for the rest).
+      // Keeping 10 would have meant either dropping those files from the sweep
+      // or padding them with blank lines to satisfy a test — both worse than
+      // planting at the three points card-glossary.tsx really has. Nothing is
+      // weakened by the lower floor: the substance is `blind` being empty, and
+      // the end-of-file plant below is a second, independent site that runs
+      // whatever this count is.
+      expect(points.length, `${basename(f)}: no plant points`).toBeGreaterThan(0);
 
       const blind = points.filter((i) => !caught([...lines.slice(0, i), PLANT, ...lines.slice(i)].join('\n')));
       expect(blind, `${basename(f)}: leak invisible at ${blind.length}/${points.length} points, first at line ${blind[0]! + 1}`)
