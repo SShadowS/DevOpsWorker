@@ -13,8 +13,10 @@ import {
   describeSpend,
   describeLeadTime,
   describeVerdictCaption,
+  didVerdictText,
   buildReviewValuePanelView,
 } from '../../src/dashboard/client/components/stats-review-value.tsx';
+import { DID_LABELS } from '../../src/db/finding-outcome-mapper.ts';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 
 // No test in this file may open a database connection (repo convention — see
@@ -1349,6 +1351,48 @@ describe('buildDidRows', () => {
     const rows = buildDidRows(compute([finding({ did: null })], spend()));
     for (const r of rows) expect(r.rate).toBeNull();
   });
+
+  // The row's `label` is the raw database value and STAYS one: it is what the
+  // React `key` prop and these tests identify a row by, and a row identified by
+  // its display text would need re-keying every time the wording changed. The
+  // plain-English text is applied at the render site instead.
+  test('the row label is the raw key — it identifies the row, it is not what is shown', () => {
+    const rows = buildDidRows(compute(mixedWindow(), spend()));
+    expect(rows.map((r) => r.label)).toEqual(['ADDRESSED', 'not', 'UNKNOWN', 'SPLIT']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// didVerdictText — the `did` breakdown's keys used to render straight into the
+// first table on the card: `ADDRESSED / not / UNKNOWN / SPLIT`, three casing
+// conventions in four rows, in a mono font, directly under the glossary that
+// explains the card's words. The bare `not` read as a broken cell rather than
+// as content. These are object KEYS, never string literals, which is why every
+// prose sweep on this branch was structurally blind to them.
+// ---------------------------------------------------------------------------
+
+describe('didVerdictText', () => {
+  // Driven off DID_LABELS rather than a hand-copied list, so adding a fifth
+  // verdict to the database mapper fails here until it has words to render.
+  test('every live `did` verdict has plain-English text', () => {
+    expect(DID_LABELS.map(didVerdictText)).toEqual(['acted on', 'not acted on', 'could not tell', 'ballots disagreed']);
+  });
+
+  // "ballots", not "checks": the caption two lines under this same table says
+  // "had all three ballots agree", and a second word for the same three votes
+  // is the synonym-for-a-settled-term defect this branch keeps re-finding.
+  test('SPLIT uses the same word for the three votes as the caption below the table', () => {
+    const caption = describeVerdictCaption(compute(mixedWindow(), spend()));
+    expect(caption).toContain('ballots');
+    expect(didVerdictText('SPLIT')).toContain('ballots');
+  });
+
+  // `computeReviewValue` keeps an unrecognised database value as its own
+  // breakdown row rather than dropping it (pinned above at 'SOMETHING-NEW'), so
+  // the render must have something to show for it. Ugly beats missing.
+  test('an unmapped key falls back to itself rather than rendering blank', () => {
+    expect(didVerdictText('SOMETHING-NEW')).toBe('SOMETHING-NEW');
+  });
 });
 
 describe('describeDisputed', () => {
@@ -1626,6 +1670,18 @@ describe('describeEngagement / describeSilentlyFixed / describeLeadTime', () => 
     const line = describeSilentlyFixed(compute(mixedWindow(), spend()));
     expect(line.value).toBe('1');
     expect(line.detail).toContain('nobody said a word');
+  });
+
+  // The heading read "Silently fixed" over a body beginning "Confirmed ACTED ON
+  // with no reply". The figure is `did === 'ADDRESSED'`, which is exactly the
+  // condition that licenses "acted on" and forbids "fixed" — the branch's own
+  // vocabulary rule, and the counter-example to the ledger line claiming this
+  // codebase never says "fixed". Heading and body now use one word.
+  test('the heading says what the figure counts, in the same word its own body uses', () => {
+    const line = describeSilentlyFixed(compute(mixedWindow(), spend()));
+    expect(line.label).toBe('Acted on with no reply');
+    expect(line.label).not.toContain('fixed');
+    expect(line.detail).toContain('Confirmed acted on');
   });
 
   test('lead time segments the after-settle rows out in words, not only in the number', () => {
@@ -2106,6 +2162,19 @@ describe('review-value structure', () => {
       'utf-8',
     );
     expect(cardSrc).toContain('review-value-figure--${line.status}');
+  });
+
+  // `didVerdictText`'s value tests above prove the map is right; only the source
+  // proves the table USES it. The raw key rendered here for the whole life of
+  // the card and no value test could see it, because the mapping did not exist
+  // to be called.
+  test('the verdict table renders the plain text, never the raw database key', () => {
+    const cardSrc = readFileSync(
+      fileURLToPath(new URL('../../src/dashboard/client/components/stats-review-value.tsx', import.meta.url)),
+      'utf-8',
+    );
+    expect(cardSrc).toContain('{didVerdictText(r.label)}');
+    expect(cardSrc).not.toContain('>{r.label}<');
   });
 
   // `describeJudgedCoverage`'s zero-raised branch dropped the "read-band"

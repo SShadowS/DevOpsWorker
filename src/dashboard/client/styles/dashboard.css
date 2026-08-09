@@ -2708,7 +2708,6 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   border-bottom: 1px solid var(--color-border-muted);
 }
 .review-value-table td { padding: 3px 8px 3px 0; color: var(--color-text-secondary); }
-.review-value-table__mono { font-family: var(--font-mono); color: var(--color-text-primary); }
 
 @media (max-width: 767px) {
   .review-value-table { display: block; overflow-x: auto; }

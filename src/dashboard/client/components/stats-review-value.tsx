@@ -173,9 +173,47 @@ export function buildDidRows(o: ReviewValueOutcome): Array<{ label: string; coun
   }));
 }
 
+/** Plain words for each verdict in the table above.
+ *
+ *  The breakdown's keys are raw database values (`DID_LABELS` in
+ *  src/db/finding-outcome-mapper.ts) and used to render straight into the first
+ *  table on this card: `ADDRESSED / not / UNKNOWN / SPLIT` — three casing
+ *  conventions in four rows, and a bare `not` that reads as a broken cell
+ *  rather than as content, immediately under the glossary that exists to
+ *  explain this card's words. They are object KEYS, never string literals,
+ *  which is why every prose sweep over this file missed them.
+ *
+ *  Mapped HERE and not in `buildDidRows`, because the row's `label` is what the
+ *  React `key` prop and the outcome tests identify a row by: keyed on display
+ *  text, every row would need re-keying each time the wording changed.
+ *
+ *  "ballots" for `SPLIT`, matching `describeVerdictCaption`'s "had all three
+ *  ballots agree" two lines below the same table — a second word for the same
+ *  three votes would be exactly the synonym-for-a-settled-term defect this card
+ *  keeps acquiring.
+ *
+ *  An unrecognised key renders as itself. `computeReviewValue` deliberately
+ *  keeps an unexpected database value as its own row rather than dropping it,
+ *  so this has to show something, and the raw value is at least the thing an
+ *  operator can search for. */
+const DID_VERDICT_TEXT: Readonly<Record<string, string>> = {
+  ADDRESSED: 'acted on',
+  not: 'not acted on',
+  UNKNOWN: 'could not tell',
+  SPLIT: 'ballots disagreed',
+};
+
+export function didVerdictText(label: string): string {
+  return DID_VERDICT_TEXT[label] ?? label;
+}
+
 export function describeSilentlyFixed(o: ReviewValueOutcome): ScorecardLine {
   return {
-    label: 'Silently fixed',
+    // NOT "Silently fixed". This figure is `did === 'ADDRESSED'`, which is the
+    // condition that licenses "acted on" and forbids "fixed" — and the body
+    // right under the heading already said "Confirmed acted on", so the card
+    // was calling one figure two things in two lines.
+    label: 'Acted on with no reply',
     value: `${o.silentlyFixed}`,
     detail:
       'Confirmed acted on with no reply on the thread and nothing in the PR discussion — the code changed and ' +
@@ -612,7 +650,7 @@ function RaisedAndActedOnSection({ o }: { o: ReviewValueOutcome }) {
         <tbody>
           {didRows.map((r) => (
             <tr key={r.label}>
-              <td class="review-value-table__mono">{r.label}</td>
+              <td>{didVerdictText(r.label)}</td>
               <td>{r.count}</td>
               <td>{formatPct(r.rate)}</td>
             </tr>
