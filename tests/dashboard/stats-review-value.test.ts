@@ -370,11 +370,13 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // NO LIVE EXAMPLE as of 2026-08-08 (0 of 72 said-labelled rows are a
     // tie) — reachable in principle (`SaidLabel` has no tie value, so a tie
     // stores `said = null, said_confidence = 'split'`), forced here. Note the
-    // closing clause: "were voted on" and "nobody here ever gave an answer on
-    // whether anyone did" cannot both be true in the same sentence, so the
-    // tied branch gets its own tail. Note too what the tail does NOT say: not
-    // "the three checks" — three is the per-finding vote count, and this
-    // window of three tied findings ran nine.
+    // closing clause: "were voted on" and "nothing here recorded an answer on
+    // whether anyone did" CAN both be true in the same sentence (a tied vote
+    // records no `said` value either), but leaving the generic claim unscoped
+    // there would omit the one thing this card can positively confirm, so the
+    // tied branch gets its own, more specific tail instead. Note too what the
+    // tail does NOT say: not "the three checks" — three is the per-finding
+    // vote count, and this window of three tied findings ran nine.
     test('PURE: tied — no live example, forced fixture', () => {
       const rows = [
         finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
@@ -424,11 +426,11 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // 'unanimous'/'majority'/'split'/'single-vote'/'none' — more than the two
     // values {null, 'split'} this line's fast path assumes for a null `said`.
     // A row that matches neither positive test must not be silently absorbed
-    // into "the team never gave an answer for them", which it has not earned:
+    // into "no answer was ever recorded for them", which it has not earned:
     // it goes to an explicit residual bucket instead, so the total never
     // silently drops findings the way `findings.length - tied` would have.
     //
-    // The closing clause here is "cannot tell", NOT "nobody here ever gave an
+    // The closing clause here is "cannot tell", NOT "nothing here recorded an
     // answer on whether anyone did" — a prior round left the tail gated on
     // `tied === 0` alone, which let it leak into exactly this state. A
     // `saidConfidence` of `'unanimous'` beside a null `said` is the signature
@@ -500,7 +502,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(withTie).toContain('cannot tell what answer the team gave for the one whose');
       // ...and neither the window-wide denial nor "no answer given" appears.
       expect(withTie).not.toContain('cannot tell whether the team ever gave an answer');
-      expect(withTie).not.toContain('nobody here ever gave an answer on whether anyone did');
+      expect(withTie).not.toContain('nothing here recorded an answer on whether anyone did');
     });
 
     // Bare numerals after the first fragment — "2 findings…and 3 findings…"
@@ -591,19 +593,22 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     });
 
     // The closing "why not zero" clause must never go silent about a tie in
-    // the mix. The two denials are different in kind, and neither is barred
-    // for the same reason a tied row is "checked and unanswered" — that
-    // wording is exactly the collision this rewrite exists to avoid:
-    //   - "nothing here recorded an answer on whether anyone did" stays TRUE
-    //     even with a tie present (a tied vote records no `said` value
-    //     either), but it would go silent about the one thing this card can
-    //     positively confirm — three votes ran and did not agree, stated in
-    //     the sentence right before this one. Barred for IMPLICATURE, not
-    //     falsehood.
-    //   - "cannot tell whether the team EVER gave an answer" IS false with a
-    //     tie present: this card is not uncertain about a tied row, it knows
-    //     the vote ran and produced no consensus. Barred because it is
-    //     wrong, not merely uninformative.
+    // the mix. Both denials stay TRUE even with a tie present — barring them
+    // is IMPLICATURE and scope, not falsehood, for both:
+    //   - "nothing here recorded an answer on whether anyone did" stays true
+    //     (a tied vote records no `said` value either), but it would go
+    //     silent about the one thing this card can positively confirm —
+    //     three votes ran and did not agree, stated in the sentence right
+    //     before this one.
+    //   - "cannot tell whether the team EVER gave an answer" ALSO stays true:
+    //     a split vote is the graders failing to agree what answer the reply
+    //     constitutes, so this card genuinely cannot tell whether an answer
+    //     resulted for a tied row either — the same uncertainty as an
+    //     unrecognized row, not a confirmed negative. Left unscoped, it would
+    //     spread that same undifferentiated doubt over the tied row this card
+    //     CAN positively confirm was checked.
+    // Neither denial is "wrong" where a tie is present; both would merely
+    // understate what the sentence right before them already establishes.
     // DENIALS below tracks the CURRENT wording — reword a tail and these
     // substrings stop matching anything, so they must be re-derived from the
     // new wording, not left to pass vacuously.

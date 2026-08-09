@@ -1772,7 +1772,7 @@ function hasEngagedEvidence(f: ReviewValueFindingRow): boolean {
  *  row that matches neither positive test lands in an explicit, honestly-worded
  *  residual bucket (`unrecognized`, below — see the comment there for why
  *  this is defensive rather than speculative) rather than being silently
- *  absorbed into "nothing was ever checked for them", which it would not earn.
+ *  absorbed into "no answer was ever recorded for them", which it would not earn.
  *  Names every bucket that is non-empty (there can be more than one — e.g. a
  *  window with both a tie and an unchecked reply) rather than picking one.
  *  Live at 2026-08-08, every not-yet-measured row in the table sits in the
@@ -1893,16 +1893,23 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   // reasoning as the tie, not a truth violation — it must not go silent
   // about that uncertainty either.
   //
-  // The `unrecognized`-only tail IS falsified by a tie in the mix, though,
-  // because it is an epistemic claim: "cannot tell whether the team EVER
-  // gave an answer" says this card does not know, and for a tied row it
-  // does — `said_confidence = 'split'` IS a check this card can confirm ran,
-  // and does confirm, in the sentence immediately before this one in the
-  // rendered string. "Ever" would have to mean "always" for both halves to
-  // stand, which is not what it says. So that mix gets its own tail, naming
-  // the tie AND scoping the residual doubt to the rows it actually covers:
-  // neither fact is dropped, neither is stretched over rows it does not hold
-  // for.
+  // The `unrecognized`-only tail is scoped away from a tie for the same KIND
+  // of reason as the fall-through, not a different one — this is not a truth
+  // violation either. "Cannot tell whether the team EVER gave an answer"
+  // stays TRUE even where a tie is present: a split vote is the graders
+  // failing to agree what answer the reply constitutes, so this card
+  // genuinely cannot tell whether an answer resulted there either — the same
+  // uncertainty as an `unrecognized` row, not a confirmed negative the way
+  // `noEngagedEvidence` is. What a tie changes is, again, what this card can
+  // additionally CONFIRM: `said_confidence = 'split'` IS a check this card
+  // can confirm ran, stated in the sentence immediately before this one in
+  // the rendered string. Leaving "EVER" unscoped over a window containing a
+  // tie would spread that same undifferentiated doubt over rows the card can
+  // positively confirm were checked — the implicature RULE 4 exists to
+  // catch, same failure mode as the fall-through. So that mix gets its own
+  // tail, naming the tie AND scoping the residual doubt to the rows it
+  // actually covers: neither fact is dropped, neither is stretched over rows
+  // it does not hold for.
   //
   // WHICH IS WHY THE TWO TIE CLAUSES ARE WORDED DIFFERENTLY, and it is not
   // drift. The standalone tie tail says "the votes that ran did not agree on an
