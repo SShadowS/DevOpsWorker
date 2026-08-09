@@ -484,7 +484,7 @@ function CostPerItemSection({ data }: { data: CostStats }) {
   const coverage = computeReadBandCoverage(c.sampleSize, data.sampleSize);
   const lowCoverageHeadline = buildReadBandLowCoverageHeadline(coverage);
   return (
-    <CostSection title="Cost per read-band item" status="neutral">
+    <CostSection title="Cost per critical/major item" status="neutral">
       <p class="cost-section__summary">{formatCostPerReadBandItem(c)}</p>
       <p class="cost-section__note">Eligible rows carry both cost and findings ({c.sampleSize} in this window).</p>
       <p class="cost-section__summary">Coverage: {describeReadBandCoverage(coverage)}</p>

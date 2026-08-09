@@ -476,6 +476,14 @@ describe('Task 8 — cost/quality prose: schema names gone, shared constants imp
     expect(src).not.toContain('Per-REVIEW count');
     expect(src).not.toContain('per-FINDING');
   });
+
+  // Fix round (Important 1): the CostPerItemSection title was the only
+  // surviving "read-band" occurrence in a section C3/C4 otherwise scrubbed
+  // of the term — title and body named the same thing two different ways.
+  test('the "Cost per ..." section title matches the term its own body now uses (C3/C4), not "read-band"', () => {
+    expect(src).toContain('title="Cost per critical/major item"');
+    expect(src).not.toContain('title="Cost per read-band item"');
+  });
 });
 
 // ---------------------------------------------------------------------------
