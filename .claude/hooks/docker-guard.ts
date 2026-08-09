@@ -89,7 +89,38 @@ function splitSegments(s: string): string[] {
   return out;
 }
 const segments = splitSegments(cmd);
-const leading = segments.map((s) => s.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/, ''));
+// The `VAR=value` strip. `value` may itself contain a COMMAND SUBSTITUTION with
+// spaces in it, so `\S*` is wrong: it stops at the first space, leaving
+// `BUILD_SHA=$(git rev-parse --short HEAD) docker compose build` stripped down to
+// the leading token `rev-parse --short HEAD) docker compose build`. `touchesDocker`
+// then goes false and the hook exits 0 having run NO CHECK AT ALL — on a Windows
+// daemon that command cannot succeed, which is the exact failure (a) exists to
+// prevent. The same mangling made `alsoBuilds` false for a stamped
+// `build && up -d`, arming the staleness check against a command that DOES build
+// and printing, as its fix, the very command it had just blocked (2026-08-09).
+// That command is the one this file's own message tells you to run.
+//
+// So a `$(…)` group is consumed whole, spaces and all, before falling back to
+// single non-space characters.
+//
+// TWO PROPERTIES OF THIS PATTERN, both measured, both easy to break by tidying it:
+//
+//  - The `$(…)` and `\S` branches deliberately OVERLAP. Making them disjoint
+//    (`\$(?!\()` plus `[^\s$]`) is the obvious cleanup and it reintroduces a
+//    fail-open: on an UNTERMINATED `$(`, neither disjoint branch matches, the
+//    strip consumes nothing, and `A=$(oops docker compose up` goes silent.
+//    With the overlap, `\S` still eats it and the guard fails toward checking.
+//  - The overlap costs backtracking: ~2 paths per `$(…)` when the tail cannot
+//    match, measured at 0.7ms for 15 groups, 82ms for 22. Real commands carry
+//    one or two, so this is charged against nothing — but do not widen the
+//    alternation further without re-measuring it.
+//
+// KNOWN LIMIT, not fixed here: a QUOTED value containing a space
+// (`MSG="a b" docker compose build`) still leaves `b" docker …` as the leading
+// token and goes silent. It predates this fix — the old pattern missed it too —
+// and closing it needs the strip to understand quoting, which is the shell
+// parser this hook does not warrant. Listed so the gap is visible, not silent.
+const leading = segments.map((s) => s.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:\$\([^)]*\)|\S)*\s+)*/, ''));
 const touchesDocker =
   leading.some((s) => /^docker\s+(compose|build|run)\b/.test(s)) ||
   // The deploy script is a docker build by another name — but only when RUN, not when
