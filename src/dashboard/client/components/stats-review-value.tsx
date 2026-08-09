@@ -283,13 +283,21 @@ export function describeDisputed(d: ReviewValueDisputed, o: ReviewValueOutcome):
   // said-labelled findings" vs "not yet measured"), but the distinction is the
   // whole point of the line, so it is said in words too.
   // "Checked" is reserved for a `did` verdict elsewhere on this card (the
-  // `describeAddressed` contrast, `describeJudgedCoverage`, the empty-panel
-  // scope note) — reusing it here for the SAID-labelled population would
-  // teach the reader "checked" means two different things a paragraph apart.
+  // `describeAddressed` contrast and the empty-panel scope note) — reusing it
+  // here for the SAID-labelled population would teach the reader "checked"
+  // means two different things a paragraph apart.
+  // "None of the X" takes a plural complement regardless of set size ("none
+  // of the students", never "none of the student", even for a class of one) —
+  // `agree()` on the noun alone cannot fix that, only drop "none of" at
+  // saidRecorded === 1, the same move `describeDisputedUnjudged` (below) makes
+  // at `count === 1`.
   const zeroClause =
     count === 0
-      ? `This is a real zero, not a gap in the data: none of the ${agree(d.saidRecorded, 'problem', 'problems')} ` +
-        'the team gave an answer on was disputed as wrong. '
+      ? d.saidRecorded === 1
+        ? 'This is a real zero, not a gap in the data: the one problem the team gave an answer on was not ' +
+          'disputed as wrong. '
+        : 'This is a real zero, not a gap in the data: none of the problems the team gave an answer on was ' +
+          'disputed as wrong. '
       : '';
 
   return {

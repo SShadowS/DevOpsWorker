@@ -2136,7 +2136,7 @@ describe('plain-English rewrite pins', () => {
   test('disputed: a measured zero is scoped to the problems the team gave an answer on, at denominators 1 and 2', () => {
     const one = compute([finding({ said: 'fixed' })], spend());
     expect(describeDisputed(one.disputedAsWrong, one).detail).toBe(
-      'This is a real zero, not a gap in the data: none of the problem the team gave an answer on was disputed ' +
+      'This is a real zero, not a gap in the data: the one problem the team gave an answer on was not disputed ' +
         'as wrong. Reported as a count, not a rate: the denominator is the 1 finding carrying a said label.',
     );
     const two = compute([finding({ said: 'fixed' }), finding({ said: 'ignored' })], spend());
