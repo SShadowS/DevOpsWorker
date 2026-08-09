@@ -210,6 +210,12 @@ describe('assessModelBreakdownCost', () => {
     expect(a.text).toContain('1 model(s)');
   });
 
+  // KNOWN-REMAINING, NOT SETTLED: this `toBe` pins `1 flagged model(s)` — a
+  // hand-written "(s)" placeholder — as required output. Elsewhere on these
+  // cards `countOf` makes the agreement unforgettable, and stats-operational's
+  // secondary net bans "(s)" outright in its own file. Left as-is here because
+  // it is what the Integrity side now matches (assessors.ts), so changing one
+  // without the other would reopen the very split this round closed.
   test('a flagged model -> attention, names the model and its cost', () => {
     const rows: ModelUsageEntry[] = [
       { model: 'claude-sonnet-5', rows: 10, totalCostUsd: 5, totalOutputTokens: 100, flagged: false },

@@ -121,6 +121,10 @@ describe('flagged model wording is shared with the Cost card', () => {
   // each card uses for a flagged row, it must be the same noun. `assessors.ts`
   // is the only file this repo can change to keep that true, which is why the
   // guard lives here and not beside either card.
+  // The shared noun still carries a hand-written "(s)" placeholder. That is
+  // known-remaining and not settled — see the note on `assessModelBreakdownCost`
+  // in tests/dashboard/stats-costquality.test.ts. Whatever replaces it has to
+  // replace it on all three call sites at once, which is what this pins.
   test('the Cost card and the Integrity card name a flagged row identically', () => {
     const costText = assessModelBreakdownCost([
       { model: 'claude-opus-5[1m]', rows: 1, totalCostUsd: 3.75, totalOutputTokens: 500, flagged: true },

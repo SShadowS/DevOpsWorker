@@ -352,6 +352,10 @@ describe('buildErrorRateSectionView', () => {
     expect(view.status).toBe('attention');
   });
 
+  // KNOWN-REMAINING, NOT SETTLED: this `toBe` pins `error_max_turns` — a stored
+  // value, on screen — as required output. It is listed in
+  // tests/dashboard/card-prose-sweep.test.ts's known-remaining set, and stays
+  // only until a plain wording identifies that failure mode as precisely.
   test('note names error_max_turns explicitly, not just "errors"', () => {
     const view = buildErrorRateSectionView({ count: 0, total: 10, rate: 0 }, false);
     expect(view.note).toBe('"Error" here includes every kind of pipeline failure recorded on the row, including error_max_turns — not narrowed to one cause.');
