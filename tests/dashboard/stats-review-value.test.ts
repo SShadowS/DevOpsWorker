@@ -1142,7 +1142,7 @@ describe('computeReviewValue — raised vs traced', () => {
       expect(o.judged).toBe(0);
       expect(o.traceability.untraceable).toBe(0);
       expect(o.traceabilityNote).not.toContain('has a verdict');
-      expect(o.traceabilityNote).toContain('was matched to a review comment');
+      expect(o.traceabilityNote).toContain('has a comment thread in the pull request');
       expect(o.traceabilityNote).toContain('counting differently');
     });
 

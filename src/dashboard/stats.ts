@@ -1682,16 +1682,16 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
     // a window with nothing judged at all. Both branches now claim only
     // traceability, which is what `untraceable === 0` actually means.
     return noFileAnchor === 0
-      ? 'Every finding raised in this window was matched to a review comment, so every one of them can eventually be checked.'
-      : `Every finding raised in this window was matched to a review comment, yet ${countOf(noFileAnchor, 'of them was', 'of them were')} ` +
-        'recorded as not tied to a specific file, which should have made a match impossible. The two sources are counting ' +
+      ? 'Every finding raised in this window has a comment thread in the pull request, so every one of them can eventually be checked.'
+      : `Every finding raised in this window has a comment thread in the pull request, yet ${countOf(noFileAnchor, 'of them was', 'of them were')} ` +
+        'recorded as not tied to a specific file, which should have made a comment thread impossible. The two sources are counting ' +
         'differently — reconcile them before quoting this section.';
   }
 
   const explained = Math.min(noFileAnchor, untraceable);
   const head =
     `${untraceable} of ${countOf(raisedCount, 'finding')} raised in this window ` +
-    `could not be matched to a review comment, so ${agree(untraceable, 'it was', 'they were')} never checked, and never can be. ` +
+    `${agree(untraceable, 'has', 'have')} no comment thread in the pull request, so ${agree(untraceable, 'it was', 'they were')} never checked, and never can be. ` +
     `${agree(untraceable, 'It is', 'They are')} counted in "raised" and in nothing else.`;
 
   // MORE file-less findings than gap means some file-less finding was traced
@@ -1702,22 +1702,28 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
   // to avoid, just one level up.
   if (noFileAnchor > untraceable) {
     return (
-      `${head} More findings here were recorded as not tied to a specific file (${noFileAnchor}) than the number that could not ` +
-      `be matched to a review comment (${untraceable}), so at least one finding with no file must have been matched anyway — ` +
-      'which cannot happen if a review comment always needs a file to attach to. These two ' +
+      `${head} More findings here were recorded as not tied to a specific file (${noFileAnchor}) than the number with no ` +
+      `comment thread in the pull request (${untraceable}), so at least one finding with no file must have gotten a comment ` +
+      'thread anyway — which cannot happen if a comment thread always needs a file to attach to. These two ' +
       'counts do not describe the same population; reconcile them before quoting this section.'
     );
   }
 
+  // The mechanism clause is byte-identical between the two branches below on
+  // purpose — it is the same fact ("a thread needs a file, a PR-level
+  // finding has none") whether it explains ALL of the gap or only PART of
+  // it, and a second wording here would be the same converged-vocabulary
+  // defect one level down from `read-band finding`/`file anchor` elsewhere in
+  // this function.
   const remainder = untraceable - explained;
   const cause =
     explained === 0
       ? ' None of that gap is explained by findings that were not tied to a specific file, which is the only cause this card knows about — ' +
         'the two sources are counting differently, and the gap should be reconciled before this line is quoted.'
       : explained === untraceable
-        ? ' The gap is fully accounted for: a review comment is placed on one specific file, and each of these findings was about the pull request as a whole, with no single file to place a comment on.'
+        ? ' The gap is fully accounted for: a comment thread needs one specific file to attach to, and a finding about the pull request as a whole has no file to attach one to.'
         : ` ${explained} of ${itThem(untraceable)} ${agree(explained, 'is', 'are')} explained by not being tied to a specific file ` +
-          '(a review comment is placed on one specific file, and these findings were about the pull request as a whole, not any one file). The remaining ' +
+          '(a comment thread needs one specific file to attach to, and a finding about the pull request as a whole has no file to attach one to). The remaining ' +
           `${remainder} ${agree(remainder, 'is', 'are')} not explained, and should be reconciled before this line is quoted.`;
 
   return head + cause;
