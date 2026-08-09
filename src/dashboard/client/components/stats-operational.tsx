@@ -3,6 +3,15 @@ import type { FetchState } from '../stats-store.ts';
 import type { OperationalStats, ToolMixEntry, ErrorCategory, ErrorClassificationSummary } from '../../stats.ts';
 import { formatDurationDetailed } from '../format.ts';
 import { countOf } from '../../count-phrase.ts';
+import { CardGlossary } from './card-glossary.tsx';
+import type { GlossaryTerm } from './card-glossary.tsx';
+
+// This card's own short vocabulary. The underlying column is named `turns`
+// (see the "Duration & turns" section below) — an operator comparing this
+// card to the query behind it wants that link kept, not renamed away.
+const TERMS: readonly GlossaryTerm[] = [
+  { term: 'a turn', plain: 'one exchange with the model during a review' },
+];
 
 // ---------------------------------------------------------------------------
 // Operational panel (Task 9) — Section E, "how is the machine actually
@@ -262,7 +271,7 @@ export interface ToolMixSectionView {
 export function buildToolMixSectionView(toolMix: ToolMixEntry[]): ToolMixSectionView {
   const rows = toolMix.map((t) => ({ ...t, isZero: t.totalCalls === 0 }));
   if (rows.length === 0) {
-    return { status: 'ok', summary: 'No tool_calls recorded in this window.', rows };
+    return { status: 'ok', summary: 'No tool activity recorded in this window.', rows };
   }
   const zero = rows.filter((r) => r.isZero);
   if (zero.length === 0) {
@@ -279,7 +288,7 @@ export function buildToolMixSectionView(toolMix: ToolMixEntry[]): ToolMixSection
       status: 'ok',
       summary:
         `None of the ${countOf(rows.length, 'observed tool')} had zero calls in this window. A tool that is never called ` +
-        'does not appear in tool_calls at all and therefore cannot be listed here — this table can only speak to ' +
+        'has no recorded activity at all, so it cannot appear here — this table can only speak to ' +
         'tools that fired at least once, not to ones that have gone silent.',
       rows,
     };
@@ -306,7 +315,7 @@ export function describeToolMixAverageNote(sampleSize: number): string {
   return (
     `Average per review is divided by all ${countOf(sampleSize, 'review')} in this window, not just the reviews that ` +
     "called a given tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a " +
-    'shrunk denominator (same convention `aggregateToolMix`, stats.ts, documents server-side).'
+    'shrunk denominator.'
   );
 }
 
@@ -508,7 +517,7 @@ function DurationTurnsSection({ data }: { data: OperationalStats }) {
 
 function ToolMixTable({ rows }: { rows: ToolMixRowView[] }) {
   if (rows.length === 0) {
-    return <p class="operational-section__empty">No tool_calls recorded in this window.</p>;
+    return <p class="operational-section__empty">No tool activity recorded in this window.</p>;
   }
   return (
     <table class="operational-table">
@@ -658,6 +667,7 @@ export function OperationalPanel() {
         <h3 class="stats-slot__title">Operational</h3>
         <span class="stats-slot__window" title="Time window this section reads">{window}</span>
       </div>
+      <CardGlossary terms={TERMS} />
       {view.status !== 'ready' ? (
         <p class={`stats-slot__status-text ${view.status === 'error' ? 'stats-slot__status-text--error' : ''}`}>
           {view.message}

@@ -236,6 +236,14 @@ describe('buildToolMixSectionView', () => {
     expect(view.rows).toEqual([]);
   });
 
+  // Fix round 2: "No tool_calls recorded" named the underlying data
+  // structure, not a thing this card's reader can see. Exact toBe, not
+  // toContain — this is the whole string, not a fragment of a larger one.
+  test('no tools recorded -> summary reads "No tool activity", never the column name', () => {
+    const view = buildToolMixSectionView([]);
+    expect(view.summary).toBe('No tool activity recorded in this window.');
+  });
+
   test('all tools nonzero -> ok, no attention tag', () => {
     const view = buildToolMixSectionView([toolMixFixture({ tool: 'Grep' }), toolMixFixture({ tool: 'Read', totalCalls: 40 })]);
     expect(view.status).toBe('ok');
@@ -246,10 +254,18 @@ describe('buildToolMixSectionView', () => {
   // "none at zero calls") AND disclose that an absent tool (never appearing
   // in tool_calls at all, e.g. the live `lsp` case) cannot be represented
   // here — the check has no way to see a tool that has gone silent.
+  //
+  // Fix round 2 (RULE 1 — record-scoping): "does not appear in tool_calls at
+  // all" named the underlying data structure. "has no recorded activity at
+  // all" says the same thing — absent from the record, not present at
+  // zero — without requiring the reader to know what tool_calls is. A window
+  // covering reviews from before tool telemetry existed would make the
+  // stronger claim ("this tool made zero calls") false; the weaker claim
+  // ("we have no record of it") stays true.
   test('all tools nonzero -> summary states the observed count and discloses the absent-tool blind spot', () => {
     const view = buildToolMixSectionView([toolMixFixture({ tool: 'Grep' }), toolMixFixture({ tool: 'Read', totalCalls: 40 })]);
     expect(view.summary).toContain('None of the 2 observed tools had zero calls');
-    expect(view.summary).toContain('does not appear in tool_calls at all');
+    expect(view.summary).toContain('has no recorded activity at all, so it cannot appear here');
   });
 
   // Count agreement (Task 7): the all-clear summary used to hard-code
@@ -261,9 +277,9 @@ describe('buildToolMixSectionView', () => {
   test('all-clear at n=1 reads "1 observed tool", not "1 observed tool(s)"', () => {
     const view = buildToolMixSectionView([toolMixFixture({ tool: 'Grep' })]);
     expect(view.summary).toBe(
-      'None of the 1 observed tool had zero calls in this window. A tool that is never called does not appear in ' +
-      'tool_calls at all and therefore cannot be listed here — this table can only speak to tools that fired at ' +
-      'least once, not to ones that have gone silent.',
+      'None of the 1 observed tool had zero calls in this window. A tool that is never called has no recorded ' +
+      'activity at all, so it cannot appear here — this table can only speak to tools that fired at least once, ' +
+      'not to ones that have gone silent.',
     );
     expect(view.summary).not.toContain('(s)');
   });
@@ -514,26 +530,68 @@ describe('describeDurationTurnsSampleNote (437/438 — three independent sample 
 });
 
 describe('describeToolMixAverageNote (485)', () => {
-  test('n=0', () => expect(describeToolMixAverageNote(0)).toContain('all 0 reviews in this window'));
-  test('n=1', () => expect(describeToolMixAverageNote(1)).toContain('all 1 review in this window'));
-  test('n=2', () => expect(describeToolMixAverageNote(2)).toContain('all 2 reviews in this window'));
+  // Fix round 2: the trailing parenthetical used to cite `aggregateToolMix`
+  // and `stats.ts` by name — an implementation detail leaking into the one
+  // sentence on this card whose reader cannot see the code. toBe pins the
+  // whole sentence, not just the count clause, so that citation cannot creep
+  // back in unnoticed.
+  test('n=0', () => expect(describeToolMixAverageNote(0)).toBe(
+    "Average per review is divided by all 0 reviews in this window, not just the reviews that called a given " +
+    "tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a shrunk denominator.",
+  ));
+  test('n=1', () => expect(describeToolMixAverageNote(1)).toBe(
+    "Average per review is divided by all 1 review in this window, not just the reviews that called a given " +
+    "tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a shrunk denominator.",
+  ));
+  test('n=2', () => expect(describeToolMixAverageNote(2)).toBe(
+    "Average per review is divided by all 2 reviews in this window, not just the reviews that called a given " +
+    "tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a shrunk denominator.",
+  ));
   test('no "(s)" placeholder survives', () => expect(describeToolMixAverageNote(1)).not.toContain('(s)'));
+  test('no internal function or file name survives in the rendered sentence', () => {
+    expect(describeToolMixAverageNote(1)).not.toContain('aggregateToolMix');
+    expect(describeToolMixAverageNote(1)).not.toContain('stats.ts');
+  });
 });
 
 describe('describeRepoBreakdownNote (521 — two independent counts)', () => {
-  test('n=0 for both', () => expect(describeRepoBreakdownNote(0, 0)).toContain('0 repos across 0 reviews'));
-  test('n=1 for both', () => expect(describeRepoBreakdownNote(1, 1)).toContain('1 repo across 1 review'));
-  test('n=2 for both', () => expect(describeRepoBreakdownNote(2, 2)).toContain('2 repos across 2 reviews'));
+  test('n=0 for both', () => expect(describeRepoBreakdownNote(0, 0)).toBe(
+    "0 repos across 0 reviews in this window — every row counts here (unlike the Cost card's per-repo table, " +
+    "scoped to rows with cost recorded).",
+  ));
+  test('n=1 for both', () => expect(describeRepoBreakdownNote(1, 1)).toBe(
+    "1 repo across 1 review in this window — every row counts here (unlike the Cost card's per-repo table, " +
+    "scoped to rows with cost recorded).",
+  ));
+  test('n=2 for both', () => expect(describeRepoBreakdownNote(2, 2)).toBe(
+    "2 repos across 2 reviews in this window — every row counts here (unlike the Cost card's per-repo table, " +
+    "scoped to rows with cost recorded).",
+  ));
   // The realistic shape: exactly one repo, many reviews against it.
   test('mixed — repo count and review count agree independently', () => {
-    expect(describeRepoBreakdownNote(1, 150)).toContain('1 repo across 150 reviews');
+    expect(describeRepoBreakdownNote(1, 150)).toBe(
+      "1 repo across 150 reviews in this window — every row counts here (unlike the Cost card's per-repo table, " +
+      "scoped to rows with cost recorded).",
+    );
   });
 });
 
 describe('describeOtherErrorsCaveat (571)', () => {
-  test('n=0', () => expect(describeOtherErrorsCaveat(0)).toContain('0 errors matched none'));
-  test('n=1', () => expect(describeOtherErrorsCaveat(1)).toContain('1 error matched none'));
-  test('n=2', () => expect(describeOtherErrorsCaveat(2)).toContain('2 errors matched none'));
+  test('n=0', () => expect(describeOtherErrorsCaveat(0)).toBe(
+    "0 errors matched none of the three known failure shapes this classifier recognises — a fact about this " +
+    "classifier's own coverage (it may need a new pattern), not necessarily a claim that the pipeline itself " +
+    "got less reliable. A growing count here is the signal to watch.",
+  ));
+  test('n=1', () => expect(describeOtherErrorsCaveat(1)).toBe(
+    "1 error matched none of the three known failure shapes this classifier recognises — a fact about this " +
+    "classifier's own coverage (it may need a new pattern), not necessarily a claim that the pipeline itself " +
+    "got less reliable. A growing count here is the signal to watch.",
+  ));
+  test('n=2', () => expect(describeOtherErrorsCaveat(2)).toBe(
+    "2 errors matched none of the three known failure shapes this classifier recognises — a fact about this " +
+    "classifier's own coverage (it may need a new pattern), not necessarily a claim that the pipeline itself " +
+    "got less reliable. A growing count here is the signal to watch.",
+  ));
 });
 
 // ---------------------------------------------------------------------------
@@ -578,5 +636,52 @@ describe('operational card structure — secondary net', () => {
   test('385 (aria-label) and 404 (visible note) both call describeZeroDaysClause', () => {
     const occurrences = cardSrc.split('describeZeroDaysClause(view.zeroDays, view.totalDays)').length - 1;
     expect(occurrences).toBe(2);
+  });
+
+  // Fix round 2, Step 1: BOTH `tool_calls` sites named the underlying data
+  // structure — the builder's zero-rows branch and the JSX empty state
+  // render the identical string, so both must have been rewritten, not just
+  // the one an earlier draft of this plan named.
+  test('the old "No tool_calls recorded" wording is gone; the replacement appears at both former sites', () => {
+    expect(cardSrc).not.toContain('No tool_calls recorded');
+    const occurrences = cardSrc.split('No tool activity recorded in this window.').length - 1;
+    expect(occurrences).toBe(2);
+  });
+
+  // Fix round 2, Step 2 (RULE 1 — record-scoping): the stronger, now-false-
+  // shaped claim must be gone, not just supplemented.
+  test('the record-scoping clause no longer claims a tool "does not appear in tool_calls"', () => {
+    expect(cardSrc).not.toContain('does not appear in tool_calls at all');
+  });
+
+  // The `aggregateToolMix`/`stats.ts` citation was found during the sweep for
+  // this task, not named in the original brief — it was the trailing
+  // parenthetical of describeToolMixAverageNote's RETURNED string (not a
+  // comment), so it rendered on the page. Pinned here as its own guard
+  // because the value-level toBe tests above only catch it if nobody ever
+  // relaxes them back to toContain.
+  test('no internal function or file name renders inside a user-facing sentence', () => {
+    // Restricted to the return-value line, not the whole file — comments
+    // legitimately name `aggregateToolMix`/`stats.ts` as developer
+    // documentation; only the RETURNED string may never contain them.
+    const returnLine = cardSrc.split('\n').find((l) => l.includes('shrunk denominator'));
+    expect(returnLine).toBeDefined();
+    expect(returnLine).not.toContain('aggregateToolMix');
+    expect(returnLine).not.toContain('stats.ts');
+  });
+
+  // Step 3: "turn" is defined in the card's own glossary rather than
+  // replaced, since the underlying column is named `turns` and an operator
+  // comparing this card to the query behind it wants that link kept.
+  // Pinned the same way Task 5 pinned its glossary on stats-review-value.tsx
+  // (module doc comment there) — deleting `TERMS` would otherwise leave this
+  // suite green while the glossary silently stops defining a word the card
+  // still uses.
+  test('the glossary term list still defines "a turn" — the word the Duration & turns section uses', () => {
+    expect(cardSrc).toContain("term: 'a turn'");
+  });
+
+  test('the glossary is not just declared but actually rendered on the panel', () => {
+    expect(cardSrc).toContain('<CardGlossary terms={TERMS} />');
   });
 });
