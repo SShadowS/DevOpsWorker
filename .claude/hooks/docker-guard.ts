@@ -41,14 +41,31 @@ const cmd = input.tool_input?.command ?? "";
 // 2026-08-09. But an UNBALANCED quote is the opposite danger: once a quote opens and
 // never closes, every later separator is swallowed into one segment, its leading token
 // is no longer `docker`, and the guard goes silent instead of catching a real `docker
-// compose up`. Backslash-escaped quotes are not tracked either and can trigger the same
-// unbalanced state — the fallback below covers that case too, not just a missing quote.
+// compose up`. The fallback below catches that (falls back to the naive split, which
+// over-splits but never under-splits) whenever `quote` is left open — including a
+// BACKSLASH-ESCAPED quote (`\'`, `\"`), which is unescaped below before it can toggle
+// `quote` at all.
+//
+// KNOWN LIMIT, accepted rather than fixed: an EVEN number of stray quotes inside a `#`
+// comment leaves `quote` balanced (closed) while still desynced from bash, so the
+// fallback has nothing to detect. `# it's stale\ndocker compose up -d # don't forget`
+// is exactly this shape — "it's" opens a phantom quote that "don't" closes two comments
+// later, swallowing the real docker command in between. Fixing this needs comment
+// awareness (tracking `#` to end-of-line), which is a shell parser this hook does not
+// warrant. If this bites again, that is the edge to look at first (2026-08-09).
 function splitSegments(s: string): string[] {
   const out: string[] = [];
   let buf = '';
   let quote: "'" | '"' | null = null;
   for (let i = 0; i < s.length; i++) {
     const c = s[i]!;
+    // A backslash escapes the next character everywhere except inside single quotes,
+    // where bash treats backslash as a plain character with no escaping power at all.
+    // Consuming the pair together stops an escaped quote (`\'` unquoted, `\"` inside a
+    // double-quoted string) from toggling `quote` when it shouldn't — two such stray
+    // quotes previously left the scanner balanced (quote === null) while still desynced
+    // from bash, which `if (quote)` below has nothing to catch (2026-08-09).
+    if (c === '\\' && quote !== "'") { buf += c; if (i + 1 < s.length) buf += s[++i]; continue; }
     if (quote) {
       if (c === quote) quote = null;
       buf += c;
@@ -162,7 +179,7 @@ if (isRun && hasOverlayBuild) {
 // Services bake BUILD_SHA at image-build time, so the built image can be asked what
 // it is. Checked only for `up` WITHOUT a build in the same command — `compose build
 // && compose up -d` is the fix, and blocking the fix is how a guard gets bypassed.
-const composeUpSegment = leading.find((s) => /^docker\s+compose\b[^\n]*\bup\b/.test(s));
+const upSegments = leading.filter((s) => /^docker\s+compose\b[^\n]*\bup\b/.test(s));
 const alsoBuilds = leading.some((s) => /^docker\s+compose\b[^\n]*\bbuild\b/.test(s));
 // Services actually BUILT from this repo (docker-compose.yml `build:` stanzas) —
 // verified against the file, not assumed. `postgres` and `pg-backup` pull pre-built
@@ -172,12 +189,32 @@ const alsoBuilds = leading.some((s) => /^docker\s+compose\b[^\n]*\bbuild\b/.test
 // development") with a wrong answer. `up` with no service names starts everything,
 // including the built-here services, so that case still needs the check.
 const BUILT_HERE_SERVICES = new Set(["watcher", "dashboard", "webhook-server"]);
-const namedServices = composeUpSegment
-  ? composeUpSegment.replace(/^.*?\bup\b/, "").trim().split(/\s+/).filter((t) => t && !t.startsWith("-"))
-  : [];
-const targetsOnlyNonBuiltServices =
-  namedServices.length > 0 && namedServices.every((s) => !BUILT_HERE_SERVICES.has(s));
-if (composeUpSegment && !alsoBuilds && !targetsOnlyNonBuiltServices) {
+// Every service name docker-compose.yml defines. Hardcoded rather than parsed out of
+// the YAML: a hand-rolled indentation scanner is its own source of silent misparsing
+// (an `x-anchor:` block or a reformat could feed it garbage), and this hook already
+// accepts that tradeoff for BUILT_HERE_SERVICES above — same file, same size, same
+// change cadence. It goes stale the same way: add a compose service and forget this
+// line, and an `up` naming only the new service silently skips the check. Keep both
+// sets next to docker-compose.yml's own service list when that file changes.
+const KNOWN_SERVICES = new Set([...BUILT_HERE_SERVICES, "postgres", "pg-backup"]);
+// An unrecognised token is a flag's VALUE (`--timeout 60`, `--scale watcher=2`), a
+// typo'd service name, or a service this list doesn't know about — none of which is
+// evidence that nothing built here is starting, so it must fail toward checking
+// (2026-08-09: a bare `!startsWith("-")` filter collected flag values as "services" and
+// silenced the check under genuine staleness). Only skip when a segment names at least
+// one service AND every name in it is one we positively know is not built here.
+//
+// Evaluated PER SEGMENT, not pooled across all of them: `up -d postgres ; up -d`
+// starts everything in the second invocation, which names nothing at all. Merging every
+// segment's names into one flat list before judging it loses that segment's "named
+// nothing = starts everything" signal — the empty contribution just vanishes into the
+// pool, so the compound command would read as "postgres only" and skip incorrectly.
+// Requiring EVERY segment to individually qualify keeps that signal instead of losing it.
+const targetsOnlyNonBuiltServices = upSegments.length > 0 && upSegments.every((seg) => {
+  const names = seg.replace(/^.*?\bup\b/, "").trim().split(/\s+/).filter((t) => t && !t.startsWith("-"));
+  return names.length > 0 && names.every((s) => KNOWN_SERVICES.has(s) && !BUILT_HERE_SERVICES.has(s));
+});
+if (upSegments.length > 0 && !alsoBuilds && !targetsOnlyNonBuiltServices) {
   const head = sh(["git", "-C", proj, "rev-parse", "--short", "HEAD"]);
   const env = sh([
     "docker", "image", "inspect", "devopsworker-watcher",
@@ -222,8 +259,12 @@ if (composeUpSegment && !alsoBuilds && !targetsOnlyNonBuiltServices) {
     // Dockerfile's COPY lines: package.json, bun.lock, src/, scripts/, tsconfig.json
     // (COPY ... at lines 48-52) and docker/claude-settings.json, docker/entrypoint.sh,
     // docker/fetch-al-extension.sh (COPY ... at lines 101-105) — plus the Dockerfile
-    // itself, since changing the recipe is also a reason to rebuild.
-    const IMAGE_INPUT_PATHS = ["src", "Dockerfile", "package.json", "bun.lock", "tsconfig.json", "scripts", "docker"];
+    // itself, since changing the recipe is also a reason to rebuild, and .dockerignore,
+    // since it's a build-context input too: it decides what COPY src/ actually sends
+    // (currently excludes tests/, docs/, CLAUDE.md). NOT included: docker-compose.yml —
+    // it isn't baked into the image, and this task's own commits change it, which would
+    // re-light the exact false positive this gate exists to close.
+    const IMAGE_INPUT_PATHS = ["src", "Dockerfile", "package.json", "bun.lock", "tsconfig.json", "scripts", "docker", ".dockerignore"];
     const diffProbe = Bun.spawnSync({
       cmd: ["git", "-C", proj, "diff", "--quiet", `${built}..HEAD`, "--", ...IMAGE_INPUT_PATHS],
     });
