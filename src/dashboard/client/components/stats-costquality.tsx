@@ -3,7 +3,7 @@ import type { FetchState } from '../stats-store.ts';
 import type { CostStats, QualityStats, SubAgentCoverage, CostPerReadBandItem, ModelUsageEntry } from '../../stats.ts';
 import { formatCost, formatPct } from '../format.ts';
 import { MIN_RELIABLE_COVERAGE_PCT } from '../../coverage-thresholds.ts';
-import { worstStatus } from '../assessors.ts';
+import { worstStatus, NO_MODEL_ACTIVITY_TEXT, FLAGGED_MODEL_KEY_TOOLTIP } from '../assessors.ts';
 
 // ---------------------------------------------------------------------------
 // Cost + Quality cards (Task 8) — Sections B and C. Replaces the
@@ -120,9 +120,9 @@ export function buildLowCoverageHeadline(coverage: SubAgentCoverage): string | n
 
 export function formatCostPerReadBandItem(c: CostPerReadBandItem): string {
   if (c.value == null) {
-    return 'n/a — no rows with both cost and findings recorded, or every eligible row had zero read-band items';
+    return 'n/a — no rows with both cost and findings recorded, or every eligible row had zero critical/major items';
   }
-  return `${formatCost(c.value)} per read-band item (avg cost ${formatCost(c.avgCostUsd!)} ÷ avg ${c.avgReadBandItems!.toFixed(2)} items/review, n=${c.sampleSize})`;
+  return `${formatCost(c.value)} per critical/major item (avg cost ${formatCost(c.avgCostUsd!)} ÷ avg ${c.avgReadBandItems!.toFixed(2)} items/review, n=${c.sampleSize})`;
 }
 
 export interface ModelCostAssessment {
@@ -142,7 +142,7 @@ export function assessModelBreakdownCost(modelBreakdown: ModelUsageEntry[]): Mod
   const flaggedCost = flagged.reduce((s, m) => s + m.totalCostUsd, 0);
   return {
     status: 'attention',
-    text: `${flagged.length} flagged model key(s) costing ${formatCost(flaggedCost)}: ${flagged.map((m) => m.model).join(', ')} — see the Integrity panel's Model usage section`,
+    text: `${flagged.length} flagged model(s) costing ${formatCost(flaggedCost)}: ${flagged.map((m) => m.model).join(', ')} — see the Integrity panel's Model usage section`,
   };
 }
 
@@ -234,7 +234,7 @@ export function describeReadBandCoverage(coverage: ReadBandCoverage): string {
  *  50% threshold at the call site. */
 export function buildReadBandLowCoverageHeadline(coverage: ReadBandCoverage): string | null {
   if (!coverage.lowCoverage) return null;
-  return `Only ${formatPctValue(coverage.coveragePct)} of this window's reviews carry findings data — the average above reflects that subset, not the full window. findings_list is a recently-added column; older rows have none recorded.`;
+  return `Only ${formatPctValue(coverage.coveragePct)} of this window's reviews carry findings data — the average above reflects that subset, not the full window. This is a recently added kind of data; older reviews have none recorded.`;
 }
 
 export interface ReadBandGaugeView {
@@ -260,19 +260,29 @@ export interface ReadBandGaugeView {
   text: string;
 }
 
+/** The words for each read-band level — shared by the visible summary text and the gauge's aria-label
+ *  (see `ReadBandGauge` in this file), so a screen-reader user gets the same clause a sighted user
+ *  reads instead of the bare enum key spliced into a sentence. Mirrors Task 6's precedent that an
+ *  aria-label and its adjacent visible text must render the same clause from one source of truth. */
+export function describeReadBandLevel(level: ReadBandLevel): string {
+  switch (level) {
+    case 'danger':
+      return 'in the danger zone (below 2.5) — reviews are surfacing too few critical/major findings on average';
+    case 'watch':
+      return 'below the healthy band (3.5-4) and approaching the danger zone (below 2.5)';
+    case 'healthy':
+      return 'within or above the healthy band (3.5-4)';
+    case 'unknown':
+      return 'no findings data to classify';
+  }
+}
+
 export function buildReadBandGaugeView(quality: QualityStats): ReadBandGaugeView {
   const { avgReadBandItems, readBandSampleSize, lowSample, sampleSize } = quality;
   const level = classifyReadBandLevel(avgReadBandItems);
   const position = avgReadBandItems == null ? null : readBandGaugePosition(avgReadBandItems);
   const valueText = avgReadBandItems == null ? 'n/a' : avgReadBandItems.toFixed(2);
-  const levelText =
-    level === 'danger'
-      ? 'in the danger zone (below 2.5) — reviews are surfacing too few critical/major findings on average'
-      : level === 'watch'
-        ? 'below the healthy band (3.5-4) and approaching the danger zone (below 2.5)'
-        : level === 'healthy'
-          ? 'within or above the healthy band (3.5-4)'
-          : 'no findings data to classify';
+  const levelText = describeReadBandLevel(level);
   return {
     level,
     value: avgReadBandItems,
@@ -489,7 +499,7 @@ function CostPerItemSection({ data }: { data: CostStats }) {
 }
 
 function ModelCostTable({ rows }: { rows: ModelUsageEntry[] }) {
-  if (rows.length === 0) return <p class="cost-section__empty">No model_usage recorded in this window.</p>;
+  if (rows.length === 0) return <p class="cost-section__empty">{NO_MODEL_ACTIVITY_TEXT}</p>;
   return (
     <table class="cost-table">
       <thead>
@@ -506,7 +516,7 @@ function ModelCostTable({ rows }: { rows: ModelUsageEntry[] }) {
             <td class="cost-table__mono">
               {r.model}
               {r.flagged && (
-                <span class="cost-table__flag" title="Matches the [1m] premium long-context contamination pattern"> ⚠ flagged</span>
+                <span class="cost-table__flag" title={FLAGGED_MODEL_KEY_TOOLTIP}> ⚠ flagged</span>
               )}
             </td>
             <td>{r.rows}</td>
@@ -535,8 +545,8 @@ function ModelBreakdownSection({ data }: { data: CostStats }) {
           measurements; the page would otherwise assert the same `[1m]`
           finding three times without ever saying so. */}
       <p class="cost-section__note">
-        Same model_usage breakdown as the Integrity panel's "Model usage" table (one query, aggregateModelUsage) —
-        shown here through a cost lens, not a second, independent measurement.
+        Same model-cost breakdown as the Integrity panel's "Model usage" table — shown here through a cost lens,
+        not a second, independent measurement.
       </p>
     </CostSection>
   );
@@ -640,7 +650,7 @@ function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
           <div
             class="read-band-gauge__track"
             role="img"
-            aria-label={`Average read-band items per review: ${view.value.toFixed(2)}, classified as ${view.level}`}
+            aria-label={`Average read-band items per review: ${view.value.toFixed(2)}, ${describeReadBandLevel(view.level)}`}
           >
             <div
               class="read-band-gauge__zone read-band-gauge__zone--danger"
@@ -710,7 +720,7 @@ function SeverityLegend({ segments }: { segments: SeveritySegmentView[] }) {
               here (unlike the split summary below, where the two rates are
               the whole point of the sentence). */}
           {s.key} {s.count} ({s.pct == null ? 'n/a' : `${(s.pct * 100).toFixed(0)}%`})
-          {i === 1 && <span class="severity-bar__legend-divider-note"> │ read-band ends here</span>}
+          {i === 1 && <span class="severity-bar__legend-divider-note"> │ critical/major ends here</span>}
         </span>
       ))}
     </p>
@@ -746,8 +756,8 @@ function BelowBandRowsSection({ data }: { data: QualityStats }) {
         findings ({formatPctValue(data.belowBandPct)}).
       </p>
       <p class="quality-section__note">
-        Per-REVIEW count — distinct from the per-FINDING severity breakdown above. A review with one critical finding
-        and five minor findings counts toward read-band above but is NOT a below-band row here.
+        Counted by review, not by individual problem: a review with one critical problem and five minor ones counts
+        toward the critical/major total above, but is not one of the below-band reviews counted here.
       </p>
     </QualitySection>
   );

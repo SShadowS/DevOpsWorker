@@ -26,6 +26,24 @@ export interface SimpleAssessment {
   text: string;
 }
 
+// ---------------------------------------------------------------------------
+// Shared copy (Task 8) — two strings rendered identically in TWO files
+// (stats-costquality.tsx's model table/tooltip and stats-integrity.tsx's
+// model table/tooltip). "Keep them identical" is a promise a hand-copied
+// literal can silently break; a shared constant makes it a guarantee.
+// ---------------------------------------------------------------------------
+
+/** The empty state for both `model_usage`-derived tables — the Cost card's
+ *  "Cost by model" and the Integrity panel's "Model usage". Mirrors the "No
+ *  tool activity recorded" phrase Task 6 already established for the
+ *  equivalent `tool_calls` case — same shape, same reason: a DB field name
+ *  does not belong in rendered prose. */
+export const NO_MODEL_ACTIVITY_TEXT = 'No model activity recorded in this window.';
+
+/** The `[1m]`-flagged-key tooltip, shown on the same chip in both the Cost
+ *  card's model table and the Integrity panel's model table. */
+export const FLAGGED_MODEL_KEY_TOOLTIP = 'Matches the [1m] premium long-context contamination pattern';
+
 /** Flags contamination-pattern model keys (the specific `[1m]` long-context
  *  premium-tier suffix data-shapes.md calls out) — a real cost-attribution
  *  bug, not a stylistic nit, so any flagged key is 'attention'. Named

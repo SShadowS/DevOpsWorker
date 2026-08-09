@@ -8,6 +8,7 @@ import {
   formatCostPerReadBandItem,
   assessModelBreakdownCost,
   classifyReadBandLevel,
+  describeReadBandLevel,
   readBandGaugePosition,
   buildReadBandGaugeView,
   computeReadBandCoverage,
@@ -27,6 +28,7 @@ import {
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { CostStats, QualityStats, SubAgentCoverage, CostPerReadBandItem, ModelUsageEntry } from '../../src/dashboard/stats.ts';
 import { MIN_RELIABLE_COVERAGE_PCT } from '../../src/dashboard/coverage-thresholds.ts';
+import { NO_MODEL_ACTIVITY_TEXT, FLAGGED_MODEL_KEY_TOOLTIP } from '../../src/dashboard/client/assessors.ts';
 
 // No test in this file may open a database connection or render a component
 // tree (repo convention — see tests/dashboard/stats-integrity.test.ts). Every
@@ -175,16 +177,24 @@ describe('buildLowCoverageHeadline', () => {
 describe('formatCostPerReadBandItem', () => {
   test('null value -> explicit n/a text, not a blank or $0.00', () => {
     const c: CostPerReadBandItem = { avgCostUsd: null, avgReadBandItems: null, value: null, sampleSize: 0 };
-    expect(formatCostPerReadBandItem(c)).toContain('n/a');
+    expect(formatCostPerReadBandItem(c))
+      .toBe('n/a — no rows with both cost and findings recorded, or every eligible row had zero critical/major items');
   });
 
   test('a real value renders cost, avg items, and sample size', () => {
     const c: CostPerReadBandItem = { avgCostUsd: 1.5, avgReadBandItems: 2.0, value: 0.75, sampleSize: 300 };
-    const text = formatCostPerReadBandItem(c);
-    expect(text).toContain('$0.75');
-    expect(text).toContain('$1.50');
-    expect(text).toContain('2.00');
-    expect(text).toContain('300');
+    expect(formatCostPerReadBandItem(c)).toBe('$0.75 per critical/major item (avg cost $1.50 ÷ avg 2.00 items/review, n=300)');
+  });
+
+  // Task 8: "read-band item(s)" -> "critical/major item(s)" — the map's
+  // "read-band finding" row names a FINDING, not this per-item count; the
+  // replacement matches the card's own established phrase instead
+  // (buildReadBandGaugeView's `text` already says "critical+major").
+  test('neither branch leaks the "read-band" term any more', () => {
+    expect(formatCostPerReadBandItem({ avgCostUsd: null, avgReadBandItems: null, value: null, sampleSize: 0 }))
+      .not.toContain('read-band');
+    expect(formatCostPerReadBandItem({ avgCostUsd: 1, avgReadBandItems: 1, value: 1, sampleSize: 1 }))
+      .not.toContain('read-band');
   });
 });
 
@@ -207,8 +217,23 @@ describe('assessModelBreakdownCost', () => {
     ];
     const a = assessModelBreakdownCost(rows);
     expect(a.status).toBe('attention');
-    expect(a.text).toContain('claude-opus-4-8[1m]');
-    expect(a.text).toContain('$3.75');
+    expect(a.text).toBe('1 flagged model(s) costing $3.75: claude-opus-4-8[1m] — see the Integrity panel\'s Model usage section');
+  });
+
+  // Task 8: dropped "key" — a flagged row is a MODEL, and "key" risked
+  // reading as a database key rather than the [1m]-suffixed model name.
+  // Printed at 1 and 2 flagged models (the "(s)" convention doesn't
+  // pluralize the word itself, so there is no grammar to break at either
+  // count, but the substring must hold at both).
+  test('two flagged models -> both named, "key" does not appear', () => {
+    const rows: ModelUsageEntry[] = [
+      { model: 'claude-opus-4-8[1m]', rows: 1, totalCostUsd: 3.75, totalOutputTokens: 500, flagged: true },
+      { model: 'claude-sonnet-5[1m]', rows: 2, totalCostUsd: 1.25, totalOutputTokens: 200, flagged: true },
+    ];
+    const a = assessModelBreakdownCost(rows);
+    expect(a.text).toContain('2 flagged model(s)');
+    expect(a.text).toContain('claude-opus-4-8[1m], claude-sonnet-5[1m]');
+    expect(a.text).not.toContain('key');
   });
 });
 
@@ -237,6 +262,32 @@ describe('classifyReadBandLevel', () => {
   });
   test('above the named healthy ceiling is still healthy (no upper bound is flagged)', () => {
     expect(classifyReadBandLevel(6)).toBe('healthy');
+  });
+});
+
+// Task 8 (C25): extracted so the gauge's aria-label and its visible summary
+// text render the SAME clause from one source, instead of the aria-label
+// splicing the bare enum key into a sentence ("classified as watch" reads as
+// nothing a screen reader should say). Printed at all four levels — this is
+// an enum, not a count, so "0/1/2" is the four reachable branches.
+describe('describeReadBandLevel', () => {
+  test('danger', () => {
+    expect(describeReadBandLevel('danger'))
+      .toBe('in the danger zone (below 2.5) — reviews are surfacing too few critical/major findings on average');
+  });
+  test('watch', () => {
+    expect(describeReadBandLevel('watch'))
+      .toBe('below the healthy band (3.5-4) and approaching the danger zone (below 2.5)');
+  });
+  test('healthy', () => {
+    expect(describeReadBandLevel('healthy')).toBe('within or above the healthy band (3.5-4)');
+  });
+  test('unknown', () => {
+    expect(describeReadBandLevel('unknown')).toBe('no findings data to classify');
+  });
+  test('all four branches are textually distinct (guards against two levels collapsing to one clause)', () => {
+    const texts = (['danger', 'watch', 'healthy', 'unknown'] as const).map(describeReadBandLevel);
+    expect(new Set(texts).size).toBe(4);
   });
 });
 
@@ -309,6 +360,18 @@ describe('buildReadBandGaugeView', () => {
     expect(view.lowSample).toBe(false);
     expect(view.coverage.lowCoverage).toBe(true);
   });
+
+  // Task 8 (C25): the aria-label the component renders is built as
+  // `` `...${view.value}, ${describeReadBandLevel(view.level)}` `` — this
+  // proves the visible text's own level clause is the SAME string
+  // `describeReadBandLevel` produces, at all four levels, without rendering
+  // the component tree (which this file's own convention disallows).
+  test('the visible text\'s level clause is exactly what describeReadBandLevel(view.level) produces, at every level', () => {
+    for (const avg of [1.2, 2.96, 4.0, null]) {
+      const view = buildReadBandGaugeView(qualityFixture({ avgReadBandItems: avg }));
+      expect(view.text).toContain(describeReadBandLevel(view.level));
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -362,6 +425,56 @@ describe('MIN_RELIABLE_COVERAGE_PCT — structural: imported, never re-declared 
 
   test('stats.ts does NOT locally declare the constant\'s value — only imports and re-exports it', () => {
     expect(statsSrc).not.toMatch(/export const MIN_RELIABLE.*COVERAGE.*=/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 8 — schema/internal names removed from rendered prose, and the two
+// strings shared with stats-integrity.tsx pulled from ONE constant so they
+// cannot drift apart. Flat literals with no count and no branch (per the
+// review ruling's S1 ruling) — a source-text pin is adequate; there is no
+// rendering logic to exercise.
+// ---------------------------------------------------------------------------
+
+describe('Task 8 — cost/quality prose: schema names gone, shared constants imported', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../../src/dashboard/client/components/stats-costquality.tsx', import.meta.url)),
+    'utf-8',
+  );
+
+  test('imports the two constants shared with stats-integrity.tsx from assessors.ts, rather than hand-copying them', () => {
+    expect(src).toMatch(/import\s*\{[^}]*NO_MODEL_ACTIVITY_TEXT[^}]*\}\s*from\s*['"]\.\.\/assessors\.ts['"]/);
+    expect(src).toMatch(/import\s*\{[^}]*FLAGGED_MODEL_KEY_TOOLTIP[^}]*\}\s*from\s*['"]\.\.\/assessors\.ts['"]/);
+  });
+
+  test('the two shared constants are actually used, not just imported', () => {
+    expect(src).toMatch(/\{NO_MODEL_ACTIVITY_TEXT\}/);
+    expect(src).toMatch(/title=\{FLAGGED_MODEL_KEY_TOOLTIP\}/);
+  });
+
+  test('the shared constants hold the expected plain-English values', () => {
+    expect(NO_MODEL_ACTIVITY_TEXT).toBe('No model activity recorded in this window.');
+    expect(FLAGGED_MODEL_KEY_TOOLTIP).toBe('Matches the [1m] premium long-context contamination pattern');
+  });
+
+  test('the literal DB field name model_usage no longer appears anywhere in rendered prose', () => {
+    expect(src).not.toMatch(/model_usage/);
+  });
+
+  test('the internal function name aggregateModelUsage no longer appears in the rendered cost-lens note', () => {
+    expect(src).not.toMatch(/\(one query, aggregateModelUsage\)/);
+    expect(src).toMatch(/Same model-cost breakdown as the Integrity panel's "Model usage" table/);
+  });
+
+  test('the severity legend divider names critical\\/major, not the bare "read-band" term', () => {
+    expect(src).toContain('│ critical/major ends here');
+    expect(src).not.toContain('│ read-band ends here');
+  });
+
+  test('the below-band note is plain, not ALL-CAPS code-comment style, and still distinguishes the two counts', () => {
+    expect(src).toContain('Counted by review, not by individual problem');
+    expect(src).not.toContain('Per-REVIEW count');
+    expect(src).not.toContain('per-FINDING');
   });
 });
 
@@ -423,11 +536,19 @@ describe('buildReadBandLowCoverageHeadline', () => {
     expect(buildReadBandLowCoverageHeadline(computeReadBandCoverage(334, 334))).toBeNull();
   });
 
-  test('lowCoverage true -> names the exact percentage and the recently-added column', () => {
+  test('lowCoverage true -> names the exact percentage and says the data is recent, so older reviews predate it', () => {
+    // Re-pointed (Task 8, per review ruling): the property this guards is that
+    // this KIND OF DATA started being collected recently, so older reviews
+    // legitimately have none — not the column's name. A reader with no code
+    // access needs the fact, not the identifier that carries it.
     const text = buildReadBandLowCoverageHeadline(computeReadBandCoverage(76, 334));
     expect(text).not.toBeNull();
     expect(text).toContain('22.8%');
-    expect(text).toContain('findings_list');
+    expect(text).toContain('recently added');
+    expect(text).toContain('older reviews have none recorded');
+    // The schema name itself must NOT leak into rendered prose (Task 6's
+    // established defect class — an internal identifier is not a plain word).
+    expect(text).not.toContain('findings_list');
   });
 });
 
