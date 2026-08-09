@@ -274,14 +274,25 @@ const KNOWN_REMAINING: ReadonlyArray<{ file: string; text: string; why: string }
  * Two more sites the extractor above cannot reach: `inferredEffort.note` and
  * `subAgentModelAttribution.note`, rendered verbatim by the Integrity panel but
  * built server-side in `src/dashboard/stats.ts`, not as a literal in any of the
- * six client files above — a note handed to a card through a variable never
+ * client files above — a note handed to a card through a variable never
  * appears there as source text, so `renderedText()` cannot see it no matter how
  * the extractor is improved. Widening the sweep to read the whole of stats.ts
  * would pull in that module's non-rendered surface for two strings; instead
  * (Task 6) both notes were hoisted to exported constants, so the ALREADY
  * EVALUATED string can be checked directly against the same DENIED list, no
  * extraction needed. This closes the gap the comment above used to describe as
- * permanent, and makes tests/dashboard/stats.test.ts's narrower 4-token
+ * permanent — but ONLY IN COMPANY WITH A BINDING HELD IN ANOTHER FILE. Checking
+ * the constant proves nothing about the card unless the card's note really IS
+ * that constant, and nothing here can see that: it is pinned by
+ * tests/dashboard/stats.test.ts's two wiring pins, which require the
+ * getIntegrityStats return object to read exactly `note: <CONSTANT>,`. Delete or
+ * loosen those and this check silently goes back to reading a string the card no
+ * longer renders — which is not hypothetical: while those pins matched a mere
+ * MENTION of the constant, `note: CONSTANT + ' …sub_agents… PR… '` put four
+ * denied tokens on the card with the whole suite green. Change either side and
+ * check the other.
+ *
+ * It also makes tests/dashboard/stats.test.ts's narrower 4-token
  * schema-name check ("the inferredEffort and subAgentModelAttribution notes
  * name no schema token") a partial subset of the check below — NOT fully
  * redundant, because two of its four tokens (`dispatch.mismatchRate`,
@@ -403,6 +414,18 @@ describe('rendered-text extraction', () => {
     expect(hit('across 3 PRs')).toEqual(['PR']);
     expect(hit('read-band items per review')).toEqual(['read-band']);
     expect(hit('no rows in tool_calls')).toEqual(['tool_calls']);
+    expect(hit('the model_usage breakdown')).toEqual(['model_usage']);
+    expect(hit('the sub_agents roster')).toEqual(['sub_agents']);
+    // The three entries below were deletable in SILENCE: removing any one of
+    // them from DENIED left this file at 25 pass / 0 fail, because no card
+    // currently renders them and nothing else named them. A deny entry that
+    // nothing exercises is one tidy-up away from being dropped as dead weight,
+    // and it would take the guard with it — error_max_turns is the token this
+    // branch has just removed from the page, so it is precisely the one that
+    // must still fail if it comes back.
+    expect(hit('findings_list is empty')).toEqual(['findings_list']);
+    expect(hit('said_confidence below threshold')).toEqual(['said_confidence']);
+    expect(hit('stopped with error_max_turns')).toEqual(['error_max_turns']);
     // Title case reaches the page — these are the two real titles Tasks 8 and 9
     // fixed by hand, and a case-sensitive pattern caught neither.
     expect(hit('Read-band findings raised')).toEqual(['read-band']);
