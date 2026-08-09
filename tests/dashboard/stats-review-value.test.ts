@@ -1224,7 +1224,7 @@ describe('describeJudgedCoverage', () => {
     const text = describeJudgedCoverage(compute(mixedWindow(), spend()));
     expect(text).toContain('8/20');
     expect(text).toContain('40.0%');
-    expect(text).toContain('12 carry no verdict, awaiting a diff to judge against');
+    expect(text).toContain('12 have not been judged yet, awaiting a code change to judge against');
   });
 
   test('separates "not yet" from "never" when some findings have no thread', () => {
@@ -1234,30 +1234,30 @@ describe('describeJudgedCoverage', () => {
       { readBandRaised: 5, noFileAnchor: 3 },
     );
     const text = describeJudgedCoverage(o);
-    expect(text).toContain('1 awaiting a diff to judge against');
-    expect(text).toContain('3 that can never be judged (no inline thread)');
+    expect(text).toContain('1 awaiting a code change to judge against');
+    expect(text).toContain('3 that can never be judged (no comment thread in the pull request)');
   });
 
   test('with a single reason the count is stated once, not on both sides of a colon', () => {
     const o = compute([finding({ did: 'ADDRESSED' }), finding({ did: null }), finding({ did: null })], spend());
     const text = describeJudgedCoverage(o);
     expect(o.unjudgeable).toBe(2);
-    expect(text).toContain('2 carry no verdict, awaiting a diff to judge against');
-    expect(text).not.toContain('2 carry no verdict: 2 awaiting');
+    expect(text).toContain('2 have not been judged yet, awaiting a code change to judge against');
+    expect(text).not.toContain('2 have not been judged: 2 awaiting');
   });
 
-  test('a zero clause is omitted, not rendered as "0 awaiting a diff"', () => {
+  test('a zero clause is omitted, not rendered as "0 awaiting a code change"', () => {
     // Every traced row judged; the only unjudged findings are untraceable.
     const o = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 5, noFileAnchor: 4 });
     const text = describeJudgedCoverage(o);
     expect(o.awaitingDiff).toBe(0);
     expect(text).not.toContain('0 awaiting');
-    expect(text).toContain('4 carry no verdict and never can: none of them has an inline thread');
+    expect(text).toContain('4 have not been judged and never can be: none of them has a comment thread in the pull request');
   });
 
-  test('says so plainly when everything raised has a verdict', () => {
+  test('says so plainly when everything raised has been judged', () => {
     const text = describeJudgedCoverage(compute([finding({ did: 'ADDRESSED' })], spend()));
-    expect(text).toContain('every finding raised in this window has a verdict');
+    expect(text).toContain('every finding raised in this window has been judged');
   });
 });
 
@@ -1364,7 +1364,7 @@ describe('describeDisputed', () => {
     expect(o.disputedAsWrong.count).toBe(0);
     expect(line.value).toBe('0 of 2 said-labelled findings');
     expect(line.value).not.toBe('not yet measured');
-    expect(line.detail).toContain('A measured zero, not an absence of measurement');
+    expect(line.detail).toContain('This is a real zero, not a gap in the data');
     // ...and it is NOT dressed as the absence of a measurement.
     expect(line.status).toBe('neutral');
   });
@@ -1485,7 +1485,7 @@ describe('describeSpend', () => {
   test('the missing-cost floor is disclosed on the no-per-item branch too, beside the total it qualifies', () => {
     const o = compute([finding({ did: null })], spend({ totalCostUsd: 40, reviewCount: 65, reviewsMissingCost: 1 }));
     const line = describeSpend(o.spend, o.addressed, o);
-    expect(line.detail).toContain('FLOOR');
+    expect(line.detail).toContain('at least the figure shown');
     expect(line.detail).toContain('1 of 65');
   });
 
@@ -1605,7 +1605,7 @@ describe('buildReviewValuePanelView', () => {
     const v = buildReviewValuePanelView({ status: 'empty' });
     expect(v.status).toBe('empty');
     expect(v.message).toContain('No classified findings');
-    expect(v.message).toContain('settled');
+    expect(v.message).toContain('merged or closed');
   });
 
   test('ready passes the payload through', () => {
@@ -1739,16 +1739,16 @@ describe('count agreement across every rendered string', () => {
 // ---------------------------------------------------------------------------
 
 describe('negation survives the singular form', () => {
-  test('one untraceable finding "has NO inline thread", not "has an inline thread"', () => {
+  test('one untraceable finding "has NO comment thread", not "has a comment thread"', () => {
     const o = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 2, noFileAnchor: 1 });
     const text = describeJudgedCoverage(o);
-    expect(text).toContain('it has no inline thread');
-    expect(text).not.toContain('it has an inline thread');
+    expect(text).toContain('it has no comment thread in the pull request');
+    expect(text).not.toContain('it has a comment thread in the pull request');
   });
 
-  test('many untraceable findings read "none of them has an inline thread"', () => {
+  test('many untraceable findings read "none of them has a comment thread"', () => {
     const o = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 3, noFileAnchor: 2 });
-    expect(describeJudgedCoverage(o)).toContain('none of them has an inline thread');
+    expect(describeJudgedCoverage(o)).toContain('none of them has a comment thread in the pull request');
   });
 });
 
@@ -1775,10 +1775,10 @@ describe('no clause points at a figure that does not exist', () => {
     expect(describeEngagement(o.engagement, o).value).toBe('no readable signal');
   });
 
-  test('zero raised is not reported as "every finding has a verdict"', () => {
+  test('zero raised is not reported as "every finding has been judged"', () => {
     const o = computeReviewValue([], spend(), { readBandRaised: 0, noFileAnchor: 0 });
     const text = describeJudgedCoverage(o);
-    expect(text).toBe('No read-band findings were raised in this window.');
+    expect(text).toBe('No findings were raised in this window.');
   });
 
   // -------------------------------------------------------------------------
@@ -1836,8 +1836,9 @@ describe('no clause points at a figure that does not exist', () => {
 
   test('coverage does not assert a CAUSE for untraceability the card says is not established', () => {
     // reconciled === false means the traceability note two lines above says
-    // in terms that the gap is not understood. Asserting "(no inline thread)"
-    // beside it claimed a cause the card had just disclaimed.
+    // in terms that the gap is not understood. Asserting "(no comment thread
+    // in the pull request)" beside it claimed a cause the card had just
+    // disclaimed.
     const unreconciled = computeReviewValue(
       [finding({ did: 'ADDRESSED' }), finding({ did: null })],
       spend(),
@@ -1845,7 +1846,7 @@ describe('no clause points at a figure that does not exist', () => {
     );
     expect(unreconciled.traceability.reconciled).toBe(false);
     const text = describeJudgedCoverage(unreconciled);
-    expect(text).not.toContain('no inline thread');
+    expect(text).not.toContain('no comment thread in the pull request');
     expect(text).toContain('reason not established');
 
     // ...and when it DOES reconcile, the cause is stated.
@@ -1855,7 +1856,7 @@ describe('no clause points at a figure that does not exist', () => {
       { readBandRaised: 5, noFileAnchor: 3 },
     );
     expect(reconciled.traceability.reconciled).toBe(true);
-    expect(describeJudgedCoverage(reconciled)).toContain('no inline thread');
+    expect(describeJudgedCoverage(reconciled)).toContain('no comment thread in the pull request');
   });
 
   test('the single-reason coverage clause also withholds an unestablished cause', () => {
@@ -1864,7 +1865,7 @@ describe('no clause points at a figure that does not exist', () => {
     expect(o.traceability.reconciled).toBe(false);
     const text = describeJudgedCoverage(o);
     expect(text).toContain('for a reason this card has not established');
-    expect(text).not.toContain('inline thread');
+    expect(text).not.toContain('comment thread');
   });
 
   test('unrecorded cost is reported as missing data, never as $0.00 per acted-on', () => {
@@ -1924,7 +1925,8 @@ describe('no clause points at a figure that does not exist', () => {
 
   test('ORDER: awaiting-a-diff is tested BEFORE the unreconciled check, or a diff-wait reads as unexplainable', () => {
     // untraceable === 0 with noFileAnchor > 0 makes `reconciled` false, while
-    // the only actual reason anything is unjudged is that it awaits a diff.
+    // the only actual reason anything is unjudged is that it awaits a code
+    // change.
     const o = computeReviewValue(
       [finding({ did: 'ADDRESSED' }), finding({ did: null })],
       spend(),
@@ -1935,7 +1937,7 @@ describe('no clause points at a figure that does not exist', () => {
     expect(o.awaitingDiff).toBe(1);
 
     const text = describeJudgedCoverage(o);
-    expect(text).toContain('awaiting a diff to judge against');
+    expect(text).toContain('awaiting a code change to judge against');
     expect(text).not.toContain('for a reason this card has not established');
   });
 
@@ -2087,5 +2089,126 @@ describe('review-value structure', () => {
     const call = viewSrc.slice(viewSrc.indexOf('pickPopulationMeta('), viewSrc.indexOf('pickPopulationMeta(') + 400);
     const invocation = call.slice(call.indexOf('pickPopulationMeta(costStats'));
     expect(invocation.slice(0, invocation.indexOf(')'))).not.toContain('reviewValueStats');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plain-English rewrite pins. Full-string `toBe` (not `toContain`) on every
+// sentence rewritten in this round, printed at n=0 (where the branch has one),
+// n=1, n=2, and — for `describeJudgedCoverage` — at judged === findingsRaised,
+// the "compared quantities are equal" case for that sentence.
+// ---------------------------------------------------------------------------
+
+describe('plain-English rewrite pins', () => {
+  test('engagement: nothing recorded reads as absence of a record, not absence of a reply', () => {
+    const o = compute([finding({ saidEvidence: 'stale-signal' })], spend());
+    expect(o.engagement.engagedRate).toBeNull();
+    expect(describeEngagement(o.engagement, o).detail).toBe(
+      'Nothing was recorded about replies for any of these, so this card cannot say whether anyone responded.',
+    );
+  });
+
+  test('disputed: a measured zero is scoped to the problems that were checked, at denominators 1 and 2', () => {
+    const one = compute([finding({ said: 'fixed' })], spend());
+    expect(describeDisputed(one.disputedAsWrong, one).detail).toBe(
+      'This is a real zero, not a gap in the data: none of the problems that were checked was disputed as ' +
+        'wrong. Reported as a count, not a rate: the denominator is the 1 finding carrying a said label.',
+    );
+    const two = compute([finding({ said: 'fixed' }), finding({ said: 'ignored' })], spend());
+    expect(describeDisputed(two.disputedAsWrong, two).detail).toBe(
+      'This is a real zero, not a gap in the data: none of the problems that were checked was disputed as ' +
+        'wrong. Reported as a count, not a rate: the denominator is the 2 findings carrying a said label.',
+    );
+  });
+
+  test('addressed: the judged-rate clause names its own denominator, at equal and unequal counts', () => {
+    const equal = compute([finding({ did: 'ADDRESSED' })], spend());
+    expect(describeAddressed(equal).detail).toContain(
+      'the first counts only the problems we could check, the second is diluted by every finding not yet judged.',
+    );
+    const unequal = computeReviewValue(
+      [finding({ did: 'ADDRESSED' }), finding({ did: 'not' })],
+      spend(),
+      { readBandRaised: 4, noFileAnchor: 0 },
+    );
+    expect(describeAddressed(unequal).detail).toContain(
+      'the first counts only the problems we could check, the second is diluted by every finding not yet judged.',
+    );
+  });
+
+  test('empty panel: scope is severity and settle-state, worded without "settled"', () => {
+    const v = buildReviewValuePanelView({ status: 'empty' });
+    expect(v.message).toBe(
+      'No classified findings in this window. Reviews may still have run — this table holds only critical and ' +
+        'major problems on pull requests that have been merged or closed, and only once a scheduled job has ' +
+        'checked them.',
+    );
+  });
+
+  test('judged coverage n=0: zero raised', () => {
+    const o = computeReviewValue([], spend(), { readBandRaised: 0, noFileAnchor: 0 });
+    expect(describeJudgedCoverage(o)).toBe('No findings were raised in this window.');
+  });
+
+  test('judged coverage: fully judged (compared quantities equal) at n=1 and n=2', () => {
+    const one = compute([finding({ did: 'ADDRESSED' })], spend());
+    expect(describeJudgedCoverage(one)).toBe('1/1 findings judged (100.0%) — every finding raised in this window has been judged.');
+    const two = compute([finding({ did: 'ADDRESSED' }), finding({ did: 'not' })], spend());
+    expect(describeJudgedCoverage(two)).toBe('2/2 findings judged (100.0%) — every finding raised in this window has been judged.');
+  });
+
+  test('judged coverage: awaiting-a-code-change only, at n=1 and n=2', () => {
+    const one = compute([finding({ did: 'ADDRESSED' }), finding({ did: null })], spend());
+    expect(describeJudgedCoverage(one)).toBe('1/2 findings judged (50.0%) — 1 has not been judged yet, awaiting a code change to judge against.');
+    const two = compute([finding({ did: 'ADDRESSED' }), finding({ did: null }), finding({ did: null })], spend());
+    expect(describeJudgedCoverage(two)).toBe('1/3 findings judged (33.3%) — 2 have not been judged yet, awaiting a code change to judge against.');
+  });
+
+  test('judged coverage: untraceable and reconciled, at n=1 and n=2', () => {
+    const one = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 2, noFileAnchor: 1 });
+    expect(describeJudgedCoverage(one)).toBe(
+      '1/2 findings judged (50.0%) — 1 has not been judged and never can be: it has no comment thread in the pull request.',
+    );
+    const two = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 3, noFileAnchor: 2 });
+    expect(describeJudgedCoverage(two)).toBe(
+      '1/3 findings judged (33.3%) — 2 have not been judged and never can be: none of them has a comment thread in the pull request.',
+    );
+  });
+
+  test('judged coverage: untraceable and unreconciled, at n=1 and n=2', () => {
+    const one = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 2, noFileAnchor: 0 });
+    expect(describeJudgedCoverage(one)).toBe(
+      '1/2 findings judged (50.0%) — 1 has not been judged and never can be, for a reason this card has not established (see the caveat above).',
+    );
+    const two = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 3, noFileAnchor: 0 });
+    expect(describeJudgedCoverage(two)).toBe(
+      '1/3 findings judged (33.3%) — 2 have not been judged and never can be, for a reason this card has not established (see the caveat above).',
+    );
+  });
+
+  test('judged coverage: two reasons at once, n=4', () => {
+    const o = computeReviewValue(
+      [finding({ did: 'ADDRESSED' }), finding({ did: null })],
+      spend(),
+      { readBandRaised: 5, noFileAnchor: 3 },
+    );
+    expect(describeJudgedCoverage(o)).toBe(
+      '1/5 findings judged (20.0%) — 4 have not been judged: 1 awaiting a code change to judge against, 3 that can never be judged (no comment thread in the pull request).',
+    );
+  });
+
+  test('spend floor clause: has/have agreement at missing=1 and missing=2, using the shared "no recorded cost" phrase', () => {
+    const one = compute([finding({ did: null })], spend({ totalCostUsd: 40, reviewCount: 65, reviewsMissingCost: 1 }));
+    expect(describeSpend(one.spend, one.addressed, one).detail).toBe(
+      '$40.00 across 65 reviews on the PRs these findings came from. Nothing is confirmed acted on in this window, ' +
+        'so there is no per-item figure to report. 1 of 65 reviews has no recorded cost, so the real total is at ' +
+        'least the figure shown, not a complete sum.',
+    );
+    const two = compute([finding({ did: null })], spend({ totalCostUsd: 40, reviewCount: 65, reviewsMissingCost: 2 }));
+    expect(describeSpend(two.spend, two.addressed, two).detail).toBe(
+      '$40.00 across 65 reviews on the PRs these findings came from. Nothing is confirmed acted on in this window, ' +
+        'so there is no per-item figure to report. 2 of 65 reviews have no recorded cost, so the real total is at ' +
+        'least the figure shown, not a complete sum.',
+    );
   });
 });

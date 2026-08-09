@@ -3,6 +3,17 @@ import type { FetchState } from '../stats-store.ts';
 import type { ReviewValueStats, ReviewValueOutcome, ReviewValueEngagement, ReviewValueDisputed, ReviewValueLeadTime, ReviewValueSpend } from '../../stats.ts';
 import { formatCost, formatPct } from '../format.ts';
 import { countOf, agree, itThem } from '../../count-phrase.ts';
+import { CardGlossary } from './card-glossary.tsx';
+import type { GlossaryTerm } from './card-glossary.tsx';
+
+// This card's own short vocabulary. "settled" also covers describeLeadTime's
+// PR-settled prose below — if a future edit removes the word "settled" from
+// every sentence on this card, drop that entry too, or the glossary defines a
+// word the card no longer uses.
+const TERMS: readonly GlossaryTerm[] = [
+  { term: 'a finding', plain: 'a problem the reviewer flagged as critical or major' },
+  { term: 'settled', plain: 'the pull request has been merged or closed' },
+];
 
 // ---------------------------------------------------------------------------
 // Review value — the Stats tab's fifth slot. Answers "what did PR review
@@ -87,7 +98,7 @@ export function describeAddressed(o: ReviewValueOutcome): ScorecardLine {
     detail:
       `${formatPct(o.addressedRateOfJudged)} of JUDGED findings (${o.addressed}/${o.judged}) · ` +
       `${formatPct(o.addressedRateOfRaised)} of ALL findings raised (${o.addressed}/${o.findingsRaised}). ` +
-      'Both are true and they measure different things: the first is the hit rate among findings we could check, ' +
+      'Both are true and they measure different things: the first counts only the problems we could check, ' +
       'the second is diluted by every finding not yet judged.',
     caveat: null,
     status: 'neutral',
@@ -97,54 +108,57 @@ export function describeAddressed(o: ReviewValueOutcome): ScorecardLine {
 /** Coverage — how much of the window has been judged at all. Rendered
  *  immediately beside the acted-on figure (R1), not in a footnote. */
 export function describeJudgedCoverage(o: ReviewValueOutcome): string {
-  // Zero raised is not "everything has a verdict" — there is nothing to have
-  // one. Rendered "0/0 findings judged (n/a) — every finding raised in this
-  // window has a verdict", which is vacuously true and reads as reassurance.
-  if (o.findingsRaised === 0) return 'No read-band findings were raised in this window.';
+  // Zero raised is not "everything has been judged" — there is nothing to
+  // judge. Rendered "0/0 findings judged (n/a) — every finding raised in this
+  // window has been judged", which is vacuously true and reads as
+  // reassurance.
+  if (o.findingsRaised === 0) return 'No findings were raised in this window.';
   const head = `${o.judged}/${o.findingsRaised} findings judged (${formatPct(o.judgedCoverage)})`;
-  if (o.unjudgeable === 0) return `${head} — every finding raised in this window has a verdict.`;
+  if (o.unjudgeable === 0) return `${head} — every finding raised in this window has been judged.`;
   // "Not yet" and "never" are different facts and are never summed into one
   // number here: `awaitingDiff` will eventually be judged, `untraceable`
   // never will be. Each clause is omitted at zero rather than rendered as
-  // "0 awaiting a diff", which reads as a category that exists and is empty
-  // when it is simply not the reason anything here is unjudged.
-  // Entailment: the "no inline thread" CAUSE is only established when the gap
-  // reconciles against the file-less count. When it does not, the traceability
-  // note two lines above says in terms that the gap is not understood — and
-  // this line was asserting a cause for it anyway, in the same breath.
-  const untraceableReason = o.traceability.reconciled ? 'no inline thread' : 'reason not established — see the caveat above';
+  // "0 awaiting a code change", which reads as a category that exists and is
+  // empty when it is simply not the reason anything here is unjudged.
+  // Entailment: the "no comment thread" CAUSE is only established when the
+  // gap reconciles against the file-less count. When it does not, the
+  // traceability note two lines above says in terms that the gap is not
+  // understood — and this line was asserting a cause for it anyway, in the
+  // same breath.
+  const untraceableReason = o.traceability.reconciled ? 'no comment thread in the pull request' : 'reason not established — see the caveat above';
   const parts: string[] = [];
-  if (o.awaitingDiff > 0) parts.push(`${o.awaitingDiff} awaiting a diff to judge against`);
+  if (o.awaitingDiff > 0) parts.push(`${o.awaitingDiff} awaiting a code change to judge against`);
   if (o.traceability.untraceable > 0) {
     parts.push(`${o.traceability.untraceable} that can never be judged (${untraceableReason})`);
   }
-  // With ONE reason the count is not worth stating twice — "28 carry no
-  // verdict: 28 awaiting a diff" says the same number either side of a colon.
-  // Each single-reason case gets its own sentence rather than one template
-  // with the reason slotted in: "all that can never be judged" is not English.
+  // With ONE reason the count is not worth stating twice — "28 have not been
+  // judged: 28 awaiting a code change" says the same number either side of a
+  // colon. Each single-reason case gets its own sentence rather than one
+  // template with the reason slotted in: "all that can never be judged" is
+  // not English.
   const n = o.unjudgeable;
   if (parts.length === 1) {
     // The two singular/plural forms differ by more than a verb here — the
-    // negation moves. `agree(n, 'it has', 'none of them has') + ' an inline
-    // thread'` rendered "it HAS an inline thread" at n=1, the exact opposite
+    // negation moves. `agree(n, 'it has', 'none of them has') + ' a comment
+    // thread'` rendered "it HAS a comment thread" at n=1, the exact opposite
     // of the fact, which is why these are written out rather than assembled.
     // ORDER IS LOAD-BEARING: `untraceable === 0` with `noFileAnchor > 0`
     // makes `reconciled` false while the only real reason anything is
-    // unjudged is that it awaits a diff. Testing the unreconciled case first
-    // would call a plain diff-wait unexplainable. Pinned by "ORDER:
+    // unjudged is that it is awaiting a code change. Testing the unreconciled
+    // case first would call a plain wait unexplainable. Pinned by "ORDER:
     // awaiting-a-diff is tested BEFORE the unreconciled check".
     if (o.awaitingDiff > 0) {
-      return `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict, awaiting a diff to judge against.`;
+      return `${head} — ${n} ${agree(n, 'has', 'have')} not been judged yet, awaiting a code change to judge against.`;
     }
     if (!o.traceability.reconciled) {
-      return `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict and never can, for a reason this card has not established (see the caveat above).`;
+      return `${head} — ${n} ${agree(n, 'has', 'have')} not been judged and never can be, for a reason this card has not established (see the caveat above).`;
     }
-    return `${head} — ${n} ${agree(n, 'carries', 'carry')} no verdict and never can: ` +
-      (n === 1 ? 'it has no inline thread.' : 'none of them has an inline thread.');
+    return `${head} — ${n} ${agree(n, 'has', 'have')} not been judged and never can be: ` +
+      (n === 1 ? 'it has no comment thread in the pull request.' : 'none of them has a comment thread in the pull request.');
   }
   // Both parts non-empty here, so `n` is at least 2 and the plural is safe —
   // asserted by a test rather than left to this comment.
-  return `${head} — ${n} carry no verdict: ${parts.join(', ')}.`;
+  return `${head} — ${n} have not been judged: ${parts.join(', ')}.`;
 }
 
 /** The `did` breakdown as ordered rows. Zero-count labels are KEPT: a missing
@@ -190,7 +204,7 @@ export function describeEngagement(e: ReviewValueEngagement, o: ReviewValueOutco
       : '';
   const detail =
     e.engagedRate == null
-      ? 'No finding in this window carries an engagement signal either way.'
+      ? 'Nothing was recorded about replies for any of these, so this card cannot say whether anyone responded.'
       : `${e.engaged} drew a written response (thread reply or PR discussion), ${e.silent} drew none — ` +
         `${formatPct(e.engagedRate)} of the ${countOf(denominator, 'finding')} where engagement could be read.${contrast}`;
   const missing: string[] = [];
@@ -270,8 +284,8 @@ export function describeDisputed(d: ReviewValueDisputed, o: ReviewValueOutcome):
   // whole point of the line, so it is said in words too.
   const zeroClause =
     count === 0
-      ? 'A measured zero, not an absence of measurement: no finding carrying a said label in this window was ' +
-        'disputed as factually wrong. '
+      ? 'This is a real zero, not a gap in the data: none of the problems that were checked was disputed as ' +
+        'wrong. '
       : '';
 
   return {
@@ -331,7 +345,7 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
   // all and `s.note` (which is about the per-item figure) must not render.
   const floorClause =
     s.numeratorState === 'floor'
-      ? ` ${s.reviewsMissingCost} of ${countOf(s.reviewCount, 'review')} ${agree(s.reviewsMissingCost, 'carries', 'carry')} no recorded cost, so this total is a FLOOR, not a complete sum.`
+      ? ` ${s.reviewsMissingCost} of ${countOf(s.reviewCount, 'review')} ${agree(s.reviewsMissingCost, 'has', 'have')} no recorded cost, so the real total is at least the figure shown, not a complete sum.`
       : '';
 
   const noCostRecorded = s.reviewCount > 0 && s.reviewsMissingCost === s.reviewCount;
@@ -509,7 +523,7 @@ export function buildReviewValuePanelView(state: FetchState<ReviewValueStats>): 
       return {
         status: 'empty',
         message:
-          'No classified findings in this window. Reviews may still have run — this table only holds read-band findings on PRs that have settled, classified by the outcome sweep.',
+          'No classified findings in this window. Reviews may still have run — this table holds only critical and major problems on pull requests that have been merged or closed, and only once a scheduled job has checked them.',
         data: null,
       };
     case 'ready':
@@ -666,6 +680,7 @@ export function ReviewValuePanel() {
         <h3 class="stats-slot__title">Review value</h3>
         <span class="stats-slot__window" title="Time window this section reads">{window}</span>
       </div>
+      <CardGlossary terms={TERMS} />
       {view.status !== 'ready' ? (
         <p class={`stats-slot__status-text ${view.status === 'error' ? 'stats-slot__status-text--error' : ''}`}>{view.message}</p>
       ) : (
