@@ -851,17 +851,16 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow, popul
       orchestratorSharePctMax: totalCost > 0 ? (orchestratorCost / totalCost) * 100 : null,
       coverage: computeSubAgentCoverage(rows.map((r) => r.sub_agents)),
       note:
-        'subAgentCostUsdMin sums sub_agents[*].apportionedCostUsd (a model\'s total cost shared out by measured ' +
-        "token count among its COUNTED contributors — see SubAgentUsage in src/types/pipeline.types.ts). That sum " +
-        'always equals the model\'s true total by construction, so a dispatch missing from the sub_agents roster ' +
-        "(a known, nondeterministic undercount vs tool_calls->'Agent' — see /api/stats/integrity) does not merely " +
-        'go uncounted: its cost is forced into orchestratorCostUsdMax instead. The bias is one-directional and ' +
-        'not a rounding choice — subAgentCostUsdMin can only read low and orchestratorCostUsdMax can only read high. ' +
-        'A SECOND, distinct cause — instrumentation coverage, not roster undercount — has the same one-directional ' +
-        'effect: sub_agents capture is a recent addition to the write path, so a row from before it existed has NO ' +
-        'sub_agents object at all, regardless of how much it actually dispatched. See coverage for how much of ' +
-        'this split rests on rows that predate that capture entirely, as opposed to rows where capture ran but ' +
-        'undercounted the roster.',
+        'The sub-agent figure sums each sub-agent\'s share of a model\'s cost, split by measured token count among ' +
+        'the sub-agents whose telemetry was actually captured. That sum always accounts for the model\'s full true ' +
+        'cost, so a sub-agent missing from the roster (a known, nondeterministic undercount — see the Dispatch ' +
+        'section on the integrity card) is not simply left uncounted: its cost is folded into the orchestrator ' +
+        'figure instead. The bias only ever runs one way, not a rounding choice — the sub-agent figure can only ' +
+        'read too low, and the orchestrator figure can only read too high. A second, separate cause has the same ' +
+        'one-directional effect: capturing sub-agent telemetry at all is a recent addition, so a review from ' +
+        'before it existed has none recorded, no matter how much it actually dispatched. See the coverage figure ' +
+        'above for how much of this split comes from reviews that predate telemetry entirely, versus reviews ' +
+        'where telemetry ran but still undercounted the roster.',
     },
     costPerReadBandItem: computeCostPerReadBandItem(rows.map((r) => ({ costUsd: r.cost_usd, findingsList: r.findings_list }))),
     modelBreakdown: aggregateModelUsage(rows.map((r) => r.model_usage)),
@@ -1057,11 +1056,11 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, 
         // buildDispatchSectionView) passes it through verbatim rather than
         // hand-writing its own copy, so there is exactly one place this
         // sentence can drift from reality.
-        "tool_calls->'Agent' is the authoritative dispatch count. sub_agents roster undercounts nondeterministically " +
-        '— never report roster count alone as "how many agents ran". A high mismatch rate is the ORDINARY case here, ' +
-        'not a sign anything broke — this is a known instrument caveat, not a new problem. medianDispatch/p90Dispatch ' +
-        "are computed over EVERY row in the window (dispatchSampleSize == sampleSize by construction): a row with no " +
-        "'Agent' key is a real zero-dispatch review (e.g. the cheap sanity path), zero-filled rather than excluded.",
+        'Recorded tool activity is the dispatch count to trust here, not the agent roster: the roster undercounts ' +
+        'nondeterministically, so never report the roster size alone as "how many agents ran". A high mismatch ' +
+        'rate is the ordinary case here, not a sign anything broke — this is a known instrument caveat, not a new ' +
+        'problem. The median and p90 figures are computed over every row in the window: a row with no recorded ' +
+        'activity is a real zero-dispatch review (e.g. the cheap sanity path), counted as zero rather than left out.',
     },
     inferredEffort: {
       inferred: true,
@@ -1548,7 +1547,7 @@ function buildSpendNote(numerator: NumeratorState, denominator: DenominatorState
       ? reviewCount === 0
         ? 'No review on these pull requests has a recorded cost, so this shows zero rather than a real figure.'
         : denominator === 'settled'
-          ? 'This figure is settled. Every review on these pull requests has a recorded cost, and every problem has ' +
+          ? 'This figure is final. Every review on these pull requests has a recorded cost, and every problem has ' +
             'been checked, so it will not move as more checking happens.'
           : 'The real figure is at most this much. Every review has a recorded cost, but not every problem has been ' +
             'checked yet, and each one confirmed acted on brings this figure down.'
@@ -1791,8 +1790,8 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
     // sentence before it.
     return (
       'No finding was traced in this window at all, so there is nothing to count. Reported as not measured ' +
-      'rather than as zero: counting this as zero would say nobody disputed a finding, and nothing here ' +
-      'checked whether anyone did.'
+      'rather than as zero: counting this as zero would say nobody disputed a finding, and nobody here ' +
+      'ever gave an answer on whether anyone did.'
     );
   }
 
@@ -1806,7 +1805,7 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   // older than the said-guard HAS produced exactly that combination in
   // production — `said` null beside a non-`split` confidence, on rows whose
   // ballots were still recorded in `said_votes` — and folding those into
-  // "nothing was ever checked for them" would have been false. Nobody has
+  // "the team never gave an answer for them" would have been false. Nobody has
   // verified this column's domain beyond what the current writer can produce.
   const unrecognized = findings.length - tied - noBallotAtAll.length;
 
@@ -1826,13 +1825,13 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   if (notYetClassified > 0) {
     parts.push(
       `${subject(notYetClassified)} ${agree(notYetClassified, 'has', 'have')} a reply on the thread or in the ` +
-      `pull request discussion, but ${agree(notYetClassified, 'has', 'have')} not been checked yet`,
+      `pull request discussion, but ${agree(notYetClassified, 'has', 'have')} not had an answer recorded yet`,
     );
   }
   if (noEngagedEvidence > 0) {
     parts.push(
-      `${subject(noEngagedEvidence)} ${agree(noEngagedEvidence, 'has', 'have')} no reply on record, so nothing ` +
-      `was ever checked for ${itThem(noEngagedEvidence)}`,
+      `${subject(noEngagedEvidence)} ${agree(noEngagedEvidence, 'has', 'have')} no reply on record, so the team ` +
+      `never gave an answer for ${itThem(noEngagedEvidence)}`,
     );
   }
   if (unrecognized > 0) {
@@ -1851,7 +1850,7 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   // The reason NOT to print zero differs by state, and only the pair (`tied`,
   // `unrecognized`) selects which tail renders. `notYetClassified` and
   // `noEngagedEvidence` cannot change it: both carry `saidConfidence` null,
-  // which is no vote cast, so they answer "was anything checked here" the
+  // which is no vote cast, so they answer "did anyone give an answer here" the
   // same way. Each branch asserts only what its own gate establishes — partial
   // is fine here, false is not.
   //
@@ -1864,29 +1863,30 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   // invisible to the type system and every test here would go green on it.
   //
   // Two of the four then scope a claim to the whole window rather than staying
-  // silent about the buckets they do not gate on: the fall-through's "nothing
-  // HERE checked whether anyone did" (sound, because that branch is reached
-  // only when `tied` and `unrecognized` are both 0, i.e. every row carries
-  // `saidConfidence` null) and the `unrecognized`-only branch's "cannot tell
-  // whether ANYTHING was checked" — and that second scope is exactly why a tie
-  // in the mix falsifies it and earns the combined tail below.
+  // silent about the buckets they do not gate on: the fall-through's "nobody
+  // HERE ever gave an answer on whether anyone did" (sound, because that branch
+  // is reached only when `tied` and `unrecognized` are both 0, i.e. every row
+  // carries `saidConfidence` null) and the `unrecognized`-only branch's "cannot
+  // tell whether the team EVER gave an answer" — and that second scope is
+  // exactly why a tie in the mix falsifies it and earns the combined tail below.
   //
   // `tied === 0` — the fall-through case at the bottom — is a NECESSARY
-  // condition for "nothing here checked whether anyone did", not a sufficient
-  // one: an earlier version of this gate used it as sufficient and leaked that
-  // claim into windows containing an `unrecognized` row too. A row lands in
-  // `unrecognized` because its `saidConfidence` is neither `'split'` nor null,
-  // which — per the comment on `unrecognized` above — is exactly the signature a
-  // stale pre-guard writer leaves on a row it graded three votes for. This card
-  // cannot tell whether that check happened, so it must not claim either way.
+  // condition for "nobody here ever gave an answer on whether anyone did", not
+  // a sufficient one: an earlier version of this gate used it as sufficient and
+  // leaked that claim into windows containing an `unrecognized` row too. A row
+  // lands in `unrecognized` because its `saidConfidence` is neither `'split'`
+  // nor null, which — per the comment on `unrecognized` above — is exactly the
+  // signature a stale pre-guard writer leaves on a row it graded three votes
+  // for. This card cannot tell whether that check happened, so it must not
+  // claim either way.
   //
-  // But "cannot tell whether ANYTHING was checked" is not a statement that
+  // But "cannot tell whether the team EVER gave an answer" is not a statement that
   // survives every mix containing an unrecognized row either — the fix that
   // closed the leak above claimed it did, and it is false wherever a tie is
   // also present: `said_confidence = 'split'` IS a check this card can confirm
   // ran, and does confirm, in the sentence immediately before this one in the
-  // rendered string. "Anything" would have to mean "everything" for both halves
-  // to stand, which is not what it says. So that mix gets its own tail, naming
+  // rendered string. "Ever" would have to mean "always" for both halves to
+  // stand, which is not what it says. So that mix gets its own tail, naming
   // the tie AND scoping the residual doubt to the rows it actually covers:
   // neither fact is dropped, neither is stretched over rows it does not hold
   // for.
@@ -1918,13 +1918,13 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   const zeroWouldMisstate =
     tied > 0 && unrecognized > 0
       ? 'counting this as zero would say nobody disputed these; the votes this card can read did not agree on ' +
-        `an answer, and this card cannot tell what was checked for the ${agree(unrecognized, 'one', 'ones')} ` +
+        `an answer, and this card cannot tell what answer the team gave for the ${agree(unrecognized, 'one', 'ones')} ` +
         'whose stored result it cannot read'
       : unrecognized > 0
-        ? 'counting this as zero would say nobody disputed these, and this card cannot tell whether anything was checked'
+        ? 'counting this as zero would say nobody disputed these, and this card cannot tell whether the team ever gave an answer'
         : tied > 0
           ? 'counting this as zero would say nobody disputed these, and the votes that ran did not agree on an answer'
-          : 'counting this as zero would say nobody disputed these, and nothing here checked whether anyone did';
+          : 'counting this as zero would say nobody disputed these, and nobody here ever gave an answer on whether anyone did';
 
   return (
     'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +

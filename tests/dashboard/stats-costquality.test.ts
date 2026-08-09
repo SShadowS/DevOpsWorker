@@ -487,6 +487,53 @@ describe('Task 8 — cost/quality prose: schema names gone, shared constants imp
 });
 
 // ---------------------------------------------------------------------------
+// Task 9 sweep — the read-band gauge and severity-split summary were outside
+// Task 8's ~35-string list (it named the severity legend divider and the
+// "Cost per ..." title only) and still said "read-band"/"below-band" in the
+// gauge title, its aria-label, its own summary text, the severity split
+// line, and the below-band section title. Same "critical/major" replacement
+// Task 8 already applied elsewhere on this card, so the term has one name.
+// ---------------------------------------------------------------------------
+
+describe('Task 9 sweep — read-band gauge and severity split, missed by Task 8', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../../src/dashboard/client/components/stats-costquality.tsx', import.meta.url)),
+    'utf-8',
+  );
+
+  test('the read-band gauge title names critical/major, not "read-band"', () => {
+    expect(src).toContain('title="Findings health (avg critical+major findings per review)"');
+    expect(src).not.toMatch(/title="Read-band health/);
+  });
+
+  test("the gauge's own summary text and aria-label both say critical/major, not \"read-band items\"", () => {
+    // Scoped to the actual template literals, not the file at large — the
+    // section-header comment above (line ~150) still says "read-band gauge"
+    // and that is fine (comments, not rendered prose, are out of scope).
+    expect(src).toContain('text: `avg critical/major findings per review:');
+    expect(src).not.toContain('text: `avg read-band items');
+    expect(src).toContain('aria-label={`Average critical/major findings per review:');
+    expect(src).not.toContain('aria-label={`Average read-band items');
+  });
+
+  test('the severity-split summary line says critical/major and minor/nitpick, not "read-band"/"below-band"', () => {
+    // Scoped to the JSX summary line, not the chart-choices comment near the
+    // top of the file, which legitimately still explains the read-band/
+    // below-band split by name for a developer reading the source.
+    expect(src).toContain('Critical/major: <strong>{split.readBandCount}</strong>');
+    expect(src).toContain('minor/nitpick:');
+    expect(src).not.toContain('Read-band (critical+major): <strong>{split.readBandCount}</strong>');
+    expect(src).not.toContain('· below-band');
+  });
+
+  test('the below-band section title and its note say critical/major, not "read-band"/"below-band"', () => {
+    expect(src).toContain('title="Reviews with zero critical/major findings"');
+    expect(src).not.toMatch(/title="Reviews with zero read-band findings"/);
+    expect(src).not.toContain('below-band reviews counted here');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Read-band coverage — fix round 1: the gauge's average can be computed over
 // a small fraction of the window (findings_list is a recently-added column,
 // same structural issue sub_agents coverage already discloses on the cost

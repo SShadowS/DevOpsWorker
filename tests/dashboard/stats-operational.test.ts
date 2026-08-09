@@ -537,15 +537,18 @@ describe('describeToolMixAverageNote (485)', () => {
   // back in unnoticed.
   test('n=0', () => expect(describeToolMixAverageNote(0)).toBe(
     "Average per review is divided by all 0 reviews in this window, not just the reviews that called a given " +
-    "tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a shrunk denominator.",
+    "tool — a rarely-used tool reads as a correspondingly low average, never one inflated by dividing by a " +
+    "smaller count instead.",
   ));
   test('n=1', () => expect(describeToolMixAverageNote(1)).toBe(
     "Average per review is divided by all 1 review in this window, not just the reviews that called a given " +
-    "tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a shrunk denominator.",
+    "tool — a rarely-used tool reads as a correspondingly low average, never one inflated by dividing by a " +
+    "smaller count instead.",
   ));
   test('n=2', () => expect(describeToolMixAverageNote(2)).toBe(
     "Average per review is divided by all 2 reviews in this window, not just the reviews that called a given " +
-    "tool — a rarely-used tool reads as a correspondingly low average, never one inflated by a shrunk denominator.",
+    "tool — a rarely-used tool reads as a correspondingly low average, never one inflated by dividing by a " +
+    "smaller count instead.",
   ));
   test('no "(s)" placeholder survives', () => expect(describeToolMixAverageNote(1)).not.toContain('(s)'));
   test('no internal function or file name survives in the rendered sentence', () => {
@@ -664,10 +667,21 @@ describe('operational card structure — secondary net', () => {
     // Restricted to the return-value line, not the whole file — comments
     // legitimately name `aggregateToolMix`/`stats.ts` as developer
     // documentation; only the RETURNED string may never contain them.
-    const returnLine = cardSrc.split('\n').find((l) => l.includes('shrunk denominator'));
+    const returnLine = cardSrc.split('\n').find((l) => l.includes('smaller count instead'));
     expect(returnLine).toBeDefined();
     expect(returnLine).not.toContain('aggregateToolMix');
     expect(returnLine).not.toContain('stats.ts');
+  });
+
+  // Task 9 sweep: the same returned sentence also said "a shrunk denominator"
+  // — a math/schema-reasoning term, not the plain "divided by fewer reviews"
+  // it now says. Restricted to the return line for the same reason as above:
+  // the JSDoc comment two lines up legitimately still says "denominator"
+  // describing what the function does, which is not user-facing.
+  test('the returned sentence never says "denominator"', () => {
+    const returnLine = cardSrc.split('\n').find((l) => l.includes('smaller count instead'));
+    expect(returnLine).toBeDefined();
+    expect(returnLine).not.toContain('denominator');
   });
 
   // Step 3: "turn" is defined in the card's own glossary rather than

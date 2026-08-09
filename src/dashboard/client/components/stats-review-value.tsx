@@ -210,7 +210,7 @@ export function describeEngagement(e: ReviewValueEngagement, o: ReviewValueOutco
   const missing: string[] = [];
   if (e.unrecorded > 0) {
     missing.push(
-      `${countOf(e.unrecorded, 'traced finding')} ${agree(e.unrecorded, 'carries', 'carry')} no engagement signal ` +
+      `${countOf(e.unrecorded, 'traced finding')} ${agree(e.unrecorded, 'has', 'have')} no engagement signal ` +
       'this code classifies — in neither bucket, not folded into "no reply"',
     );
   }
@@ -274,8 +274,8 @@ export function describeDisputed(d: ReviewValueDisputed, o: ReviewValueOutcome):
   const unlabelled = o.findingsRaised - d.saidRecorded;
   const contrast =
     unlabelled > 0
-      ? ` The other ${countOf(unlabelled, 'raised finding')} ${agree(unlabelled, 'carries', 'carry')} no said label ` +
-        'at all, which is not the same as carrying no dispute.'
+      ? ` The other ${countOf(unlabelled, 'raised finding')} ${agree(unlabelled, 'has', 'have')} no said label ` +
+        'at all, which is not the same as having no dispute.'
       : '';
 
   // A measured zero must not look like the not-measured line one paragraph
@@ -320,8 +320,8 @@ export function describeDisputed(d: ReviewValueDisputed, o: ReviewValueOutcome):
     // so the sentence states the policy and the denominator, and claims
     // nothing about how big n happens to be.
     detail:
-      `${zeroClause}Reported as a count, not a rate: the denominator is the ` +
-      `${countOf(d.saidRecorded, 'finding')} carrying a said label.${contrast}`,
+      `${zeroClause}Reported as a count, not a rate: it is counted against the ` +
+      `${countOf(d.saidRecorded, 'said-labelled finding')}.${contrast}`,
     // The `did` cross-tab, disclosed only when there is something to disclose.
     // At `unjudged === 0` there is no limitation to state and the clause would
     // be a category that exists and is empty. It claims only what a null `did`
@@ -340,13 +340,13 @@ export function describeDisputed(d: ReviewValueDisputed, o: ReviewValueOutcome):
 function describeDisputedUnjudged(count: number, unjudged: number): string {
   if (unjudged === count) {
     return count === 1
-      ? 'The finding disputed here carries no verdict on the diff, so this card cannot say whether the branch acted ' +
+      ? 'The finding disputed here has no verdict on the diff, so this card cannot say whether the branch acted ' +
         'on it anyway.'
-      : `None of the ${count} findings disputed here carries a verdict on the diff, so this card cannot say whether ` +
+      : `None of the ${count} findings disputed here has a verdict on the diff, so this card cannot say whether ` +
         'the branch acted on any of them anyway.';
   }
   return (
-    `${unjudged} of the ${countOf(count, 'finding')} disputed here ${agree(unjudged, 'carries', 'carry')} no verdict ` +
+    `${unjudged} of the ${countOf(count, 'finding')} disputed here ${agree(unjudged, 'has', 'have')} no verdict ` +
     `on the diff, so this card cannot say whether the branch acted on ${itThem(unjudged)} anyway.`
   );
 }
@@ -375,7 +375,7 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
       label: 'Total spend this window',
       value: 'not recorded',
       detail:
-        `None of the ${countOf(s.reviewCount, 'review')} on the PRs these findings came from carries a recorded ` +
+        `None of the ${countOf(s.reviewCount, 'review')} on the PRs these findings came from has a recorded ` +
         'cost, so there is no spend to report and no per-item figure to derive from it. This is missing data, not a ' +
         'measured zero.',
       caveat: null,
@@ -583,7 +583,7 @@ function RaisedAndActedOnSection({ o }: { o: ReviewValueOutcome }) {
     <ReviewValueSection title="Findings raised, and what happened to them" status="neutral">
       <div class="review-value-figure review-value-figure--neutral">
         <div class="review-value-figure__value">{o.findingsRaised}</div>
-        <div class="review-value-figure__label">Read-band findings raised</div>
+        <div class="review-value-figure__label">Findings raised</div>
         <p class="review-value-section__summary">{o.scopeNote}</p>
         {/* The spec's fourth stated limit, rendered rather than buried — and
             with its measured size, not a rule of thumb. The caveat LABEL only

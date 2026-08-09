@@ -340,9 +340,9 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
-        '5 findings have no reply on record, so nothing was ever checked for them. Reported as not measured ' +
-        'rather than as zero: counting this as zero would say nobody disputed these, and nothing here checked ' +
-        'whether anyone did.',
+        '5 findings have no reply on record, so the team never gave an answer for them. Reported as not ' +
+        'measured rather than as zero: counting this as zero would say nobody disputed these, and nobody here ' +
+        'ever gave an answer on whether anyone did.',
       );
     });
 
@@ -361,20 +361,20 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
-        '4 findings have a reply on the thread or in the pull request discussion, but have not been checked ' +
-        'yet. Reported as not measured rather than as zero: counting this as zero would say nobody disputed ' +
-        'these, and nothing here checked whether anyone did.',
+        '4 findings have a reply on the thread or in the pull request discussion, but have not had an answer ' +
+        'recorded yet. Reported as not measured rather than as zero: counting this as zero would say nobody ' +
+        'disputed these, and nobody here ever gave an answer on whether anyone did.',
       );
     });
 
     // NO LIVE EXAMPLE as of 2026-08-08 (0 of 72 said-labelled rows are a
     // tie) — reachable in principle (`SaidLabel` has no tie value, so a tie
     // stores `said = null, said_confidence = 'split'`), forced here. Note the
-    // closing clause: "were voted on" and "nothing here checked whether anyone
-    // did" cannot both be true in the same sentence, so the tied branch gets
-    // its own tail. Note too what the tail does NOT say: not "the three
-    // checks" — three is the per-finding vote count, and this window of three
-    // tied findings ran nine.
+    // closing clause: "were voted on" and "nobody here ever gave an answer on
+    // whether anyone did" cannot both be true in the same sentence, so the
+    // tied branch gets its own tail. Note too what the tail does NOT say: not
+    // "the three checks" — three is the per-finding vote count, and this
+    // window of three tied findings ran nine.
     test('PURE: tied — no live example, forced fixture', () => {
       const rows = [
         finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' }),
@@ -391,10 +391,10 @@ describe('computeReviewValue — disputed as factually wrong', () => {
 
     test('count-of-1 for each pure state', () => {
       const noEngaged = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
-      expect(noEngaged).toContain('1 finding has no reply on record, so nothing was ever checked for it.');
+      expect(noEngaged).toContain('1 finding has no reply on record, so the team never gave an answer for it.');
 
       const notYetClassified = compute([finding({ saidConfidence: null, saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
-      expect(notYetClassified).toContain('1 finding has a reply on the thread or in the pull request discussion, but has not been checked yet');
+      expect(notYetClassified).toContain('1 finding has a reply on the thread or in the pull request discussion, but has not had an answer recorded yet');
 
       const tied = compute([finding({ saidConfidence: 'split', saidEvidence: 'thread-reply' })], spend()).disputedAsWrong.reason!;
       expect(tied).toContain('1 finding was voted on and the votes did not agree.');
@@ -415,7 +415,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         finding({ saidConfidence: null, saidEvidence: null }),
       ];
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
-      expect(reason).toContain('3 findings have no reply on record, so nothing was ever checked for them');
+      expect(reason).toContain('3 findings have no reply on record, so the team never gave an answer for them');
       expect(reason).not.toContain('a reply on the thread or in the pull request discussion');
     });
 
@@ -424,17 +424,18 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // 'unanimous'/'majority'/'split'/'single-vote'/'none' — more than the two
     // values {null, 'split'} this line's fast path assumes for a null `said`.
     // A row that matches neither positive test must not be silently absorbed
-    // into "nothing was ever checked for them", which it has not earned: it
-    // goes to an explicit residual bucket instead, so the total never silently
-    // drops findings the way `findings.length - tied` would have.
+    // into "the team never gave an answer for them", which it has not earned:
+    // it goes to an explicit residual bucket instead, so the total never
+    // silently drops findings the way `findings.length - tied` would have.
     //
-    // The closing clause here is "cannot tell", NOT "nothing here checked
-    // whether anyone did" — a prior round left the tail gated on `tied === 0`
-    // alone, which let it leak into exactly this state. A `saidConfidence` of
-    // `'unanimous'` beside a null `said` is the signature of a writer that
-    // graded votes and dropped the label (per the comment on `unrecognized`),
-    // so this card has no basis for "nothing checked" — which is why the tail
-    // says it cannot tell either way rather than asserting the opposite.
+    // The closing clause here is "cannot tell", NOT "nobody here ever gave an
+    // answer on whether anyone did" — a prior round left the tail gated on
+    // `tied === 0` alone, which let it leak into exactly this state. A
+    // `saidConfidence` of `'unanimous'` beside a null `said` is the signature
+    // of a writer that graded votes and dropped the label (per the comment on
+    // `unrecognized`), so this card has no basis for "no answer given" — which
+    // is why the tail says it cannot tell either way rather than asserting the
+    // opposite.
     // "Cannot tell" is the whole window's state HERE only because no tie is
     // present: with one, the card could confirm a check ran, and the tail names
     // it and scopes this doubt to the unrecognized rows instead (see below).
@@ -444,7 +445,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
         '1 finding has a stored result this card cannot read. Reported as not measured rather than as zero: ' +
-        'counting this as zero would say nobody disputed these, and this card cannot tell whether anything was checked.',
+        'counting this as zero would say nobody disputed these, and this card cannot tell whether the team ever gave an answer.',
       );
     });
 
@@ -460,18 +461,18 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = o.disputedAsWrong.reason!;
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
-        '1 finding was voted on and the votes did not agree, 1 has no reply on record, so nothing was ever ' +
-        'checked for it, and 2 have a stored result this card cannot read. Reported as not measured rather ' +
+        '1 finding was voted on and the votes did not agree, 1 has no reply on record, so the team never gave ' +
+        'an answer for it, and 2 have a stored result this card cannot read. Reported as not measured rather ' +
         'than as zero: counting this as zero would say nobody disputed these; the votes this card can read did ' +
-        'not agree on an answer, and this card cannot tell what was checked for the ones whose stored result ' +
-        'it cannot read.',
+        'not agree on an answer, and this card cannot tell what answer the team gave for the ones whose stored ' +
+        'result it cannot read.',
       );
     });
 
     // A tie AND an unrecognized row in the same window: the tail must render
     // BOTH facts. An earlier round let the residual clause win outright, so the
     // string asserted votes were cast and did not agree and then, in the very
-    // next sentence, that it "cannot tell whether ANYTHING was checked" —
+    // next sentence, that it "cannot tell whether the team EVER gave an answer" —
     // asserting and denying the same proposition. Scoping the residual WITHOUT
     // naming the votes is the mirror-image defect: it drops the one thing in
     // the window this card positively knows was checked. So: votes named,
@@ -488,18 +489,18 @@ describe('computeReviewValue — disputed as factually wrong', () => {
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
         '1 finding was voted on and the votes did not agree and 1 has a stored result this card cannot read. ' +
         'Reported as not measured rather than as zero: counting this as zero would say nobody disputed these; ' +
-        'the votes this card can read did not agree on an answer, and this card cannot tell what was checked ' +
-        'for the one whose stored result it cannot read.',
+        'the votes this card can read did not agree on an answer, and this card cannot tell what answer the ' +
+        'team gave for the one whose stored result it cannot read.',
       );
       // The tie survives, scoped to the votes this card can read — the
       // unrecognized row beside it carries votes that ran AND agreed.
       expect(withTie).toContain('the votes this card can read did not agree on an answer');
       expect(withTie).not.toContain('the votes that ran did not agree on an answer');
       // ...the residual doubt is scoped to the rows it covers, not to the window...
-      expect(withTie).toContain('cannot tell what was checked for the one whose');
-      // ...and neither the window-wide denial nor "nothing checked" appears.
-      expect(withTie).not.toContain('cannot tell whether anything was checked');
-      expect(withTie).not.toContain('nothing here checked whether anyone did');
+      expect(withTie).toContain('cannot tell what answer the team gave for the one whose');
+      // ...and neither the window-wide denial nor "no answer given" appears.
+      expect(withTie).not.toContain('cannot tell whether the team ever gave an answer');
+      expect(withTie).not.toContain('nobody here ever gave an answer on whether anyone did');
     });
 
     // Bare numerals after the first fragment — "2 findings…and 3 findings…"
@@ -516,9 +517,9 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
-        '2 findings were voted on and the votes did not agree and 3 have no reply on record, so nothing was ' +
-        'ever checked for them. Reported as not measured rather than as zero: counting this as zero would say ' +
-        'nobody disputed these, and the votes that ran did not agree on an answer.',
+        '2 findings were voted on and the votes did not agree and 3 have no reply on record, so the team never ' +
+        'gave an answer for them. Reported as not measured rather than as zero: counting this as zero would ' +
+        'say nobody disputed these, and the votes that ran did not agree on an answer.',
       );
     });
 
@@ -533,10 +534,10 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute(rows, spend()).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
-        '2 findings have a reply on the thread or in the pull request discussion, but have not been checked ' +
-        'yet and 3 have no reply on record, so nothing was ever checked for them. Reported as not measured ' +
-        'rather than as zero: counting this as zero would say nobody disputed these, and nothing here checked ' +
-        'whether anyone did.',
+        '2 findings have a reply on the thread or in the pull request discussion, but have not had an answer ' +
+        'recorded yet and 3 have no reply on record, so the team never gave an answer for them. Reported as ' +
+        'not measured rather than as zero: counting this as zero would say nobody disputed these, and nobody ' +
+        'here ever gave an answer on whether anyone did.',
       );
     });
 
@@ -553,9 +554,9 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       expect(reason).toBe(
         'No problem here has a recorded answer for what the team said about it, so there is nothing to count. ' +
         '1 finding was voted on and the votes did not agree, 2 have a reply on the thread or in the pull ' +
-        'request discussion, but have not been checked yet, and 3 have no reply on record, so nothing was ever ' +
-        'checked for them. Reported as not measured rather than as zero: counting this as zero would say ' +
-        'nobody disputed these, and the votes that ran did not agree on an answer.',
+        'request discussion, but have not had an answer recorded yet, and 3 have no reply on record, so the ' +
+        'team never gave an answer for them. Reported as not measured rather than as zero: counting this as ' +
+        'zero would say nobody disputed these, and the votes that ran did not agree on an answer.',
       );
     });
 
@@ -565,8 +566,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const reason = compute([], spend(), { readBandRaised: 0, noFileAnchor: 0 }).disputedAsWrong.reason!;
       expect(reason).toBe(
         'No finding was traced in this window at all, so there is nothing to count. Reported as not measured ' +
-        'rather than as zero: counting this as zero would say nobody disputed a finding, and nothing here ' +
-        'checked whether anyone did.',
+        'rather than as zero: counting this as zero would say nobody disputed a finding, and nobody here ' +
+        'ever gave an answer on whether anyone did.',
       );
       // "a finding", not "these": there is no window contents for a
       // demonstrative to point at here.
@@ -589,18 +590,19 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       }
     });
 
-    // The closing "why not zero" clause must never deny that anything here was
-    // checked where a tie is in the mix — votes WERE cast and asked exactly
+    // The closing "why not zero" clause must never deny that an answer was
+    // given here where a tie is in the mix — votes WERE cast and asked exactly
     // this question, and the string says so in the sentence right before the
     // denial. There are two ways to phrase that denial and this card has
-    // shipped both: "nothing here checked whether anyone did" outright, and
-    // "cannot tell whether ANYTHING was checked", which denies the card's own
-    // knowledge of a check it just reported. Both are barred wherever a tie is
-    // present, whatever else is in the window. DENIALS below tracks the CURRENT
-    // wording — reword a tail and these substrings stop matching anything, so
-    // they must be re-derived from the new wording, not left to pass vacuously.
+    // shipped both: "nobody here ever gave an answer on whether anyone did"
+    // outright, and "cannot tell whether the team EVER gave an answer", which
+    // denies the card's own knowledge of an answer it just reported. Both are
+    // barred wherever a tie is present, whatever else is in the window.
+    // DENIALS below tracks the CURRENT wording — reword a tail and these
+    // substrings stop matching anything, so they must be re-derived from the
+    // new wording, not left to pass vacuously.
     test('the closing clause never denies a check happened where a tie is present', () => {
-      const DENIALS = ['nothing here checked whether anyone did', 'cannot tell whether anything was checked'];
+      const DENIALS = ['nobody here ever gave an answer on whether anyone did', 'cannot tell whether the team ever gave an answer'];
       // Two forms, because the combined tail scopes the tie to the votes this
       // card can read (an unrecognized row in the window carries votes that ran
       // AND agreed, so the universal would over-claim). Exactly one must
@@ -631,7 +633,7 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       // ...and conversely, NEITHER form of "the votes did not agree" may appear
       // where there is no tie — it would assert a check that never happened.
       const noTie = compute([finding({ saidConfidence: null, saidEvidence: 'none' })], spend()).disputedAsWrong.reason!;
-      expect(noTie).toContain('nothing here checked whether anyone did');
+      expect(noTie).toContain('nobody here ever gave an answer on whether anyone did');
       for (const form of TIE_NAMED) {
         expect(noTie, `no tie: must not contain "${form}"`).not.toContain(form);
       }
@@ -659,8 +661,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // unrecognized row is present, the narrower "the votes this card can read"
     // where one is — see the constant below for why); an unrecognized row in the
     // mix ⇒ its doubt is voiced, window-wide where there is no tie for it to
-    // contradict and scoped to its own rows where there is; neither ⇒ nothing
-    // here checked. The two tie forms are DELIBERATE, not drift: do not
+    // contradict and scoped to its own rows where there is; neither ⇒ nobody
+    // here answered. The two tie forms are DELIBERATE, not drift: do not
     // "restore consistency" by collapsing them without reading that constant —
     // collapsing them to the universal is how this clause breaks.
     //
@@ -675,12 +677,12 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // is on record there and nothing has read it yet). Flatten that and the
     // table still passes.
     test('all fifteen non-empty bucket combinations render exactly one tail, and it is the true one', () => {
-      const NOTHING_CHECKED =
-        'counting this as zero would say nobody disputed these, and nothing here checked whether anyone did.';
+      const NO_ANSWER_GIVEN =
+        'counting this as zero would say nobody disputed these, and nobody here ever gave an answer on whether anyone did.';
       const TIED_SETTLED =
         'counting this as zero would say nobody disputed these, and the votes that ran did not agree on an answer.';
       const CANNOT_CONFIRM =
-        'counting this as zero would say nobody disputed these, and this card cannot tell whether anything was checked.';
+        'counting this as zero would say nobody disputed these, and this card cannot tell whether the team ever gave an answer.';
       // "the votes THIS CARD CAN READ", not "the votes that ran": this tail
       // renders only where an `unrecognized` row is also present, and such a row
       // CAN carry a `said_confidence` of `'unanimous'`/`'majority'`/
@@ -696,8 +698,8 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       // pinned by the two-unrecognized-row test above.
       const TIED_AND_SCOPED_RESIDUAL =
         'counting this as zero would say nobody disputed these; the votes this card can read did not agree on an ' +
-        'answer, and this card cannot tell what was checked for the one whose stored result it cannot read.';
-      const allTails = [NOTHING_CHECKED, TIED_SETTLED, CANNOT_CONFIRM, TIED_AND_SCOPED_RESIDUAL];
+        'answer, and this card cannot tell what answer the team gave for the one whose stored result it cannot read.';
+      const allTails = [NO_ANSWER_GIVEN, TIED_SETTLED, CANNOT_CONFIRM, TIED_AND_SCOPED_RESIDUAL];
 
       // The "must not also contain" assertions below only mean anything if no
       // tail is a substring of another. Assert that rather than assume it — the
@@ -719,13 +721,13 @@ describe('computeReviewValue — disputed as factually wrong', () => {
 
       const expectedTail: Record<string, string> = {
         'T': TIED_SETTLED,
-        'N': NOTHING_CHECKED,
-        'E': NOTHING_CHECKED,
+        'N': NO_ANSWER_GIVEN,
+        'E': NO_ANSWER_GIVEN,
         'U': CANNOT_CONFIRM,
         'T+N': TIED_SETTLED,
         'T+E': TIED_SETTLED,
         'T+U': TIED_AND_SCOPED_RESIDUAL,
-        'N+E': NOTHING_CHECKED,
+        'N+E': NO_ANSWER_GIVEN,
         'N+U': CANNOT_CONFIRM,
         'E+U': CANNOT_CONFIRM,
         'T+N+E': TIED_SETTLED,
@@ -912,12 +914,18 @@ describe('computeReviewValue — spend', () => {
     );
   });
 
-  test('exact numerator + settled denominator: the note says the figure is settled and will not move', () => {
+  test('exact numerator + settled denominator: the note says the figure is final and will not move', () => {
+    // "final", not "settled": this card's glossary defines "settled" as "the
+    // pull request has been merged or closed" (TERMS in this component file),
+    // but `denominatorState === 'settled'` only requires every RAISED finding
+    // to be judged — reachable on a still-open PR. Reusing "settled" here
+    // would teach the glossary's PR-lifecycle meaning onto a figure that says
+    // nothing about whether the PR itself has merged or closed.
     const o = compute([finding({ did: 'ADDRESSED' })], spend());
     expect(o.spend.numeratorState).toBe('exact');
     expect(o.spend.denominatorState).toBe('settled');
     expect(o.spend.note).toBe(
-      'This figure is settled. Every review on these pull requests has a recorded cost, and every problem has ' +
+      'This figure is final. Every review on these pull requests has a recorded cost, and every problem has ' +
         `been checked, so it will not move as more checking happens. ${TRAILER}`,
     );
   });
@@ -1330,9 +1338,9 @@ describe('describeDisputed', () => {
     expect(line.value).not.toBe('2');
     // Never over raised, which is the number sitting at the top of the card.
     expect(line.value).not.toContain('of 6');
-    expect(line.detail).toContain('the denominator is the 3 findings carrying a said label');
+    expect(line.detail).toContain('it is counted against the 3 said-labelled findings');
     // The raised total is still stated — just not as this figure's denominator.
-    expect(line.detail).toContain('The other 3 raised findings carry no said label at all');
+    expect(line.detail).toContain('The other 3 raised findings have no said label at all');
   });
 
   test('the contrast clause is OMITTED when every raised finding carries a label', () => {
@@ -1353,7 +1361,7 @@ describe('describeDisputed', () => {
     // was corrected for.
     const o = computeReviewValue([finding({ said: 'fixed' })], spend(), { readBandRaised: 4, noFileAnchor: 2 });
     const detail = describeDisputed(o.disputedAsWrong, o).detail;
-    expect(detail).toContain('carry no said label at all, which is not the same as carrying no dispute');
+    expect(detail).toContain('have no said label at all, which is not the same as having no dispute');
     expect(detail).not.toContain('nobody wrote');
     expect(detail).not.toContain('no thread');
   });
@@ -1380,7 +1388,7 @@ describe('describeDisputed', () => {
   test('a denominator of 1 reads as English, and "of 0" is unreachable', () => {
     const one = compute([finding({ said: 'rejected-wrong' })], spend());
     expect(describeDisputed(one.disputedAsWrong, one).value).toBe('1 of 1 said-labelled finding');
-    expect(describeDisputed(one.disputedAsWrong, one).detail).toContain('the 1 finding carrying a said label');
+    expect(describeDisputed(one.disputedAsWrong, one).detail).toContain('the 1 said-labelled finding');
     // `measured` IS `saidRecorded > 0`, so the measured branch can never
     // divide by an empty population — the engagement line's "no readable
     // signal" escape hatch has nothing to guard here.
@@ -1410,7 +1418,7 @@ describe('describeDisputed', () => {
     const o = compute([finding({ said: 'rejected-wrong' }), finding({ said: 'rejected-wrong' })], spend());
     const caveat = describeDisputed(o.disputedAsWrong, o).caveat!;
     expect(o.disputedAsWrong.unjudged).toBe(2);
-    expect(caveat).toContain('None of the 2 findings disputed here carries a verdict on the diff');
+    expect(caveat).toContain('None of the 2 findings disputed here has a verdict on the diff');
     expect(caveat).toContain('cannot say whether the branch acted on any of them anyway');
     // It must NOT promote "no verdict" into "the branch ignored it".
     expect(caveat).not.toContain('ignored');
@@ -1421,7 +1429,7 @@ describe('describeDisputed', () => {
     const o = compute([finding({ said: 'rejected-wrong' })], spend());
     const caveat = describeDisputed(o.disputedAsWrong, o).caveat!;
     expect(caveat).toBe(
-      'The finding disputed here carries no verdict on the diff, so this card cannot say whether the branch acted on it anyway.',
+      'The finding disputed here has no verdict on the diff, so this card cannot say whether the branch acted on it anyway.',
     );
   });
 
@@ -1429,7 +1437,7 @@ describe('describeDisputed', () => {
     const o = compute([finding({ said: 'rejected-wrong' }), finding({ said: 'rejected-wrong', did: 'not' })], spend());
     const caveat = describeDisputed(o.disputedAsWrong, o).caveat!;
     expect(o.disputedAsWrong.unjudged).toBe(1);
-    expect(caveat).toContain('1 of the 2 findings disputed here carries no verdict on the diff');
+    expect(caveat).toContain('1 of the 2 findings disputed here has no verdict on the diff');
   });
 
   test('the cross-tab is OMITTED when every disputed finding has a verdict — a zero limitation is not a limitation', () => {
@@ -1542,7 +1550,7 @@ describe('describeEngagement / describeSilentlyFixed / describeLeadTime', () => 
       { readBandRaised: 5, noFileAnchor: 3 },
     );
     const line = describeEngagement(o.engagement, o);
-    expect(line.caveat).toContain('1 traced finding carries no engagement signal');
+    expect(line.caveat).toContain('1 traced finding has no engagement signal');
     expect(line.caveat).toContain('3 raised findings have no thread at all');
   });
 
@@ -2137,12 +2145,12 @@ describe('plain-English rewrite pins', () => {
     const one = compute([finding({ said: 'fixed' })], spend());
     expect(describeDisputed(one.disputedAsWrong, one).detail).toBe(
       'This is a real zero, not a gap in the data: the one problem the team gave an answer on was not disputed ' +
-        'as wrong. Reported as a count, not a rate: the denominator is the 1 finding carrying a said label.',
+        'as wrong. Reported as a count, not a rate: it is counted against the 1 said-labelled finding.',
     );
     const two = compute([finding({ said: 'fixed' }), finding({ said: 'ignored' })], spend());
     expect(describeDisputed(two.disputedAsWrong, two).detail).toBe(
       'This is a real zero, not a gap in the data: none of the problems the team gave an answer on was disputed ' +
-        'as wrong. Reported as a count, not a rate: the denominator is the 2 findings carrying a said label.',
+        'as wrong. Reported as a count, not a rate: it is counted against the 2 said-labelled findings.',
     );
   });
 

@@ -180,7 +180,7 @@ export function assessDrift(drift: DriftStats): DriftAssessment {
     return { severity: 'attention', warning: 'HEAD is not observable — deployment drift cannot be verified.' };
   }
   if (drift.composeService.classification !== 'sha') {
-    return { severity: 'attention', warning: 'Running compose services carry no build provenance — cannot verify they match HEAD.' };
+    return { severity: 'attention', warning: 'Running compose services have no build provenance — cannot verify they match HEAD.' };
   }
   const behind = drift.composeService.commitsBehindHead;
   if (behind == null) {

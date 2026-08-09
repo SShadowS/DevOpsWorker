@@ -998,8 +998,8 @@ describe('stats.ts SQL shape', () => {
     expect(fn).not.toBeNull();
     const body = fn![0];
     expect(body).toMatch(/coverage:\s*computeSubAgentCoverage\(/);
-    expect(body.toLowerCase()).toContain('instrumentation coverage');
-    expect(body.toLowerCase()).toContain('second, distinct cause');
+    expect(body.toLowerCase()).toContain('recent addition');
+    expect(body.toLowerCase()).toContain('second, separate cause');
   });
 
   test('getDriftStats excludes non-sha sentinel values when finding the most recent real sha', () => {

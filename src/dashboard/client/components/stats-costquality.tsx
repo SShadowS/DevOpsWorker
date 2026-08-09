@@ -290,7 +290,7 @@ export function buildReadBandGaugeView(quality: QualityStats): ReadBandGaugeView
     sampleSize: readBandSampleSize,
     lowSample,
     coverage: computeReadBandCoverage(readBandSampleSize, sampleSize),
-    text: `avg read-band items (critical+major per review): ${valueText} — ${levelText} (n=${readBandSampleSize})`,
+    text: `avg critical/major findings per review: ${valueText} — ${levelText} (n=${readBandSampleSize})`,
   };
 }
 
@@ -642,7 +642,7 @@ function QualitySection({ title, status, children }: { title: string; status: Se
 function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
   const lowCoverageHeadline = buildReadBandLowCoverageHeadline(view.coverage);
   return (
-    <QualitySection title="Read-band health (avg critical+major findings per review)" status={view.level === 'danger' ? 'attention' : 'neutral'}>
+    <QualitySection title="Findings health (avg critical+major findings per review)" status={view.level === 'danger' ? 'attention' : 'neutral'}>
       {view.value == null ? (
         <p class="quality-section__empty">No findings data recorded in this window.</p>
       ) : (
@@ -650,7 +650,7 @@ function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
           <div
             class="read-band-gauge__track"
             role="img"
-            aria-label={`Average read-band items per review: ${view.value.toFixed(2)}, ${describeReadBandLevel(view.level)}`}
+            aria-label={`Average critical/major findings per review: ${view.value.toFixed(2)}, ${describeReadBandLevel(view.level)}`}
           >
             <div
               class="read-band-gauge__zone read-band-gauge__zone--danger"
@@ -739,8 +739,8 @@ function SeverityDistributionSection({ data }: { data: QualityStats }) {
           <SeverityBar segments={segments} />
           <SeverityLegend segments={segments} />
           <p class="quality-section__summary">
-            Read-band (critical+major): <strong>{split.readBandCount}</strong> ({formatPct(split.readBandRate)}) · below-band
-            (minor+nitpick): <strong>{split.belowBandCount}</strong> ({formatPct(split.belowBandRate)})
+            Critical/major: <strong>{split.readBandCount}</strong> ({formatPct(split.readBandRate)}) · minor/nitpick:{' '}
+            <strong>{split.belowBandCount}</strong> ({formatPct(split.belowBandRate)})
           </p>
         </>
       )}
@@ -750,14 +750,14 @@ function SeverityDistributionSection({ data }: { data: QualityStats }) {
 
 function BelowBandRowsSection({ data }: { data: QualityStats }) {
   return (
-    <QualitySection title="Reviews with zero read-band findings" status="neutral">
+    <QualitySection title="Reviews with zero critical/major findings" status="neutral">
       <p class="quality-section__summary">
         {data.belowBandCount} of {data.readBandSampleSize} review(s) with findings recorded surfaced zero critical/major
         findings ({formatPctValue(data.belowBandPct)}).
       </p>
       <p class="quality-section__note">
         Counted by review, not by individual problem: a review with one critical problem and five minor ones counts
-        toward the critical/major total above, but is not one of the below-band reviews counted here.
+        toward the critical/major total above, but is not one of the reviews counted here.
       </p>
     </QualitySection>
   );
