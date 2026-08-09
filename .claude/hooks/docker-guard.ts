@@ -15,6 +15,9 @@
 // Exit 2 = block + reason to the model. Hooks only gate the agent; a human can still
 // run the command from a terminal.
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 interface HookInput { tool_input?: { command?: string } }
 
 const input: HookInput = await Bun.stdin.json().catch(() => ({}));
@@ -31,7 +34,35 @@ const cmd = input.tool_input?.command ?? "";
 // So: split on shell separators, strip any leading `VAR=value` prefixes, and test only
 // the LEADING token of each segment. `docker …` as an argument or inside prose is then
 // invisible, while `docker run …` and `FOO=bar docker compose build` still match.
-const segments = cmd.split(/\n|;|&&|\|\||\|/);
+// Split on shell separators, but NEVER inside quotes. A quoted regex alternation
+// (`grep 'a\|docker compose b'`) contains a literal `|`; a naive split tore it apart
+// and promoted `docker compose b` to a leading token, blocking a read-only grep on
+// 2026-08-09. Backslash-escaping is not tracked: inside quotes nothing splits anyway,
+// and outside quotes an escaped separator is not a separator we need to honour.
+function splitSegments(s: string): string[] {
+  const out: string[] = [];
+  let buf = '';
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]!;
+    if (quote) {
+      if (c === quote) quote = null;
+      buf += c;
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; buf += c; continue; }
+    if (c === '\n' || c === ';' || c === '|') {
+      if (c === '|' && s[i + 1] === '|') i++;
+      out.push(buf); buf = '';
+      continue;
+    }
+    if (c === '&' && s[i + 1] === '&') { i++; out.push(buf); buf = ''; continue; }
+    buf += c;
+  }
+  out.push(buf);
+  return out;
+}
+const segments = splitSegments(cmd);
 const leading = segments.map((s) => s.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/, ''));
 const touchesDocker =
   leading.some((s) => /^docker\s+(compose|build|run)\b/.test(s)) ||
@@ -106,6 +137,59 @@ if (isRun && hasOverlayBuild) {
         `  If the staleness is deliberate, run the command from a terminal.`,
       );
     }
+  }
+}
+
+// (c) Stale COMPOSE SERVICE images — the inverse of (b), and it bit on 2026-08-03.
+//
+// `docker compose up -d` recreates a container from the EXISTING image without
+// rebuilding it, so a service can run code several commits old while every tag and
+// container looks healthy. The deploy script only builds the SPAWNED image and ends
+// with a printed reminder to run `docker compose build` — a reminder that was
+// followed three times that day and missed the fourth, leaving the watcher two
+// commits behind. The `continue` tag it had just gained was therefore undetectable,
+// silently, which is the same class of failure this hook exists for.
+//
+// Services bake BUILD_SHA at image-build time, so the built image can be asked what
+// it is. Checked only for `up` WITHOUT a build in the same command — `compose build
+// && compose up -d` is the fix, and blocking the fix is how a guard gets bypassed.
+const isComposeUp = leading.some((s) => /^docker\s+compose\b[^\n]*\bup\b/.test(s));
+const alsoBuilds = leading.some((s) => /^docker\s+compose\b[^\n]*\bbuild\b/.test(s));
+if (isComposeUp && !alsoBuilds) {
+  const head = sh(["git", "-C", proj, "rev-parse", "--short", "HEAD"]);
+  const env = sh([
+    "docker", "image", "inspect", "devopsworker-watcher",
+    "--format", "{{range .Config.Env}}{{println .}}{{end}}",
+  ]);
+  const built = env.match(/^BUILD_SHA=(.+)$/m)?.[1]?.trim();
+  // A generic clone never exports BUILD_SHA and bakes the literal "unknown"; blocking
+  // every `up` there would be hostile noise, so the staleness check below stays silent.
+  // But a composed DEPLOYMENT (private/ present — the core gitignores it and probes it
+  // at runtime) then gets NO protection at all: the check can only fire once the sha is
+  // being set, so it protects only installations that already do the right thing. Nudge
+  // those once, with the exact command, rather than staying silent and unfalsifiable.
+  const isDeployment = existsSync(join(proj, "private"));
+  if (isDeployment && head && built === "unknown") {
+    reasons.push(
+      `This deployment's compose images carry no build stamp, so nothing can tell whether\n` +
+      `  the running service is current. \`compose up\` recreates from the EXISTING image —\n` +
+      `  it does not rebuild — which is how a watcher sat two commits behind and silently\n` +
+      `  could not see a tag it had just been taught (2026-08-03).\n` +
+      `  Fix: BUILD_SHA=$(git rev-parse --short HEAD) docker compose build && docker compose up -d`,
+    );
+  }
+  // Inert when the image does not exist yet (compose will build it), and when
+  // BUILD_SHA was never baked — a generic clone that does not export it bakes the
+  // literal "unknown", and blocking every `up` there would be hostile noise.
+  if (head && built && built !== "unknown" && built !== head) {
+    reasons.push(
+      `The compose service image is stale: devopsworker-watcher was built at ${built}, HEAD is ${head}.\n` +
+      `  \`compose up\` recreates from the EXISTING image — it does not rebuild. The service would\n` +
+      `  keep running ${built} code with no error, which is how a watcher sat two commits behind\n` +
+      `  and silently could not see a tag it had just been taught (2026-08-03).\n` +
+      `  Fix: BUILD_SHA=$(git rev-parse --short HEAD) docker compose build && docker compose up -d\n` +
+      `  If running the old build is deliberate, run the command from a terminal.`,
+    );
   }
 }
 
