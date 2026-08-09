@@ -5,6 +5,7 @@ import type { ConfigReport } from '../../config-report.ts';
 import { buildContaminationAvailability } from '../model-contamination.ts';
 import { assessModelIntegrity, assessLevers, assessErrorRate } from '../assessors.ts';
 import type { SimpleAssessment } from '../assessors.ts';
+import { countOf } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
 // Status ribbon (Task 5) — "the reason this entire feature exists." Four
@@ -94,7 +95,7 @@ export function describeHeadUnresolved(reason: HeadUnresolvedReason): string {
 export function formatDistance(commitsBehindHead: number | null): string {
   if (commitsBehindHead == null) return 'distance unknown';
   if (commitsBehindHead === 0) return 'in sync';
-  return `${commitsBehindHead} commit${commitsBehindHead === 1 ? '' : 's'} behind`;
+  return `${countOf(commitsBehindHead, 'commit')} behind`;
 }
 
 /** One row of the three-sha provenance table. `display` is either a real
@@ -191,7 +192,7 @@ export function assessDrift(drift: DriftStats): DriftAssessment {
   if (behind > 0) {
     return {
       severity: 'attention',
-      warning: `Compose services are ${behind} commit${behind === 1 ? '' : 's'} behind HEAD — config may be inert.`,
+      warning: `Compose services are ${countOf(behind, 'commit')} behind HEAD — config may be inert.`,
     };
   }
   return { severity: 'ok', warning: null };

@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   describeNonShaState,
   describeHeadUnresolved,
@@ -242,6 +244,19 @@ describe('assessDrift', () => {
     expect(result.severity).toBe('attention');
     expect(result.warning).toContain('9 commits behind');
     expect(result.warning).toContain('config may be inert');
+  });
+
+  // Task 8 (S2, print-at-1): this exact clause was never exercised at n=1
+  // before — the pre-existing test above only covers n=9, always plural, so
+  // a singular/plural regression in this specific warning (as opposed to
+  // formatDistance's own, separately-tested n=1 case) would have shipped
+  // unnoticed. Closes that gap now that both sites share one countOf() call.
+  test('compose service is ONE commit behind HEAD -> singular, not "1 commits"', () => {
+    const result = assessDrift(driftFixture({
+      composeService: { value: '11b5a83', classification: 'sha', source: 'x', commitsBehindHead: 1 },
+    }));
+    expect(result.severity).toBe('attention');
+    expect(result.warning).toBe('Compose services are 1 commit behind HEAD — config may be inert.');
   });
 
   test('compose service confirmed in sync (0 behind, HEAD known) -> ok, no warning', () => {
@@ -544,5 +559,38 @@ describe('buildLeversCard', () => {
   test('loading -> loading, never crashes on a missing evalLevers array', () => {
     const state: FetchState<ConfigReport> = { status: 'loading' };
     expect(buildLeversCard(state)).toEqual({ status: 'loading', text: 'Loading…' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 8 (S2) — formatDistance and assessDrift's behind-count warning both
+// hand-rolled `n === 1 ? '' : 's'` singular/plural agreement: exactly the
+// defect count-phrase.ts's own doc comment says keeps recurring ("the last
+// round found three more of them inside the functions written that round to
+// eliminate the previous three"), a third instance, in a file this plan
+// hadn't touched yet. Both now delegate to countOf(). Wording is UNCHANGED —
+// every existing test above (formatDistance's 0/1/2 cases, assessDrift's
+// "9 commits behind" pin) already proves that — this block only proves the
+// hand-rolled ternary is actually gone, not just coincidentally
+// output-compatible with countOf.
+// ---------------------------------------------------------------------------
+
+describe('Task 8 — count agreement delegated to countOf(), not hand-rolled', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../../src/dashboard/client/components/stats-ribbon.tsx', import.meta.url)),
+    'utf-8',
+  );
+
+  test('imports countOf from the shared leaf module', () => {
+    expect(src).toMatch(/import\s*\{\s*countOf\s*\}\s*from\s*['"]\.\.\/\.\.\/count-phrase\.ts['"]/);
+  });
+
+  test('neither formatDistance nor assessDrift hand-rolls the singular/plural ternary any more', () => {
+    expect(src).not.toMatch(/commit\$\{.*===\s*1\s*\?\s*''\s*:\s*'s'\}/);
+  });
+
+  test('both call sites use countOf(n, \'commit\')', () => {
+    const calls = src.match(/countOf\([^)]*'commit'\)/g) ?? [];
+    expect(calls.length).toBe(2);
   });
 });
