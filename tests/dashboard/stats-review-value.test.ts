@@ -1129,6 +1129,58 @@ describe('computeReviewValue — raised vs traced', () => {
       expect(o.traceabilityNote).not.toContain('0 of them');
     });
 
+    // RULE 1 — "nothing recorded" is not "nothing happened". `untraceable` is
+    // `max(readBandRaised, traced) - traced`: a difference between two counts,
+    // never a property read off any one finding. The head used to say those
+    // findings "have no comment thread in the pull request, so they were never
+    // checked, and never can be" — a claim about what exists on the pull
+    // request, asserted from a number this note's own tail then calls
+    // unreconciled. A second mechanism breaks the row-to-thread match
+    // independently of file anchoring (a substantially-reworded re-review forks
+    // the identity key, ~stats.ts:1980), so the gap does not even entail a
+    // missing thread when it IS reconciled — only the file-less count licenses
+    // that, and it is the tail that carries it.
+    //
+    // Pinned whole rather than by substring: the property is what the sentence
+    // claims, and a substring check cannot see an over-claim in the clause it
+    // does not cover.
+    test('the head claims only what a count difference establishes — never that the threads are missing', () => {
+      const o = computeReviewValue(rows(), spend(), { readBandRaised: 6, noFileAnchor: 0 });
+      expect(o.traceability.untraceable).toBe(3);
+      expect(o.traceabilityNote).toBe(
+        'This card cannot match 3 of 6 findings raised in this window to a comment thread in the pull request. ' +
+          'They have no verdict here, and this card has no way to give them one. That gap is a difference between two ' +
+          'counts, not a look at any single finding: on its own it does not establish that the threads are missing. ' +
+          'They are counted in "raised" and in nothing else.' +
+          ' None of that gap is explained by findings that were not tied to a specific file, which is the only cause ' +
+          'this card knows about — the two sources are counting differently, and the gap should be reconciled before ' +
+          'this line is quoted.',
+      );
+      expect(o.traceabilityNote).not.toContain('no comment thread in the pull request, so');
+      expect(o.traceabilityNote).not.toContain('never checked, and never can be');
+    });
+
+    test('the singular head agrees, and still claims only the count difference', () => {
+      const o = computeReviewValue([finding({ did: 'ADDRESSED' })], spend(), { readBandRaised: 2, noFileAnchor: 0 });
+      expect(o.traceability.untraceable).toBe(1);
+      expect(o.traceabilityNote).toContain('cannot match 1 of 2 findings raised in this window');
+      expect(o.traceabilityNote).toContain('It has no verdict here, and this card has no way to give it one.');
+      expect(o.traceabilityNote).not.toContain('It has no comment thread');
+    });
+
+    // The inversion branch reported the contradiction by glossing `untraceable`
+    // as "the number with no comment thread in the pull request" — the same
+    // unlicensed claim as the old head, one sentence later. The INFERENCE it
+    // draws survives the reweaken: more file-less findings than the gap means at
+    // least one file-less finding was matched to a thread anyway, which the
+    // anchoring rule forbids.
+    test('the inversion branch names the gap, not a thread count it cannot observe', () => {
+      const o = computeReviewValue(rows(), spend(), { readBandRaised: 6, noFileAnchor: 5 });
+      expect(o.traceabilityNote).toContain('than the size of that gap (3)');
+      expect(o.traceabilityNote).not.toContain('the number with no comment thread in the pull request');
+      expect(o.traceabilityNote).toContain('cannot happen');
+    });
+
     test('counts cannot invert — "N of them" can never exceed the gap it refers to', () => {
       const o = computeReviewValue(rows(), spend(), { readBandRaised: 6, noFileAnchor: 5 });
       expect(o.traceability.untraceable).toBe(3);

@@ -1688,9 +1688,22 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
   }
 
   const explained = Math.min(noFileAnchor, untraceable);
+  // RULE 1. This number is a difference between two counts — the raised count
+  // and the number of rows this card could match to it — so it establishes
+  // only that the two cannot be matched up. It is not a look at any one
+  // finding, and it licenses NO claim about what exists on the pull request:
+  // the head said "have no comment thread in the pull request, so they were
+  // never checked, and never can be", which asserts a missing thread from an
+  // arithmetic gap. A missing file anchor is one cause and the tail below
+  // states it where the counts support it; a substantially-reworded re-review
+  // forks the identity key (see `computeReviewValue`) and breaks the match with
+  // the thread still there, which is why even a reconciled gap is not proof of
+  // absence and the head must not read as one.
   const head =
-    `${untraceable} of ${countOf(raisedCount, 'finding')} raised in this window ` +
-    `${agree(untraceable, 'has', 'have')} no comment thread in the pull request, so ${agree(untraceable, 'it was', 'they were')} never checked, and never can be. ` +
+    `This card cannot match ${untraceable} of ${countOf(raisedCount, 'finding')} raised in this window to a comment ` +
+    `thread in the pull request. ${agree(untraceable, 'It has', 'They have')} no verdict here, and this card has no ` +
+    `way to give ${itThem(untraceable)} one. That gap is a difference between two counts, not a look at any single ` +
+    'finding: on its own it does not establish that the threads are missing. ' +
     `${agree(untraceable, 'It is', 'They are')} counted in "raised" and in nothing else.`;
 
   // MORE file-less findings than gap means some file-less finding was traced
@@ -1701,9 +1714,9 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
   // to avoid, just one level up.
   if (noFileAnchor > untraceable) {
     return (
-      `${head} More findings here were recorded as not tied to a specific file (${noFileAnchor}) than the number with no ` +
-      `comment thread in the pull request (${untraceable}), so at least one finding with no file must have gotten a comment ` +
-      'thread anyway — which cannot happen if a comment thread always needs a file to attach to. These two ' +
+      `${head} More findings here were recorded as not tied to a specific file (${noFileAnchor}) than the size of that ` +
+      `gap (${untraceable}), so at least one finding with no file must have been matched to a comment thread anyway ` +
+      '— which cannot happen if a comment thread always needs a file to attach to. These two ' +
       'counts do not describe the same population; reconcile them before quoting this section.'
     );
   }
