@@ -78,7 +78,7 @@ export interface AgentModelRow {
  * cover whichever pins happened to dispatch, never the declared roster: on
  * a live 30d window, 12 of 19 declared frontmatter pins — every
  * plan-reviewer/code-reviewer sub-agent — produced zero observed runs, and
- * "all 7 pinned sub-agent(s) ran only on their declared model" read as an
+ * "all 7 pinned sub-agents ran only on their declared model" read as an
  * all-clear over those 7 alone, silently dropping the other 12. A
  * `'not-observed'` row is explicitly NOT contamination (nothing ran, so
  * nothing can be off-pin) and must stay out of any contamination count the

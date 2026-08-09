@@ -171,6 +171,9 @@ describe("the ribbon's contamination clause", () => {
     expect(text).not.toContain('floor');
     expect(text).not.toContain('(s)');
     expect(text).toContain('at least this many');
+    // The hedge and its reason travel together — pinning only "at least this
+    // many" would let a later edit strand a bare hedge with nothing behind it.
+    expect(text).toContain('the record of which sub-agents ran is incomplete');
   });
 
   test('the ribbon agrees with its own count at one and at three', () => {

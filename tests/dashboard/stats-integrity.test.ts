@@ -336,8 +336,8 @@ describe('assessFindingsIntegrity', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildErrorRateSectionView — delegates to assessErrorRate, adds the
-// error_max_turns scope note.
+// buildErrorRateSectionView — delegates to assessErrorRate, adds the note
+// that "error" is not narrowed to one cause.
 // ---------------------------------------------------------------------------
 
 describe('buildErrorRateSectionView', () => {
@@ -366,9 +366,8 @@ describe('buildErrorRateSectionView', () => {
   // Task 8 (I6): dropped the three internal TS class names in rendered prose
   // (PipelineError, RevisionExhaustedError, ExternalServiceError) — same
   // defect class Task 6's review found in a returned string elsewhere. The
-  // pinned error_max_turns substring above still carries the "not narrowed
-  // to one cause" claim; these three carried no distinct information for a
-  // reader with no code access.
+  // `toBe` above still pins the "not narrowed to one cause" claim; these
+  // three carried no distinct information for a reader with no code access.
   test('the note no longer names internal PipelineError subtypes', () => {
     const view = buildErrorRateSectionView({ count: 0, total: 10, rate: 0 }, false);
     expect(view.note).not.toContain('PipelineError');

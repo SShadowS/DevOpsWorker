@@ -148,7 +148,7 @@ describe('buildAgentModelRows', () => {
 
   // I-4: a declared pin with ZERO observed runs used to be silently absent
   // from this function's output entirely (it only ever walked `entries`) —
-  // which is exactly how "all N pinned sub-agent(s) ran only on their
+  // which is exactly how "all N pinned sub-agents ran only on their
   // declared model" ended up reporting an all-clear over 7 of 20 declared
   // pins on the live 30d window. These cases start from a PIN, not an
   // observed entry — the blind spot the other tests above never exercise.
