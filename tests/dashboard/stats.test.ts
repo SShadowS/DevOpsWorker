@@ -964,9 +964,53 @@ describe('stats.ts SQL shape', () => {
     const body = fn![0];
     expect(body).toMatch(/aggregateSubAgentModelAttribution\(rows\.map\(\(r\) => r\.sub_agents\)\)/);
     expect(body).toMatch(/subAgentModelAttribution:\s*\{/);
-    // The undercount must be stated as a WORSE-not-better direction, not a
+    // The undercount must be stated as a worse-not-better direction, not a
     // vague "may be incomplete" — matching the fix round's explicit ask.
-    expect(body).toContain('WORSE than these counts show, never better');
+    // Task 4 (dashboard follow-ups) reworded this sentence to plain English
+    // and dropped the shouting-case emphasis along with the schema names —
+    // the direction itself is still pinned, just no longer shouted.
+    expect(body).toContain('worse than these counts show, never better');
+  });
+
+  // Task 4 (dashboard follow-ups): these two notes are rendered VERBATIM by the
+  // Integrity card (stats-integrity.tsx), and until this fix both named raw
+  // schema — `model_usage`, `sub_agents`, `dispatch.mismatchRate`, `/api/config`
+  // — on a card whose reader has no schema to resolve those against. They sit
+  // outside tests/dashboard/card-prose-sweep.test.ts's reach (that sweep reads
+  // client card files only; these strings are built server-side and reach the
+  // page through a variable, not a literal), so this is the one guard that
+  // holds them clean. See the sweep's own comment for why it cannot reach here.
+  test('the inferredEffort and subAgentModelAttribution notes name no schema token', () => {
+    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    const inferredEffortBlock = body.slice(body.indexOf('inferredEffort: {'), body.indexOf('findingsIntegrity: {'));
+    const subAgentModelAttributionBlock = body.slice(body.indexOf('subAgentModelAttribution: {'));
+    expect(inferredEffortBlock).not.toBe('');
+    expect(subAgentModelAttributionBlock).not.toBe('');
+
+    const SCHEMA_NAMES = ['model_usage', 'sub_agents', 'dispatch.mismatchRate', '/api/config'];
+    for (const name of SCHEMA_NAMES) {
+      expect(inferredEffortBlock).not.toContain(name);
+      expect(subAgentModelAttributionBlock).not.toContain(name);
+    }
+  });
+
+  // The rewrite that drops the schema names must not drop the caveats those
+  // notes exist to carry: effort is INFERRED (no effort column exists) and the
+  // orchestrator share is an OVERESTIMATE (inferredEffort.note); a missing
+  // dispatch could make contamination look better than it is, NEVER the
+  // reverse (subAgentModelAttribution.note).
+  test('each note keeps the caveat it exists to carry', () => {
+    const fn = src.match(/export async function getIntegrityStats[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    const inferredEffortBlock = body.slice(body.indexOf('inferredEffort: {'), body.indexOf('findingsIntegrity: {'));
+    const subAgentModelAttributionBlock = body.slice(body.indexOf('subAgentModelAttribution: {'));
+
+    expect(inferredEffortBlock).toContain('No effort column exists');
+    expect(inferredEffortBlock.toLowerCase()).toContain('overestimate');
+    expect(subAgentModelAttributionBlock).toContain('never better');
   });
 
   // Fix-round-1 regression pin: the cost split previously exposed a plain

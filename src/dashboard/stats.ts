@@ -1067,8 +1067,9 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, 
       bands: { high: HIGH_EFFORT_RANGE, low: LOW_EFFORT_RANGE },
       drift: computeEffortDrift(effortEntries),
       note:
-        'No effort column exists. Bands are inferred from orchestrator output tokens (model_usage totals minus ' +
-        'measured sub-agent output) and inherit the sub_agents undercount as an overestimate of the orchestrator share.',
+        'No effort column exists. Bands are inferred from orchestrator output tokens (the total for all ' +
+        "models minus the sub-agent output we could measure), so they inherit the roster's undercount as an " +
+        'overestimate of the orchestrator share.',
     },
     findingsIntegrity: {
       comparedRows: comparedForFindings.length,
@@ -1083,11 +1084,11 @@ export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, 
     subAgentModelAttribution: {
       entries: subAgentModelAttribution,
       note:
-        'Observed models only — sub_agents is a known, nondeterministic undercount of true dispatch counts ' +
-        "(see dispatch.mismatchRate above): a dispatch missing from this roster has no model recorded here at " +
-        'all. Model contamination could therefore be WORSE than these counts show, never better. This field ' +
-        "reports what ran, not whether it matched what was pinned — cross-reference against each agent's " +
-        'declared frontmatter pin (/api/config) to find actual deviations.',
+        'These are the models actually seen running. The record of which sub-agents ran is an incomplete ' +
+        'count, and it varies run to run: a dispatch missing from it has no model recorded here at all. So a ' +
+        'model running where it should not could be worse than these counts show, never better. This says ' +
+        'what ran, not whether it matched what was asked for — to find real deviations, compare it against ' +
+        'the model each agent declares in its own settings.',
     },
   };
 }

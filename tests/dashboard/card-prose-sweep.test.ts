@@ -229,14 +229,24 @@ const DENIED: ReadonlyArray<{ name: string; pattern: RegExp }> = [
  * site is fixed its entry must be deleted; the staleness check below fails
  * until it is.
  *
- * There are two further known leaks the sweep cannot see, because they are
- * rendered verbatim by the Integrity panel from strings built in
+ * Two further sites sit permanently out of this sweep's reach, because they
+ * are rendered verbatim by the Integrity panel from strings built in
  * `src/dashboard/stats.ts` (`inferredEffort.note` and
- * `subAgentModelAttribution.note`, ~stats.ts:1069 and ~:1085): between them they
- * put `model_usage`, `sub_agents`, `dispatch.mismatchRate` and `/api/config` on
- * the page. Widening the sweep to stats.ts would pull in the server module and
- * its whole non-rendered surface, so they are recorded here rather than
- * guarded.
+ * `subAgentModelAttribution.note`, ~stats.ts:1069 and ~:1085) — the sweep reads
+ * literal and template text in the six client card files above; a note built
+ * server-side and handed to a card through a variable never appears there as
+ * a literal. Widening the sweep to stats.ts would pull in the server module
+ * and its whole non-rendered surface, so this scope limit is permanent, not a
+ * round-by-round gap like the list below.
+ *
+ * That does not mean those two notes are unguarded — they no longer carry a
+ * schema name (fixed in the dashboard-followups round), and
+ * `tests/dashboard/stats.test.ts`'s "the inferredEffort and
+ * subAgentModelAttribution notes name no schema token" test is what holds
+ * that, checking the exact four tokens (`model_usage`, `sub_agents`,
+ * `dispatch.mismatchRate`, `/api/config`) these two notes used to carry — its
+ * own deny list, not this file's DENIED, since these two strings never reach
+ * this scanner to be checked against it.
  */
 const KNOWN_REMAINING: ReadonlyArray<{ file: string; text: string; why: string }> = [];
 
