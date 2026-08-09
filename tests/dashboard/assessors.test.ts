@@ -78,13 +78,18 @@ describe('assessors module', () => {
 // One name for the `flagged` rows, across the two cards that cross-reference
 // each other.
 //
-// Task 8 dropped "key" from the Cost card's summary and guarded it there. Two
-// sites in this module were untouched, so the Cost card said "1 flagged
-// model(s)" while the Integrity card two slots away said "1 flagged model
-// key(s)" — the same server-computed `flagged` field under two names, on a card
-// whose own note says it is not a second measurement. The Cost card's summary
-// even ends "see the Integrity panel's Model usage section", pointing the reader
-// straight at the other spelling.
+// This block guards the property: whatever noun the Cost card and the
+// Integrity card use for a flagged row, both must use the SAME one. The two
+// panels report the same server-computed `flagged` field — not two
+// independent measurements — and the Cost card's own summary ends "see the
+// Integrity panel's Model usage section", pointing the reader straight at
+// the other card's wording.
+//
+// History: Task 8 dropped "key" from the Cost card's summary and guarded it
+// there, but left two sites in this module untouched, so the Cost card said
+// "1 flagged model(s)" while the Integrity card two slots away said "1
+// flagged model key(s)" — the same field under two names. That split is what
+// this block now closes and keeps closed.
 // ---------------------------------------------------------------------------
 
 describe('flagged model wording is shared with the Cost card', () => {

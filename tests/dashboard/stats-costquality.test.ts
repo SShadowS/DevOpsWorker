@@ -212,6 +212,11 @@ describe('describeCostSampleNote', () => {
     const text = describeCostSampleNote({ costSampleSize: 87, sampleSize: 150,
       monthlyProjection: { basis: 'linear extrapolation of the 30d window total' } });
     expect(text).not.toMatch(/\.\s+[a-z]/);
+    // The hedge clause itself is the reason the two sample sizes are
+    // disclosed side by side — pin its exact wording, not just the two
+    // counts either side of it, so a later edit cannot quietly tighten
+    // "may differ" into an unqualified claim and still pass.
+    expect(text).toContain("which may differ from this window's 150 rows in total.");
     expect(text).toContain('Monthly projection is a linear extrapolation of the 30d window total.');
   });
 
@@ -220,6 +225,7 @@ describe('describeCostSampleNote', () => {
       monthlyProjection: { basis: 'linear extrapolation of the 30d window total' } });
     expect(text).toContain('1 row with cost recorded');
     expect(text).not.toContain('1 rows');
+    expect(text).toContain("which may differ from this window's 1 row in total.");
   });
 });
 

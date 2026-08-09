@@ -449,9 +449,10 @@ function CostSplitSection({ data }: { data: CostStats }) {
 /** The Cost card's sampling note.
  *
  *  `monthlyProjection.basis` is a NOUN PHRASE ("linear extrapolation of the 30d
- *  window total") and has other call sites, so it stays a noun phrase; the sentence
- *  is built HERE. Appending it after a full stop rendered a subjectless lowercase
- *  fragment — "…150 total rows. linear extrapolation of the 30d window total." */
+ *  window total"), kept as one so the payload field stays composable and the
+ *  sentence is built in exactly one place — HERE, not at the field. Appending
+ *  it after a full stop rendered a subjectless lowercase fragment — "…150
+ *  total rows. linear extrapolation of the 30d window total." */
 export function describeCostSampleNote(d: {
   costSampleSize: number;
   sampleSize: number;
@@ -779,9 +780,11 @@ function BelowBandRowsSection({ data }: { data: QualityStats }) {
 
 // Named `verdictDistribution` in the payload, headed "Recommendation" on screen.
 // The values are `pr_reviews.recommendation` (free text, z.string()), and the
-// Review-value card's own "Verdict" column heads an unrelated quantity — the
-// `did` outcome. One word for two quantities in mono font on two cards read as
-// one thing. The empty state below already said "No recommendations recorded".
+// Review-value card's own verdict column (stats-review-value.tsx's did-breakdown
+// table) heads an unrelated quantity — the `did` outcome. One word for two
+// quantities in mono font on two cards reads as one thing. The table's own
+// empty state below already names recommendations rather than that other
+// quantity, in matching wording.
 function VerdictTable({ dist }: { dist: Record<string, number> }) {
   const total = Object.values(dist).reduce((s, n) => s + n, 0);
   const rows = Object.entries(dist).sort((a, b) => b[1] - a[1]);

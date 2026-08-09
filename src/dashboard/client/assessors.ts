@@ -56,7 +56,7 @@ export const FLAGGED_MODEL_KEY_TOOLTIP = 'Matches the [1m] premium long-context 
  *  only (contamination has its own dedicated panel section).
  *
  *  The Cost card renders the same `flagged` rows and must use the same noun for
- *  them — its own note says it is not a second measurement. A cross-card test in
+ *  them — its own doc comment says it is not a second measurement. A cross-card test in
  *  tests/dashboard/assessors.test.ts pins the three call sites to one word rather
  *  than to three literals that happen to agree today, so all three move together.
  *  Both branches say "model", including the clean one: splitting the wording by
