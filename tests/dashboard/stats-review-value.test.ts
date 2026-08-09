@@ -1684,6 +1684,20 @@ describe('describeEngagement / describeSilentlyFixed / describeLeadTime', () => 
     expect(line.detail).toContain('Confirmed acted on');
   });
 
+  // These two figures render as adjacent ScorecardFigures in `ResponseSection`,
+  // two lines apart on screen, and were describing the same place a reply can
+  // land in two ways: "thread reply or PR discussion" here against the server's
+  // "a reply on the thread or in the pull request discussion" directly below.
+  // One phrase, byte for byte.
+  test('engagement names where a reply lands in the same words the line below it uses', () => {
+    const o = compute([finding({ saidEvidence: 'thread-reply' })], spend());
+    expect(describeEngagement(o.engagement, o).detail).toContain(
+      'a reply on the thread or in the pull request discussion',
+    );
+    const notMeasured = compute([finding({ saidEvidence: 'thread-reply' })], spend());
+    expect(notMeasured.disputedAsWrong.reason).toContain('a reply on the thread or in the pull request discussion');
+  });
+
   test('lead time segments the after-settle rows out in words, not only in the number', () => {
     const o = compute(
       [finding({ leadTimeMins: 30 }), finding({ leadTimeMins: -100 })],
@@ -1691,7 +1705,7 @@ describe('describeEngagement / describeSilentlyFixed / describeLeadTime', () => 
     );
     const text = describeLeadTime(o.leadTime);
     expect(text).toContain('Median 30 min');
-    expect(text).toContain('AFTER the PR settled');
+    expect(text).toContain('AFTER the pull request settled');
     expect(text).toContain('excluded from the median above');
   });
 
@@ -1954,8 +1968,8 @@ describe('no clause points at a figure that does not exist', () => {
     expect(o.leadTime.beforeSettleCount).toBe(0);
     expect(o.leadTime.unrecordedCount).toBe(2);
     const text = describeLeadTime(o.leadTime);
-    expect(text).toContain('No finding with a recorded lead time was raised before its PR settled');
-    expect(text).not.toContain('No finding in this window was raised before its PR settled');
+    expect(text).toContain('No finding with a recorded lead time was raised before its pull request settled');
+    expect(text).not.toContain('No finding in this window was raised before its pull request settled');
     // ...and the sentence that contradicted it still appears, scoped.
     expect(text).toContain('2 findings have no lead time recorded at all');
   });
@@ -1964,7 +1978,7 @@ describe('no clause points at a figure that does not exist', () => {
     const o = compute([finding({ leadTimeMins: null }), finding({ leadTimeMins: null })], spend());
     const text = describeLeadTime(o.leadTime);
     expect(text).toContain('No finding in this window has a lead time recorded');
-    expect(text).not.toContain('raised before its PR settled, so there is no median');
+    expect(text).not.toContain('raised before its pull request settled, so there is no median');
   });
 
   test('coverage does not assert a CAUSE for untraceability the card says is not established', () => {
@@ -2201,6 +2215,26 @@ describe('review-value structure', () => {
     expect(cardSrc).toContain('<CardGlossary terms={TERMS} />');
   });
 
+  // "said-labelled" is the DENOMINATOR of a scorecard value ("2 of 3
+  // said-labelled findings"), so leaving it undefined makes the whole line
+  // uninterpretable, not just one word of it — and this branch raised it from
+  // one occurrence to two on that same line.
+  //
+  // `plain:` is pinned as well as `term:`. Every other glossary guard on this
+  // branch checks only `term:`, which an entry reading "said-labelled means the
+  // said label" would satisfy — a definition that defines nothing, shipped
+  // green.
+  test('the glossary defines "said-labelled", and defines it in words that need no schema', () => {
+    const measured = compute([finding({ said: 'rejected-wrong' })], spend());
+    expect(describeDisputed(measured.disputedAsWrong, measured).value).toContain('said-labelled');
+    const cardSrc = readFileSync(
+      fileURLToPath(new URL('../../src/dashboard/client/components/stats-review-value.tsx', import.meta.url)),
+      'utf-8',
+    );
+    expect(cardSrc).toContain("term: 'said-labelled'");
+    expect(cardSrc).toContain("plain: 'the team gave an answer on the problem and this card recorded which answer'");
+  });
+
   test('every status a builder emits has a CSS rule — an unstyled modifier renders identically to none', () => {
     const cardSrc = readFileSync(
       fileURLToPath(new URL('../../src/dashboard/client/components/stats-review-value.tsx', import.meta.url)),
@@ -2370,14 +2404,14 @@ describe('plain-English rewrite pins', () => {
   test('spend floor clause: has/have agreement at missing=1 and missing=2, using the shared "no recorded cost" phrase', () => {
     const one = compute([finding({ did: null })], spend({ totalCostUsd: 40, reviewCount: 65, reviewsMissingCost: 1 }));
     expect(describeSpend(one.spend, one.addressed, one).detail).toBe(
-      '$40.00 across 65 reviews on the PRs these findings came from. Nothing is confirmed acted on in this window, ' +
-        'so there is no per-item figure to report. 1 of 65 reviews has no recorded cost, so the sum shown is not ' +
+      '$40.00 across 65 reviews on the pull requests these findings came from. Nothing is confirmed acted on in ' +
+        'this window, so there is no per-item figure to report. 1 of 65 reviews has no recorded cost, so the sum shown is not ' +
         'complete: the real total is at least this much.',
     );
     const two = compute([finding({ did: null })], spend({ totalCostUsd: 40, reviewCount: 65, reviewsMissingCost: 2 }));
     expect(describeSpend(two.spend, two.addressed, two).detail).toBe(
-      '$40.00 across 65 reviews on the PRs these findings came from. Nothing is confirmed acted on in this window, ' +
-        'so there is no per-item figure to report. 2 of 65 reviews have no recorded cost, so the sum shown is not ' +
+      '$40.00 across 65 reviews on the pull requests these findings came from. Nothing is confirmed acted on in ' +
+        'this window, so there is no per-item figure to report. 2 of 65 reviews have no recorded cost, so the sum shown is not ' +
         'complete: the real total is at least this much.',
     );
   });

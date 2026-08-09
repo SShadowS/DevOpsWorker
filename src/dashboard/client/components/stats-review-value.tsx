@@ -7,12 +7,17 @@ import { CardGlossary } from './card-glossary.tsx';
 import type { GlossaryTerm } from './card-glossary.tsx';
 
 // This card's own short vocabulary. "settled" also covers describeLeadTime's
-// PR-settled prose below — if a future edit removes the word "settled" from
-// every sentence on this card, drop that entry too, or the glossary defines a
-// word the card no longer uses.
+// pull-request-settled prose below — if a future edit removes the word
+// "settled" from every sentence on this card, drop that entry too, or the
+// glossary defines a word the card no longer uses.
 const TERMS: readonly GlossaryTerm[] = [
   { term: 'a finding', plain: 'a problem the reviewer flagged as critical or major' },
   { term: 'settled', plain: 'the pull request has been merged or closed' },
+  // The DENOMINATOR of the disputed line's headline value ("2 of 3
+  // said-labelled findings"), so an unexplained word here makes the whole line
+  // uninterpretable rather than one word of it. `said` is a database column and
+  // a reader of this card has no schema to resolve it against.
+  { term: 'said-labelled', plain: 'the team gave an answer on the problem and this card recorded which answer' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -216,8 +221,8 @@ export function describeSilentlyFixed(o: ReviewValueOutcome): ScorecardLine {
     label: 'Acted on with no reply',
     value: `${o.silentlyFixed}`,
     detail:
-      'Confirmed acted on with no reply on the thread and nothing in the PR discussion — the code changed and ' +
-      'nobody said a word. These are invisible to any measure of review value based on replies alone.',
+      'Confirmed acted on with no reply on the thread and nothing in the pull request discussion — the code changed ' +
+      'and nobody said a word. These are invisible to any measure of review value based on replies alone.',
     caveat: null,
     status: 'neutral',
   };
@@ -243,7 +248,12 @@ export function describeEngagement(e: ReviewValueEngagement, o: ReviewValueOutco
   const detail =
     e.engagedRate == null
       ? 'Nothing was recorded about replies for any of these, so this card cannot say whether anyone responded.'
-      : `${e.engaged} drew a written response (thread reply or PR discussion), ${e.silent} drew none — ` +
+      // The incumbent phrasing, byte for byte: `buildDisputedNotMeasuredReason`
+      // (stats.ts) renders "a reply on the thread or in the pull request
+      // discussion" into a ScorecardFigure two lines below this one on the same
+      // card. Two wordings for one place a reply can land, adjacent on screen.
+      : `${e.engaged} drew a written response (a reply on the thread or in the pull request discussion), ` +
+        `${e.silent} drew none — ` +
         `${formatPct(e.engagedRate)} of the ${countOf(denominator, 'finding')} where engagement could be read.${contrast}`;
   const missing: string[] = [];
   if (e.unrecorded > 0) {
@@ -413,7 +423,7 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
       label: 'Total spend this window',
       value: 'not recorded',
       detail:
-        `None of the ${countOf(s.reviewCount, 'review')} on the PRs these findings came from has a recorded ` +
+        `None of the ${countOf(s.reviewCount, 'review')} on the pull requests these findings came from has a recorded ` +
         'cost, so there is no spend to report and no per-item figure to derive from it. This is missing data, not a ' +
         'measured zero.',
       caveat: null,
@@ -430,7 +440,7 @@ export function describeSpend(s: ReviewValueSpend, addressed: number, o: ReviewV
       label: 'Total spend this window',
       value: formatCost(s.totalCostUsd),
       detail:
-        `${formatCost(s.totalCostUsd)} across ${countOf(s.reviewCount, 'review')} on the PRs these findings came from. ` +
+        `${formatCost(s.totalCostUsd)} across ${countOf(s.reviewCount, 'review')} on the pull requests these findings came from. ` +
         `Nothing is confirmed acted on in this window, so there is no per-item figure to report.${floorClause}`,
       caveat: null,
       status: 'neutral',
@@ -530,8 +540,8 @@ export function describeLeadTime(l: ReviewValueLeadTime): string {
   const med = l.medianMinsBeforeSettle == null ? 'n/a' : `${Math.round(l.medianMinsBeforeSettle)} min`;
   const head =
     b === 0
-      ? 'No finding with a recorded lead time was raised before its PR settled, so there is no median to report.'
-      : `Median ${med} from finding posted to PR settled, over the ${countOf(b, 'finding')} raised before the PR settled.`;
+      ? 'No finding with a recorded lead time was raised before its pull request settled, so there is no median to report.'
+      : `Median ${med} from a finding being posted to its pull request settling, over the ${countOf(b, 'finding')} raised before the pull request settled.`;
 
   // "excluded from the median above" needs a median to be excluded from; with
   // no before-settle findings there is none, and the clause pointed at
@@ -539,7 +549,7 @@ export function describeLeadTime(l: ReviewValueLeadTime): string {
   const after =
     a === 0
       ? ''
-      : ` ${countOf(a, 'finding')} ${agree(a, 'was', 'were')} raised AFTER the PR settled (a cherry-pick or ` +
+      : ` ${countOf(a, 'finding')} ${agree(a, 'was', 'were')} raised AFTER the pull request settled (a cherry-pick or ` +
         `post-merge review); ${agree(a, 'it has', 'they have')} no lead time to measure` +
         (b === 0 ? '.' : `, and ${agree(a, 'is', 'are')} excluded from the median above rather than averaged into it.`);
 
