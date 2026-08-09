@@ -486,4 +486,48 @@ describe('Task 8 — integrity prose: schema names gone, shared constants import
     expect(src).toContain('Dispatch (recorded tool activity vs. the agent roster)');
     expect(src).not.toMatch(/title="Dispatch \(tool_calls/);
   });
+
+  // Task 4's fix for a finding about lost emphasis: an undercount caveat printed
+  // as plain body text reads, at a skim, as ordinary commentary. The "Known
+  // instrument caveat: " tag is what marks it as a limit of the instrument
+  // rather than a remark about the data — and it is the FIX, so it needs a pin
+  // of its own. Nothing held it: retagging the Contamination note to "Note: "
+  // left the whole dashboard suite at 862 pass / 0 fail.
+  //
+  // Asserted per SECTION, not as a file-wide substring count, so that dropping
+  // the tag from one card while the other still carries it fails here. Both
+  // sections state a limit of the same kind, and the wording is deliberately
+  // identical between them.
+  const sectionSource = (name: string) => {
+    const m = src.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`));
+    expect(m, `${name} not found in stats-integrity.tsx`).not.toBeNull();
+    return m![0];
+  };
+
+  test('the Contamination undercount note keeps its "Known instrument caveat" tag', () => {
+    expect(sectionSource('ContaminationSection')).toContain(
+      'integrity-section__tag--caveat">Known instrument caveat: </strong>',
+    );
+  });
+
+  test('the Dispatch caveat keeps the same tag, worded identically', () => {
+    expect(sectionSource('DispatchSection')).toContain(
+      'integrity-section__tag--caveat">Known instrument caveat: </strong>',
+    );
+  });
+
+  // SUB_AGENT_MODEL_ATTRIBUTION_NOTE ends "the table above makes that
+  // comparison". That is a claim about POSITION, and prose is all that holds it:
+  // move the note above <ContaminationTable> and the sentence points at nothing,
+  // with every test still green. It replaced a sentence telling the reader to do
+  // the comparison by hand directly underneath the table that already does it,
+  // so the pointer is the whole value of the rewrite.
+  test('the Contamination note really is rendered BELOW the table it points at', () => {
+    const body = sectionSource('ContaminationSection');
+    const table = body.indexOf('<ContaminationTable');
+    const note = body.indexOf('{view.undercountNote}');
+    expect(table, 'ContaminationTable not rendered in ContaminationSection').toBeGreaterThan(-1);
+    expect(note, 'undercountNote not rendered in ContaminationSection').toBeGreaterThan(-1);
+    expect(note).toBeGreaterThan(table);
+  });
 });

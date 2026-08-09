@@ -994,8 +994,8 @@ export const SUB_AGENT_MODEL_ATTRIBUTION_NOTE =
   'These are the models actually seen running. The record of which sub-agents ran is incomplete, and ' +
   'how much it misses varies from run to run: a dispatch missing from it has no model recorded here at ' +
   'all. So there could be more models running where they should not than these counts show, never fewer. ' +
-  'This says what ran, not whether it matched what was asked for — to find real deviations, compare it ' +
-  'against the model each agent declares in its own settings.';
+  'This says what ran, not whether it matched what was asked for: the table above makes that comparison, ' +
+  'and flags a sub-agent that ran on anything other than the model it is pinned to.';
 
 export async function getIntegrityStats(sql: postgres.Sql, window: StatsWindow, population: Population): Promise<IntegrityStats> {
   const days = getWindowDays(window);
