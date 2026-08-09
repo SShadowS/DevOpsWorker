@@ -1889,13 +1889,22 @@ function buildDisputedNotMeasuredReason(findings: ReviewValueFindingRow[]): stri
   // answer" — sound there, because that branch requires `unrecognized === 0`,
   // so every other row carries `saidConfidence` null and ran no votes at all.
   // The combined tail says "the votes THIS CARD CAN READ did not agree", the
-  // narrower claim, because it renders only where `unrecognized > 0` and those
-  // rows carry `'unanimous'`/`'majority'`/`'single-vote'` (see the domain note
-  // on `saidConfidence`, ~stats.ts:1367-1370) — votes that ran AND agreed. Over
-  // that window "the votes that ran" is a definite description whose extension
-  // includes them, so the universal would deny votes the window actually holds:
-  // the exact mirror of the older defect above, over-claiming the tie at the
-  // residual's expense instead of denying the tie to protect it.
+  // narrower claim, because it renders only where `unrecognized > 0` — and an
+  // `unrecognized` row CAN carry `'unanimous'`/`'majority'`/`'single-vote'`
+  // (see the domain note on `saidConfidence`, ~stats.ts:1367-1370), each of
+  // which is votes that ran AND agreed. "Can", not "does": `unrecognized` is a
+  // residual by complement, and the comment on it above declines to assert this
+  // column's domain at all. One such row is enough — over that window "the
+  // votes that ran" is a definite description whose extension would include it,
+  // so the universal risks denying votes the window actually holds: the exact
+  // mirror of the older defect above, over-claiming the tie at the residual's
+  // expense instead of denying the tie to protect it.
+  //
+  // Note what the narrower form does NOT do, and why it should survive where
+  // three previous versions of this clause did not: it restricts to the votes
+  // this card can read rather than asserting anything about the residual, so
+  // it stays true whatever that bucket turns out to hold. Every previous break
+  // here was a claim whose truth depended on a bucket's membership.
   //
   // Neither form says "the three checks": three is the PER-FINDING vote count,
   // and a window holding two tied findings ran six.

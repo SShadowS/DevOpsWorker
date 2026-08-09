@@ -654,10 +654,15 @@ describe('computeReviewValue — disputed as factually wrong', () => {
     // U = unrecognized `said_confidence`.
     //
     // Only (tied > 0, unrecognized > 0) selects the tail, so four tails cover
-    // all fifteen: a tie in the mix ⇒ the votes that ran are named; an
-    // unrecognized row in the mix ⇒ its doubt is voiced, window-wide where there
-    // is no tie for it to contradict and scoped to its own rows where there is;
-    // neither ⇒ nothing here checked.
+    // all fifteen: a tie in the mix ⇒ the tie is named, in whichever of its TWO
+    // forms the window licenses (the universal "the votes that ran" where no
+    // unrecognized row is present, the narrower "the votes this card can read"
+    // where one is — see the constant below for why); an unrecognized row in the
+    // mix ⇒ its doubt is voiced, window-wide where there is no tie for it to
+    // contradict and scoped to its own rows where there is; neither ⇒ nothing
+    // here checked. The two tie forms are DELIBERATE, not drift: do not
+    // "restore consistency" by collapsing them without reading that constant —
+    // collapsing them to the universal is how this clause breaks.
     //
     // WHAT THIS TABLE DOES NOT CHECK, and the reason three false states once
     // shipped green: it pins SELECTION, not TRUTH. Feed it four false constants
@@ -677,11 +682,14 @@ describe('computeReviewValue — disputed as factually wrong', () => {
       const CANNOT_CONFIRM =
         'counting this as zero would say nobody disputed these, and this card cannot tell whether anything was checked.';
       // "the votes THIS CARD CAN READ", not "the votes that ran": this tail
-      // renders only where an `unrecognized` row is also present, and those
-      // rows carry a `said_confidence` of `'unanimous'`/`'majority'`/
-      // `'single-vote'` (~stats.ts:1367-1370) — votes that ran AND agreed. A
-      // definite description over the whole window would deny them. The
-      // standalone tie tail above keeps the universal, where it is sound.
+      // renders only where an `unrecognized` row is also present, and such a row
+      // CAN carry a `said_confidence` of `'unanimous'`/`'majority'`/
+      // `'single-vote'` (~stats.ts:1367-1370) — votes that ran AND agreed. "Can"
+      // is the whole point: `unrecognized` is a residual by complement and its
+      // membership is not established, so the clause is written to hold whatever
+      // lands there. A definite description over the whole window would not.
+      // The standalone tie tail above keeps the universal, where it is sound
+      // because that branch requires no unrecognized row at all.
       //
       // Singular here because every combination below contributes exactly one
       // row per bucket, so `agree()` renders "the one". The plural form is
