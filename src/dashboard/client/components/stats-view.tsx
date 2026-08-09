@@ -11,6 +11,7 @@ import { ConfigPanel } from './stats-config.tsx';
 import { CostQualityPanel } from './stats-costquality.tsx';
 import { ReviewValuePanel } from './stats-review-value.tsx';
 import { OperationalPanel } from './stats-operational.tsx';
+import { countOf } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
 // Shell for the Stats & Config tab (Task 4). Owns: the third tab's panel
@@ -63,11 +64,11 @@ export function describePopulationExclusion(population: Population, otherCount: 
   if (population === 'prod') {
     return otherCount === 0
       ? 'No test runs in this window.'
-      : `${otherCount} test run(s) excluded from this window.`;
+      : `${countOf(otherCount, 'test run')} excluded from this window.`;
   }
   return otherCount === 0
     ? 'Showing test runs only. No production reviews in this window.'
-    : `Showing test runs only. ${otherCount} production review(s) excluded from this window.`;
+    : `Showing test runs only. ${countOf(otherCount, 'production review')} excluded from this window.`;
 }
 
 /**

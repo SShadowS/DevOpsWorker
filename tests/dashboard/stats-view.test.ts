@@ -48,7 +48,12 @@ describe('worstStatus', () => {
 describe('describePopulationExclusion', () => {
   test('prod view names how many test runs were excluded', () => {
     expect(describePopulationExclusion('prod', 5))
-      .toBe('5 test run(s) excluded from this window.');
+      .toBe('5 test runs excluded from this window.');
+  });
+
+  test('prod view agrees with a count of exactly one', () => {
+    expect(describePopulationExclusion('prod', 1))
+      .toBe('1 test run excluded from this window.');
   });
 
   test('prod view with nothing excluded says so rather than going silent', () => {
@@ -58,7 +63,12 @@ describe('describePopulationExclusion', () => {
 
   test('test view names the population it is showing', () => {
     expect(describePopulationExclusion('test', 200))
-      .toBe('Showing test runs only. 200 production review(s) excluded from this window.');
+      .toBe('Showing test runs only. 200 production reviews excluded from this window.');
+  });
+
+  test('test view agrees with a count of exactly one', () => {
+    expect(describePopulationExclusion('test', 1))
+      .toBe('Showing test runs only. 1 production review excluded from this window.');
   });
 
   test('test view with nothing excluded says so rather than going silent', () => {
