@@ -34,11 +34,15 @@ const cmd = input.tool_input?.command ?? "";
 // So: split on shell separators, strip any leading `VAR=value` prefixes, and test only
 // the LEADING token of each segment. `docker …` as an argument or inside prose is then
 // invisible, while `docker run …` and `FOO=bar docker compose build` still match.
-// Split on shell separators, but NEVER inside quotes. A quoted regex alternation
-// (`grep 'a\|docker compose b'`) contains a literal `|`; a naive split tore it apart
-// and promoted `docker compose b` to a leading token, blocking a read-only grep on
-// 2026-08-09. Backslash-escaping is not tracked: inside quotes nothing splits anyway,
-// and outside quotes an escaped separator is not a separator we need to honour.
+//
+// The split must not tear apart a quoted separator — a quoted regex alternation
+// (`grep 'a\|docker compose b'`) contains a literal `|`; naively splitting on it
+// promoted `docker compose b` to a leading token, blocking a read-only grep on
+// 2026-08-09. But an UNBALANCED quote is the opposite danger: once a quote opens and
+// never closes, every later separator is swallowed into one segment, its leading token
+// is no longer `docker`, and the guard goes silent instead of catching a real `docker
+// compose up`. Backslash-escaped quotes are not tracked either and can trigger the same
+// unbalanced state — the fallback below covers that case too, not just a missing quote.
 function splitSegments(s: string): string[] {
   const out: string[] = [];
   let buf = '';
@@ -60,6 +64,11 @@ function splitSegments(s: string): string[] {
     buf += c;
   }
   out.push(buf);
+  // An unbalanced quote means the state was wrong from the opening quote onward: every
+  // separator after it was swallowed, so a real `docker compose up` can hide in a
+  // non-leading position. Fall back to the naive split, which over-splits (the bug this
+  // function fixes) but never under-splits. A guard may cry wolf; it may not go silent.
+  if (quote) return s.split(/\n|;|&&|\|\||\|/);
   return out;
 }
 const segments = splitSegments(cmd);
@@ -153,9 +162,22 @@ if (isRun && hasOverlayBuild) {
 // Services bake BUILD_SHA at image-build time, so the built image can be asked what
 // it is. Checked only for `up` WITHOUT a build in the same command — `compose build
 // && compose up -d` is the fix, and blocking the fix is how a guard gets bypassed.
-const isComposeUp = leading.some((s) => /^docker\s+compose\b[^\n]*\bup\b/.test(s));
+const composeUpSegment = leading.find((s) => /^docker\s+compose\b[^\n]*\bup\b/.test(s));
 const alsoBuilds = leading.some((s) => /^docker\s+compose\b[^\n]*\bbuild\b/.test(s));
-if (isComposeUp && !alsoBuilds) {
+// Services actually BUILT from this repo (docker-compose.yml `build:` stanzas) —
+// verified against the file, not assumed. `postgres` and `pg-backup` pull pre-built
+// public images and carry no BUILD_SHA at all, so checking devopsworker-watcher's
+// stamp against a bare-metal Postgres start is a category error. It blocked CLAUDE.md's
+// own documented `docker compose up -d postgres` recipe ("PostgreSQL only, for local
+// development") with a wrong answer. `up` with no service names starts everything,
+// including the built-here services, so that case still needs the check.
+const BUILT_HERE_SERVICES = new Set(["watcher", "dashboard", "webhook-server"]);
+const namedServices = composeUpSegment
+  ? composeUpSegment.replace(/^.*?\bup\b/, "").trim().split(/\s+/).filter((t) => t && !t.startsWith("-"))
+  : [];
+const targetsOnlyNonBuiltServices =
+  namedServices.length > 0 && namedServices.every((s) => !BUILT_HERE_SERVICES.has(s));
+if (composeUpSegment && !alsoBuilds && !targetsOnlyNonBuiltServices) {
   const head = sh(["git", "-C", proj, "rev-parse", "--short", "HEAD"]);
   const env = sh([
     "docker", "image", "inspect", "devopsworker-watcher",
@@ -164,10 +186,18 @@ if (isComposeUp && !alsoBuilds) {
   const built = env.match(/^BUILD_SHA=(.+)$/m)?.[1]?.trim();
   // A generic clone never exports BUILD_SHA and bakes the literal "unknown"; blocking
   // every `up` there would be hostile noise, so the staleness check below stays silent.
-  // But a composed DEPLOYMENT (private/ present — the core gitignores it and probes it
-  // at runtime) then gets NO protection at all: the check can only fire once the sha is
-  // being set, so it protects only installations that already do the right thing. Nudge
-  // those once, with the exact command, rather than staying silent and unfalsifiable.
+  // But a composed DEPLOYMENT gets NO protection at all: the check can only fire once
+  // the sha is being set, so it protects only installations that already do the right
+  // thing. Nudge those once, with the exact command, rather than staying silent and
+  // unfalsifiable.
+  //
+  // `private/` existing (not `hasOverlayBuild` above) is the discriminator. The two
+  // answer different questions: `hasOverlayBuild` is specifically about
+  // private/deploy/docker-build.ps1, the script check (b) names in ITS fix message —
+  // reusing it here would tie this nudge to one script's path rather than to "is this a
+  // composed deployment at all", and go silent on any overlay layout that doesn't
+  // happen to have that exact file yet. The core gitignores `private/` and
+  // default-probes it at runtime, so its presence is the real signal.
   const isDeployment = existsSync(join(proj, "private"));
   if (isDeployment && head && built === "unknown") {
     reasons.push(
@@ -175,21 +205,45 @@ if (isComposeUp && !alsoBuilds) {
       `  the running service is current. \`compose up\` recreates from the EXISTING image —\n` +
       `  it does not rebuild — which is how a watcher sat two commits behind and silently\n` +
       `  could not see a tag it had just been taught (2026-08-03).\n` +
-      `  Fix: BUILD_SHA=$(git rev-parse --short HEAD) docker compose build && docker compose up -d`,
-    );
-  }
-  // Inert when the image does not exist yet (compose will build it), and when
-  // BUILD_SHA was never baked — a generic clone that does not export it bakes the
-  // literal "unknown", and blocking every `up` there would be hostile noise.
-  if (head && built && built !== "unknown" && built !== head) {
-    reasons.push(
-      `The compose service image is stale: devopsworker-watcher was built at ${built}, HEAD is ${head}.\n` +
-      `  \`compose up\` recreates from the EXISTING image — it does not rebuild. The service would\n` +
-      `  keep running ${built} code with no error, which is how a watcher sat two commits behind\n` +
-      `  and silently could not see a tag it had just been taught (2026-08-03).\n` +
       `  Fix: BUILD_SHA=$(git rev-parse --short HEAD) docker compose build && docker compose up -d\n` +
       `  If running the old build is deliberate, run the command from a terminal.`,
     );
+  }
+  // Inert when the image does not exist yet (compose will build it). Also inert when
+  // BUILD_SHA was never baked on a GENERIC CLONE (not a deployment) — blocking every
+  // `up` there would be hostile noise. A composed deployment in the same unstamped
+  // state is NOT silent: the nudge above already caught it.
+  if (head && built && built !== "unknown") {
+    // A plain `built !== head` comparison is a false positive on every commit that
+    // doesn't touch the image — this task's own commit moved HEAD past the sha the
+    // image was built at without changing a byte that goes into the image, and the
+    // guard blocked anyway (2026-08-09). Gate on whether the paths the Dockerfile
+    // actually bakes moved, not on HEAD identity. Path list verified against the
+    // Dockerfile's COPY lines: package.json, bun.lock, src/, scripts/, tsconfig.json
+    // (COPY ... at lines 48-52) and docker/claude-settings.json, docker/entrypoint.sh,
+    // docker/fetch-al-extension.sh (COPY ... at lines 101-105) — plus the Dockerfile
+    // itself, since changing the recipe is also a reason to rebuild.
+    const IMAGE_INPUT_PATHS = ["src", "Dockerfile", "package.json", "bun.lock", "tsconfig.json", "scripts", "docker"];
+    const diffProbe = Bun.spawnSync({
+      cmd: ["git", "-C", proj, "diff", "--quiet", `${built}..HEAD`, "--", ...IMAGE_INPUT_PATHS],
+    });
+    // exit 0 = quiet = none of the paths the image actually bakes changed since `built`
+    // — current regardless of HEAD identity. exit 1 = a real diff in those paths.
+    // Anything else (128 = `built` unresolvable, e.g. after a history rewrite) can't be
+    // verified either way — fail toward blocking, not silence, per this file's own rule.
+    if (diffProbe.exitCode !== 0) {
+      const why = diffProbe.exitCode === 1
+        ? `HEAD (${head}) has since changed a path the image actually bakes`
+        : `git could not diff ${built}..HEAD to check (that commit may no longer be reachable)`;
+      reasons.push(
+        `The compose service image may be stale: devopsworker-watcher was built at ${built}, and ${why}.\n` +
+        `  \`compose up\` recreates from the EXISTING image — it does not rebuild. The service would\n` +
+        `  keep running ${built} code with no error, which is how a watcher sat two commits behind\n` +
+        `  and silently could not see a tag it had just been taught (2026-08-03).\n` +
+        `  Fix: BUILD_SHA=$(git rev-parse --short HEAD) docker compose build && docker compose up -d\n` +
+        `  If running the old build is deliberate, run the command from a terminal.`,
+      );
+    }
   }
 }
 

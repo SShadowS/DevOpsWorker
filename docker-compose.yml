@@ -26,8 +26,10 @@ services:
       # a stale or fabricated sha. Pass the real sha with:
       #   BUILD_SHA=$(git rev-parse --short HEAD) docker compose build
       # Leaving it unset is not neutral: the stale-image guard in
-      # .claude/hooks/docker-guard.ts cannot compare an unstamped image against HEAD,
-      # so an unstamped deployment gets no staleness protection at all.
+      # .claude/hooks/docker-guard.ts cannot compare an unstamped image against HEAD.
+      # On a composed deployment (private/ present) it does not go silent about
+      # that — it blocks `compose up` and asks you to stamp it. A generic clone
+      # without private/ stays unblocked, since it never opted into the practice.
       args:
         BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
