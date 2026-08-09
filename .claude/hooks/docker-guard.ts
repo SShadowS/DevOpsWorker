@@ -100,27 +100,42 @@ const segments = splitSegments(cmd);
 // and printing, as its fix, the very command it had just blocked (2026-08-09).
 // That command is the one this file's own message tells you to run.
 //
-// So a `$(…)` group is consumed whole, spaces and all, before falling back to
-// single non-space characters.
+// So a value is consumed in whole UNITS — a quoted string, or a `$(…)` group,
+// spaces and all — before falling back to single non-space characters.
 //
-// TWO PROPERTIES OF THIS PATTERN, both measured, both easy to break by tidying it:
+// The QUOTED branches are not decoration. Consuming `$(…)` alone fixed the
+// stamped build but broke the opposite direction, because the strip then walked
+// straight past a quote boundary:
 //
-//  - The `$(…)` and `\S` branches deliberately OVERLAP. Making them disjoint
-//    (`\$(?!\()` plus `[^\s$]`) is the obvious cleanup and it reintroduces a
-//    fail-open: on an UNTERMINATED `$(`, neither disjoint branch matches, the
-//    strip consumes nothing, and `A=$(oops docker compose up` goes silent.
-//    With the overlap, `\S` still eats it and the guard fails toward checking.
-//  - The overlap costs backtracking: ~2 paths per `$(…)` when the tail cannot
-//    match, measured at 0.7ms for 15 groups, 82ms for 22. Real commands carry
-//    one or two, so this is charged against nothing — but do not widen the
-//    alternation further without re-measuring it.
+//   CMD='BUILD_SHA=$(git rev-parse --short HEAD) docker compose build' bun -e …
 //
-// KNOWN LIMIT, not fixed here: a QUOTED value containing a space
-// (`MSG="a b" docker compose build`) still leaves `b" docker …` as the leading
-// token and goes silent. It predates this fix — the old pattern missed it too —
-// and closing it needs the strip to understand quoting, which is the shell
-// parser this hook does not warrant. Listed so the gap is visible, not silent.
-const leading = segments.map((s) => s.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:\$\([^)]*\)|\S)*\s+)*/, ''));
+// had `CMD='BUILD_SHA=$(…)` eaten, leaving `docker compose build' bun -e …` as
+// the leading token — so a `bun` command was blocked as though it were a docker
+// build. That is the obstructive false positive this file's header describes,
+// and it fired on the second command written after the fix. The quoted branches
+// consume the whole value, which also closes a fail-open BOTH earlier patterns
+// had: `MSG="a b" docker compose build` used to leave `b" docker …` and go
+// silent.
+//
+// THREE PROPERTIES OF THIS PATTERN, all measured, all easy to break by tidying it:
+//
+//  - The branches deliberately OVERLAP (`\S` matches a quote or a `$` too).
+//    Making them disjoint (`\$(?!\()` plus `[^\s$]`) is the obvious cleanup and
+//    it reintroduces a fail-open: on an UNTERMINATED `$(` or an unbalanced
+//    quote, no specific branch matches, the strip consumes nothing, and
+//    `A=$(oops docker compose up` goes silent. With the overlap, `\S` still eats
+//    it and the guard fails toward checking.
+//  - Order matters: quotes are tried before `\S` so a quoted value is taken
+//    whole rather than one character at a time.
+//  - The overlap costs backtracking: ~2 paths per unit when the tail cannot
+//    match, measured at 0.8ms for 15 `$(…)` groups and 110ms for 22. Real
+//    commands carry one or two, so this is charged against nothing — but do not
+//    widen the alternation again without re-measuring it.
+//
+// Checked against 18 command shapes covering both directions (the strip must
+// expose `docker` in 11 of them and must NOT in 7); this pattern is the first
+// to get all 18, against 13 for the original and 15 for the `$(…)`-only fix.
+const leading = segments.map((s) => s.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\$\([^)]*\)|\S)*\s+)*/, ''));
 const touchesDocker =
   leading.some((s) => /^docker\s+(compose|build|run)\b/.test(s)) ||
   // The deploy script is a docker build by another name — but only when RUN, not when
