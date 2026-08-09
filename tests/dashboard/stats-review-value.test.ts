@@ -1091,7 +1091,7 @@ describe('computeReviewValue — raised vs traced', () => {
       const o = computeReviewValue(rows(), spend(), { readBandRaised: 6, noFileAnchor: 1 });
       expect(o.traceability.untraceable).toBe(3);
       expect(o.traceability.reconciled).toBe(false);
-      expect(o.traceabilityNote).toContain('1 of them is explained by having no file anchor');
+      expect(o.traceabilityNote).toContain('1 of them is explained by not being tied to a specific file');
       expect(o.traceabilityNote).toContain('remaining 2 are not explained');
       expect(o.traceabilityNote).not.toContain('fully accounted for');
     });
@@ -1099,9 +1099,9 @@ describe('computeReviewValue — raised vs traced', () => {
     test('a wholly-unexplained gap does NOT state the file-anchor cause it just denied', () => {
       const o = computeReviewValue(rows(), spend(), { readBandRaised: 6, noFileAnchor: 0 });
       expect(o.traceability.reconciled).toBe(false);
-      expect(o.traceabilityNote).toContain('None of that gap is explained by a missing file anchor');
+      expect(o.traceabilityNote).toContain('None of that gap is explained by findings that were not tied to a specific file');
       // The cause sentence must not also appear — that was the contradiction.
-      expect(o.traceabilityNote).not.toContain('are explained by having no file anchor');
+      expect(o.traceabilityNote).not.toContain('explained by not being tied to a specific file');
       expect(o.traceabilityNote).not.toContain('0 of them');
     });
 
@@ -1128,7 +1128,7 @@ describe('computeReviewValue — raised vs traced', () => {
       const o = computeReviewValue(rows(), spend(), { readBandRaised: 3, noFileAnchor: 2 });
       expect(o.traceability.untraceable).toBe(0);
       expect(o.traceabilityNote).toContain('counting differently');
-      expect(o.traceabilityNote).not.toContain('every one of them is traceable');
+      expect(o.traceabilityNote).not.toContain('can eventually be checked');
     });
 
     // This test previously asserted only `toContain('counting differently')`,
@@ -1142,14 +1142,14 @@ describe('computeReviewValue — raised vs traced', () => {
       expect(o.judged).toBe(0);
       expect(o.traceability.untraceable).toBe(0);
       expect(o.traceabilityNote).not.toContain('has a verdict');
-      expect(o.traceabilityNote).toContain('has an inline thread');
+      expect(o.traceabilityNote).toContain('was matched to a review comment');
       expect(o.traceabilityNote).toContain('counting differently');
     });
 
     test('zero raised says there is nothing to trace rather than that everything is traceable', () => {
       const o = computeReviewValue([], spend(), { readBandRaised: 0, noFileAnchor: 0 });
-      expect(o.traceabilityNote).toContain('No read-band findings were raised');
-      expect(o.traceabilityNote).not.toContain('Every read-band finding');
+      expect(o.traceabilityNote).toContain('No findings were raised');
+      expect(o.traceabilityNote).not.toContain('Every finding raised in this window');
     });
   });
 
@@ -1165,7 +1165,7 @@ describe('computeReviewValue — raised vs traced', () => {
   test('with no gap the note says so plainly rather than going silent', () => {
     const o = compute(rows(), spend());
     expect(o.traceability.untraceable).toBe(0);
-    expect(o.traceabilityNote).toContain('every one of them is traceable');
+    expect(o.traceabilityNote).toContain('every one of them can eventually be checked');
   });
 
   test('engagement and lead-time denominators stay on TRACED rows, not on raised', () => {
@@ -1185,15 +1185,15 @@ describe('computeReviewValue — raised vs traced', () => {
 // ---------------------------------------------------------------------------
 
 describe('computeReviewValue — stated limits are carried on the payload, not left to the reader', () => {
-  test('the reproducibility limit names aggregates as usable and rows as not', () => {
+  test('the reproducibility limit names the totals as usable and one finding\'s verdict as not', () => {
     const o = compute(mixedWindow(), spend());
     expect(o.reproducibilityNote).toContain('33%');
-    expect(o.reproducibilityNote).toContain('aggregates');
+    expect(o.reproducibilityNote).toContain('totals');
   });
 
-  test('the scope note says unsettled PRs are excluded rather than counted as ignored', () => {
+  test('the scope note says unsettled pull requests are excluded rather than counted as ignored', () => {
     const o = compute(mixedWindow(), spend());
-    expect(o.scopeNote).toContain('SETTLED');
+    expect(o.scopeNote).toContain('merged or closed');
     expect(o.scopeNote.toLowerCase()).toContain('excluded');
   });
 });

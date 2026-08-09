@@ -1672,7 +1672,7 @@ export interface ReviewValueOutcome {
  */
 function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileAnchor: number): string {
   if (raisedCount === 0) {
-    return 'No read-band findings were raised in this window, so there is nothing to trace.';
+    return 'No findings were raised in this window, so there is nothing to trace.';
   }
 
   if (untraceable === 0) {
@@ -1682,16 +1682,16 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
     // a window with nothing judged at all. Both branches now claim only
     // traceability, which is what `untraceable === 0` actually means.
     return noFileAnchor === 0
-      ? 'Every read-band finding raised in this window has an inline thread, so every one of them is traceable.'
-      : `Every read-band finding raised in this window has an inline thread, yet ${countOf(noFileAnchor, 'of them was', 'of them were')} ` +
-        'recorded without a file anchor and should not have been traceable at all. The two sources are counting ' +
+      ? 'Every finding raised in this window was matched to a review comment, so every one of them can eventually be checked.'
+      : `Every finding raised in this window was matched to a review comment, yet ${countOf(noFileAnchor, 'of them was', 'of them were')} ` +
+        'recorded as not tied to a specific file, which should have made a match impossible. The two sources are counting ' +
         'differently — reconcile them before quoting this section.';
   }
 
   const explained = Math.min(noFileAnchor, untraceable);
   const head =
-    `${untraceable} of ${countOf(raisedCount, 'read-band finding')} raised in this window ` +
-    `${agree(untraceable, 'has', 'have')} NO verdict and can never be given one. ` +
+    `${untraceable} of ${countOf(raisedCount, 'finding')} raised in this window ` +
+    `could not be matched to a review comment, so ${agree(untraceable, 'it was', 'they were')} never checked, and never can be. ` +
     `${agree(untraceable, 'It is', 'They are')} counted in "raised" and in nothing else.`;
 
   // MORE file-less findings than gap means some file-less finding was traced
@@ -1702,8 +1702,9 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
   // to avoid, just one level up.
   if (noFileAnchor > untraceable) {
     return (
-      `${head} More findings raised here carry no file anchor (${noFileAnchor}) than the gap itself (${untraceable}), ` +
-      'so at least one file-less finding was traced anyway — which the anchoring rule says cannot happen. These two ' +
+      `${head} More findings here were recorded as not tied to a specific file (${noFileAnchor}) than the number that could not ` +
+      `be matched to a review comment (${untraceable}), so at least one finding with no file must have been matched anyway — ` +
+      'which cannot happen if a review comment always needs a file to attach to. These two ' +
       'counts do not describe the same population; reconcile them before quoting this section.'
     );
   }
@@ -1711,12 +1712,12 @@ function buildTraceabilityNote(raisedCount: number, untraceable: number, noFileA
   const remainder = untraceable - explained;
   const cause =
     explained === 0
-      ? ' None of that gap is explained by a missing file anchor, which is the only cause this card knows about — ' +
+      ? ' None of that gap is explained by findings that were not tied to a specific file, which is the only cause this card knows about — ' +
         'the two sources are counting differently, and the gap should be reconciled before this line is quoted.'
       : explained === untraceable
-        ? ' The gap is fully accounted for: a thread is anchored to a file, and a PR-level finding has no file to anchor to.'
-        : ` ${explained} of ${itThem(untraceable)} ${agree(explained, 'is', 'are')} explained by having no file anchor ` +
-          '(a thread is anchored to a file, and a PR-level finding has no file to anchor to). The remaining ' +
+        ? ' The gap is fully accounted for: a review comment is placed on one specific file, and each of these findings was about the pull request as a whole, with no single file to place a comment on.'
+        : ` ${explained} of ${itThem(untraceable)} ${agree(explained, 'is', 'are')} explained by not being tied to a specific file ` +
+          '(a review comment is placed on one specific file, and these findings were about the pull request as a whole, not any one file). The remaining ' +
           `${remainder} ${agree(remainder, 'is', 'are')} not explained, and should be reconciled before this line is quoted.`;
 
   return head + cause;
@@ -2108,12 +2109,12 @@ export function computeReviewValue(
     },
     traceabilityNote: buildTraceabilityNote(findingsRaised, untraceable, raised.noFileAnchor),
     reproducibilityNote:
-      'Row-level verdicts are not reproducible: a single ballot flipped on 33% of byte-identical re-runs, which is ' +
-      'why each finding is judged by 3 ballots and why the verdict collapses to three values. The aggregates on ' +
-      'this card are usable; any individual finding\'s verdict is not.',
+      'A single finding\'s verdict is not reproducible: one ballot flipped on 33% of identical re-runs, which is ' +
+      'why each finding is judged by 3 ballots, and why the verdict can only land on one of three outcomes. The ' +
+      'totals on this card are usable; any one finding\'s verdict is not.',
     scopeNote:
-      'Read-band (critical/major) findings on PRs that have SETTLED — completed or abandoned. A finding on a ' +
-      'still-open PR is excluded entirely, never counted as ignored: the team may still act on it.',
+      'Findings flagged as critical or major, on pull requests that have been merged or closed. A finding on a ' +
+      'still-open pull request is excluded entirely, never counted as ignored: the team may still act on it.',
   };
 }
 
