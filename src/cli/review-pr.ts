@@ -1385,6 +1385,15 @@ export async function reviewPR(args: string[]): Promise<void> {
           appliedLevers,
           imageSha: process.env['BUILD_SHA'] ?? null,
           isTest: isTestRun(),
+          // What the reviewer noticed while reading, kept apart from `reviewPath`,
+          // which is what the router decided before any money was spent. When the two
+          // disagree the router has a blind spot — see the column comment in postgres.ts.
+          //
+          // Only the full reviewer answers this. The sanity reviewer returns a different
+          // shape and has nothing to add: that path runs only when the router already
+          // identified the port, so there is no disagreement to record.
+          observedCherryPick: 'observedCherryPick' in result.output ? (result.output.observedCherryPick ?? null) : null,
+          observedCherryPickSource: 'observedCherryPickSource' in result.output ? (result.output.observedCherryPickSource ?? null) : null,
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -1431,6 +1440,10 @@ export async function reviewPR(args: string[]): Promise<void> {
         appliedLevers,
         imageSha: process.env['BUILD_SHA'] ?? null,
         isTest: isTestRun(),
+        // A failed review reached no conclusion about anything, this included.
+        // Null, not false — "we never found out" is not "it is not a port".
+        observedCherryPick: null,
+        observedCherryPickSource: null,
       });
     }
 

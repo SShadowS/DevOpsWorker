@@ -75,6 +75,22 @@ export interface PRReviewRow {
   imageSha: string | null;
   /** True when this run must be excluded from production statistics. */
   isTest: boolean;
+  /** What the reviewer noticed while reading, not what the router decided before
+   *  spending: true when the review itself concluded the change is a port of an
+   *  earlier one. Kept apart from `reviewPath` on purpose — that field records a
+   *  deterministic pre-flight decision, and mixing a model's observation into it
+   *  would make the field every cost analysis leans on unfalsifiable.
+   *
+   *  Read it as a check on the router, not as a saving: it arrives after the
+   *  expensive review has run. `reviewPath` of `full:not a cherry-pick` beside a
+   *  true here means the router missed one. Null means the row predates the field
+   *  or the reviewer said nothing — never that the change is not a port. */
+  observedCherryPick: boolean | null;
+  /** The source PR the reviewer named, when it identified one. Usually null even
+   *  when `observedCherryPick` is true — most reviews say a change is a port
+   *  without naming which PR it came from, which is why this cannot drive the
+   *  cheap review path. */
+  observedCherryPickSource: number | null;
 }
 
 export interface IPRReviewStore {

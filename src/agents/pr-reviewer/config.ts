@@ -56,10 +56,46 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
   const descLower = pr.description?.toLowerCase() ?? '';
   const descMatch = /cherry[- ]picked? from/.test(descLower);
 
-  const isCherryPick = titleMatch || descMatch;
+  // The second shape, written by the backport tooling rather than the Azure DevOps
+  // button: `Merged PR 52705: [Cherry-pick 25] Remove DK prefix...`. The marker sits
+  // mid-title in brackets and no description ever says "picked FROM" anything, so
+  // neither test above sees it. Nine reviews took the full path on this shape and cost
+  // $63.71 between them against roughly $0.42 a review on the cheap path.
+  //
+  // The number in the bracket is the Business Central version branch (25.x, 26.x), NOT
+  // a PR id — `\d+` is matched only to anchor the form, and never read as an id.
+  const BRACKETED = /\[cherry[- ]pick\s*\d*\s*\]/i;
+  const bracketMatch = BRACKETED.test(pr.title) || BRACKETED.test(pr.description ?? '');
+
+  // A revert of a port quotes the port's own title, marker and all, so every test above
+  // says yes to it. It is the opposite of a port — it takes a change away — and the
+  // cheap path would compare it against the very PR it undoes, calling every file
+  // "diverged". Reverts are rare and read cheap; send them down the full path.
+  const isRevert = /^\s*revert\b/i.test(pr.title);
+
+  const isCherryPick = !isRevert && (titleMatch || descMatch || bracketMatch);
   if (!isCherryPick) return { isCherryPick: false };
 
   let originalPrId: number | undefined;
+
+  // `Merged PR <id>:` is what a squash merge writes at the front of the message, so on a
+  // port it names the PR this branch was taken from. On a port of a port the prefixes
+  // nest — `Merged PR 52705: Merged PR 52680: [Cherry-pick 26] …` — and the FIRST is the
+  // nearest ancestor, matching the "newest trailer wins" rule below.
+  //
+  // Only consulted once the cherry-pick marker is present. Every squash-merged PR in this
+  // organisation carries this prefix, so on its own it means nothing at all.
+  // The trailing colon is required, and it is the whole guard against prose. A squash
+  // merge always writes `Merged PR 52705:` as a prefix; a sentence like "align with what
+  // merged PR 51000 did" names a PR that is not this change's parent, and nothing
+  // downstream would catch that — 51000 is real, same-repo and fetchable, so the cheap
+  // path would compare against the wrong change and report on it confidently.
+  const mergedParent = (text: string | undefined): number | undefined => {
+    const m = text?.match(/merged pr (\d+):/i);
+    return m ? parseInt(m[1]!, 10) : undefined;
+  };
+  const parentFromTitle = mergedParent(pr.title) ?? mergedParent(pr.description);
+
   if (pr.description) {
     // Ordered by how strongly each form indicates the SOURCE of this port.
     //
@@ -79,9 +115,20 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
     const lastTrailer = trailers[trailers.length - 1];
     const urlMatch = pr.description.match(/\/pullrequest\/(\d+)/);
     const refMatch = pr.description.match(/!(\d+)/);
-    const chosen = lastTrailer?.[1] ?? urlMatch?.[1] ?? refMatch?.[1];
-    if (chosen) originalPrId = parseInt(chosen, 10);
+    // 4. The `Merged PR <id>:` prefix. It outranks the URL and the bare `!<id>` when the
+    //    bracketed marker is present, and only then: on that shape the prefix is written
+    //    by the backport tooling and is structural, while a URL or a bare `!<id>` in the
+    //    same description is prose a person typed. That is the 52307 lesson applied to
+    //    the newer shape — a cited sibling PR is real, same-repo and fetchable, so
+    //    picking it over the true parent is a mistake no later guard can catch. An
+    //    explicit trailer still wins over everything: it names the source outright.
+    const chosen = bracketMatch
+      ? (lastTrailer?.[1] ?? parentFromTitle ?? urlMatch?.[1] ?? refMatch?.[1])
+      : (lastTrailer?.[1] ?? urlMatch?.[1] ?? refMatch?.[1]);
+    if (chosen) originalPrId = typeof chosen === 'number' ? chosen : parseInt(chosen, 10);
   }
+
+  originalPrId ??= parentFromTitle;
 
   return { isCherryPick, originalPrId };
 }

@@ -321,6 +321,7 @@ export async function readPRReviews(store: IPRReviewStore, actionStore?: IAction
     pendingStatus: undefined as 'queued' | 'reviewing' | undefined,
     isTest: r.isTest,
     reviewPath: r.reviewPath,
+    observedCherryPick: r.observedCherryPick,
   }));
 
   // Merge pending/in-progress reviews from the action queue
@@ -353,6 +354,8 @@ export async function readPRReviews(store: IPRReviewStore, actionStore?: IAction
         isTest: false,
         // Nor does it have a route yet — that is decided when the review runs.
         reviewPath: null,
+        // Nothing has read this PR yet, so nobody has observed anything about it.
+        observedCherryPick: null,
       });
     }
   }
@@ -370,6 +373,6 @@ export async function readPRReviewDetail(store: IPRReviewStore, id: number): Pro
     durationMs: r.durationMs, turns: r.turns, toolCalls: r.toolCalls, error: r.error,
     createdAt: r.createdAt, webUrl: buildPrWebUrl(r.repoKey, r.prId),
     pendingStatus: undefined, reviewBody: r.reviewBody, isTest: r.isTest,
-    reviewPath: r.reviewPath,
+    reviewPath: r.reviewPath, observedCherryPick: r.observedCherryPick,
   };
 }

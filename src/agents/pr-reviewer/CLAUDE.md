@@ -393,6 +393,10 @@ Return the PRReviewResult with:
   - The severity counts in `findings` must agree with the entries here.
   - If a finding matches one listed under "Findings already tracked on this PR", reuse that row's `file` and `title` verbatim here.
 - **reviewBody**: the COMPLETE formatted review markdown from step 9 (identical to what you posted/would post as the comment). Always include this, including in REPLAY MODE.
+- **observedCherryPick**: `true` if, while reading, you concluded this PR ports a change made earlier on another branch. Answer from what you saw — a `(cherry picked from commit …)` trailer, a `[Cherry-pick 25]` marker in the title, a description that nests earlier PRs, an identical change already merged elsewhere. Say `true` even when the prompt carried no `## Cherry-Pick Detected` section: that section is written by a check that runs before you start, and the whole point of this field is to catch what that check missed. Omit the field if you never considered the question.
+- **observedCherryPickSource**: the PR number this was ported FROM, if you identified one. Omit unless you are confident. A bracketed number is a Business Central version branch, not a PR — `[Cherry-pick 25]` means 25.x. A `Merged PR 52705:` prefix, on the other hand, does name a PR.
+
+These two fields do not change the review you post, and they cannot make this review cheaper — the routing decision was made before you started. They exist so a reviewer that spots a port the pre-flight check missed leaves a record of the miss.
 
 Critical and Major entries that carry a `file` and `line` are additionally posted as
 line-anchored PR threads (at most 5, Critical first). You do not post these — the pipeline

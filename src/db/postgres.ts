@@ -140,6 +140,26 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS image_sha TEXT;
 -- here genuinely means production, so a nullable column would invent a third
 -- state the UI would have to explain.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT false;
+-- What the reviewer noticed WHILE reading, as opposed to what the router decided
+-- BEFORE spending: true when the review itself concluded this change is a port of
+-- an earlier one. Deliberately a separate column from review_path, which records a
+-- deterministic pre-flight decision — folding a model's observation into it would
+-- make the one column any cost analysis leans on unfalsifiable.
+--
+-- Its value is the disagreement. review_path = 'full:not a cherry-pick' beside
+-- observed_cherry_pick = true means the router has a blind spot, and it cannot save
+-- money on that run because the review has already happened. Nine such rows sat
+-- undetected for weeks at about $7 each, with the contradicting evidence in a text
+-- column nobody joined against.
+--
+-- Null means the review predates this field or the reviewer said nothing — never
+-- read it as "not a port".
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS observed_cherry_pick BOOLEAN;
+-- The source PR the reviewer named, when it managed to identify one. Usually null
+-- even when observed_cherry_pick is true: of the nine misses, one review named a
+-- source PR in a parseable form. So this cannot drive the cheap path on its own —
+-- only the router's pre-flight detection can.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS observed_cherry_pick_source INTEGER;
 
 CREATE TABLE IF NOT EXISTS finding_outcomes (
   pr_id           INTEGER NOT NULL,

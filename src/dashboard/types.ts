@@ -130,6 +130,12 @@ export interface DashboardPRReview {
    *  otherwise. null for a queued review (no row yet) and for every row written before
    *  the column existed, so absence means "not known", never "was a full review". */
   reviewPath: string | null;
+  /** True when the reviewer itself concluded, while reading, that this change ports an
+   *  earlier one. Set apart from `reviewPath`, which is what the router decided before
+   *  the review ran: the two disagreeing is the signal, because it means the pre-flight
+   *  check missed a port and the expensive path was taken for nothing. Null when the row
+   *  predates the field, when the review failed, or on the cheap path — never "no". */
+  observedCherryPick: boolean | null;
 }
 
 export interface DashboardPRReviewDetail extends DashboardPRReview {

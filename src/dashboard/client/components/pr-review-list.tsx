@@ -1,6 +1,6 @@
 import { prReviews, selectedPRReviewId } from '../store.ts';
 import { formatDuration, formatCost, formatRelativeTime } from '../format.ts';
-import { RecommendationBadge, FindingsPills } from './pr-review-bits.tsx';
+import { RecommendationBadge, FindingsPills, CherryPickMark } from './pr-review-bits.tsx';
 import { PRReviewDetail } from './pr-review-detail.tsx';
 
 function togglePR(id: number): void {
@@ -41,6 +41,26 @@ export function cherryPickSourcePr(review: { reviewPath?: string | null }): numb
   return Number.isFinite(id) ? id : null;
 }
 
+/**
+ * True when the reviewer said this change is a port of an earlier one and the check that
+ * runs before it did not. That check decides which reviewer to spend money on, so a miss
+ * costs the difference between a full read and a cheap comparison — around $7 against
+ * $0.42 on the reviews that exposed this. The reviewer's own answer arrives far too late
+ * to save that, which is exactly why it is worth surfacing: it is the only evidence that
+ * the pre-flight check has a blind spot.
+ *
+ * Requires an explicit `true` — a null means the row predates the field or the review
+ * failed, and neither is a claim that the change is not a port.
+ */
+export function routerMissedCherryPick(review: { observedCherryPick?: boolean | null; reviewPath?: string | null }): boolean {
+  // Exactly this one reason, not any `full:`. The router writes several other `full:`
+  // reasons AFTER it has already recognised the port — the caller asked for a full read
+  // with /review-full, the source PR was not found, its diff would not compute, the
+  // trailer named no id. Those rows are not blind spots, and marking them as such would
+  // brand the designed "ask for a deeper look" workflow a defect.
+  return review.observedCherryPick === true && review.reviewPath === 'full:not a cherry-pick';
+}
+
 export function PRReviewList() {
   const reviews = prReviews.value;
 
@@ -48,8 +68,17 @@ export function PRReviewList() {
     return <p class="empty-state">No PR reviews found.</p>;
   }
 
+  const missed = reviews.filter(routerMissedCherryPick).length;
+
   return (
     <div class="pr-review-list">
+      {missed > 0 && (
+        <p class="pr-review-list__note">
+          {missed} of these {reviews.length} reviews read a change in full that the reviewer
+          then recognised as a port of an earlier one. Each is marked below. The check that
+          picks the cheap path missed them, so they cost full price.
+        </p>
+      )}
       {reviews.map((r) => {
         const interactive = r.id >= 0;
         const expanded = selectedPRReviewId.value === r.id;
@@ -87,20 +116,14 @@ export function PRReviewList() {
                 ) : (
                   <span class="pr-review-row__pr" title={`PR #${r.prId} (repo "${r.repoKey}" not registered)`}>PR #{r.prId}</span>
                 )}
+                {cherryPickSourcePr(r) != null && <CherryPickMark sourcePr={cherryPickSourcePr(r)!} />}
+                {cherryPickSourcePr(r) == null && routerMissedCherryPick(r) && <CherryPickMark missed />}
                 <span class="pr-review-row__repo">{r.repoKey}</span>
                 <span class="pr-review-row__branch" title={r.sourceBranch}>{r.sourceBranch}</span>
                 <RecommendationBadge rec={r.recommendation} hasError={!!r.error} pendingStatus={r.pendingStatus} />
                 <FindingsPills findings={r.findings} />
                 {badgeForReview(r) && (
                   <span class="pr-review__badge pr-review__badge--test" title="Excluded from production statistics">test</span>
-                )}
-                {cherryPickSourcePr(r) != null && (
-                  <span
-                    class="pr-review__badge pr-review__badge--cherry-pick"
-                    title={`cherry-picked from PR #${cherryPickSourcePr(r)} — checked against that PR's review instead of read in full`}
-                  >
-                    cherry-pick
-                  </span>
                 )}
               </div>
               <div class="pr-review-row__meta">
