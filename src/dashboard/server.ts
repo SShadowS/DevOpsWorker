@@ -14,6 +14,12 @@ import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import { LogPoller } from './log-poller.ts';
 import { parseWindow, parsePopulation, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getReviewValueStats, getDriftStats } from './stats.ts';
 import { buildConfigReport } from './config-report.ts';
+import type { IUserStore } from '../auth/user-store.interface.ts';
+import type { ISessionStore } from '../auth/session-store.interface.ts';
+import type { AuthUser } from '../auth/types.ts';
+import { authenticate, handleLogin, handleLogout, handleMe, handleAuthStatus, originAllowed, type AuthDeps } from '../auth/http.ts';
+import { requiredAccess } from '../auth/route-access.ts';
+import { LoginRateLimiter } from '../auth/rate-limit.ts';
 
 // ---------------------------------------------------------------------------
 // Learn-rules in-progress tracking
@@ -57,10 +63,19 @@ export interface DashboardOptions {
    *  endpoints need `percentile_cont` and per-row JSONB shaping that the
    *  typed store interfaces don't expose (see `src/dashboard/stats.ts`). */
   sql: postgres.Sql;
+  userStore: IUserStore;
+  sessionStore: ISessionStore;
 }
 
 export function startDashboard(options: DashboardOptions): void {
   const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql } = options;
+
+  const authDeps: AuthDeps = {
+    userStore: options.userStore,
+    sessionStore: options.sessionStore,
+    rateLimiter: new LoginRateLimiter(),
+    secureCookies: process.env['DASHBOARD_SECURE_COOKIES'] === '1',
+  };
 
   const logPoller = new LogPoller(logSink, stateStore, broadcastSSE);
 
@@ -117,9 +132,35 @@ export function startDashboard(options: DashboardOptions): void {
   const server = Bun.serve({
     port,
     idleTimeout: 255, // Max value — SSE connections are long-lived
-    async fetch(req) {
+    async fetch(req, server) {
       const url = new URL(req.url);
       const path = url.pathname;
+
+      // ---- Auth gate. Everything below this block requires a session unless
+      // ---- the route-access table says 'public'. Default is 'operator'.
+      if (path === '/api/auth/login' && req.method === 'POST') {
+        const ip = server.requestIP(req)?.address ?? 'unknown';
+        return handleLogin(req, authDeps, ip);
+      }
+      if (path === '/api/auth/status' && req.method === 'GET') {
+        return handleAuthStatus(authDeps);
+      }
+
+      const access = requiredAccess(req.method, path);
+      let user: AuthUser | null = null;
+      if (access !== 'public') {
+        user = await authenticate(req, authDeps);
+        if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
+        if (access === 'admin' && user.role !== 'admin') {
+          return Response.json({ error: 'This needs the admin role' }, { status: 403 });
+        }
+        if (req.method !== 'GET' && !originAllowed(req)) {
+          return Response.json({ error: 'Cross-origin request rejected' }, { status: 403 });
+        }
+      }
+
+      if (path === '/api/auth/me' && req.method === 'GET') return handleMe(user!);
+      if (path === '/api/auth/logout' && req.method === 'POST') return handleLogout(req, authDeps);
 
       // Action submission endpoint
       if (path === '/api/actions' && req.method === 'POST') {
