@@ -67,7 +67,18 @@ export interface DashboardOptions {
   sessionStore: ISessionStore;
 }
 
-export function startDashboard(options: DashboardOptions): void {
+/** What `startDashboard` hands back: the underlying Bun server (its `.port` is
+ *  the actually-bound port, useful with an ephemeral `port: 0` in tests) and a
+ *  `stop()` that clears the heartbeat + poller intervals and closes the
+ *  server. The CLI entry point ignores this — the process only ever exits via
+ *  a signal. Tests must call `stop()` in an `afterAll`, or the intervals keep
+ *  the runner alive after the test file finishes. */
+export interface DashboardHandle {
+  server: ReturnType<typeof Bun.serve>;
+  stop(): void;
+}
+
+export function startDashboard(options: DashboardOptions): DashboardHandle {
   const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql } = options;
 
   const authDeps: AuthDeps = {
@@ -82,7 +93,7 @@ export function startDashboard(options: DashboardOptions): void {
   // Write heartbeat on startup and every 30 seconds
   const heartbeat = () => { void Promise.resolve(runnerStatus.writeHeartbeat('dashboard')).catch(() => {}); };
   heartbeat();
-  setInterval(heartbeat, 30_000);
+  const heartbeatInterval = setInterval(heartbeat, 30_000);
 
   // Wire up SSE broadcasts on state changes (same-process writes)
   stateStore.onChange = async (workItemId) => {
@@ -123,11 +134,13 @@ export function startDashboard(options: DashboardOptions): void {
   }, 2_000);
 
   // Clean up on process exit
-  process.on('beforeExit', () => {
+  const clearAllIntervals = () => {
+    clearInterval(heartbeatInterval);
     clearInterval(sessionPollInterval);
     clearInterval(prReviewPollInterval);
     clearInterval(actionsPollInterval);
-  });
+  };
+  process.on('beforeExit', clearAllIntervals);
 
   const server = Bun.serve({
     port,
@@ -139,6 +152,7 @@ export function startDashboard(options: DashboardOptions): void {
       // ---- Auth gate. Everything below this block requires a session unless
       // ---- the route-access table says 'public'. Default is 'operator'.
       if (path === '/api/auth/login' && req.method === 'POST') {
+        if (!originAllowed(req)) return Response.json({ error: 'Cross-origin request rejected' }, { status: 403 });
         const ip = server.requestIP(req)?.address ?? 'unknown';
         return handleLogin(req, authDeps, ip);
       }
@@ -529,4 +543,13 @@ export function startDashboard(options: DashboardOptions): void {
   });
 
   console.log(`Pipeline Dashboard running at http://localhost:${server.port}`);
+
+  return {
+    server,
+    stop() {
+      clearAllIntervals();
+      process.off('beforeExit', clearAllIntervals);
+      server.stop(true);
+    },
+  };
 }
