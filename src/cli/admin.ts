@@ -8,6 +8,13 @@ export interface AdminArgs {
   passwordStdin: boolean;
 }
 
+function requireValue(flag: string, value: string | undefined): string {
+  if (value === undefined || value.startsWith('--')) {
+    throw new Error(`${flag} requires a value`);
+  }
+  return value;
+}
+
 export function parseAdminArgs(args: string[]): AdminArgs {
   const sub = args[0];
   if (sub !== 'create-user' && sub !== 'set-password' && sub !== 'list-users') {
@@ -19,14 +26,14 @@ export function parseAdminArgs(args: string[]): AdminArgs {
   let passwordStdin = false;
   for (let i = 1; i < args.length; i++) {
     switch (args[i]) {
-      case '--email': email = (args[++i] ?? '').trim().toLowerCase(); break;
+      case '--email': email = requireValue('--email', args[++i]).trim().toLowerCase(); break;
       case '--role': {
-        const r = args[++i];
+        const r = requireValue('--role', args[++i]);
         if (r !== 'admin' && r !== 'operator') throw new Error('role must be admin or operator');
         role = r;
         break;
       }
-      case '--display-name': displayName = args[++i] ?? ''; break;
+      case '--display-name': displayName = requireValue('--display-name', args[++i]); break;
       case '--password-stdin': passwordStdin = true; break;
       default: throw new Error(`Unknown flag: ${args[i]}`);
     }
@@ -57,13 +64,21 @@ export async function admin(args: string[]): Promise<void> {
         if (existing) throw new Error(`A user with email ${parsed.email} already exists`);
         const { hashPassword } = await import('../auth/local-provider.ts');
         const passwordHash = await hashPassword(await readPassword(parsed.passwordStdin));
-        const user = await userStore.create({
-          email: parsed.email,
-          displayName: parsed.displayName,
-          role: parsed.role,
-          passwordHash,
-        });
-        console.log(`Created ${user.role} user ${user.email} (id ${user.id})`);
+        try {
+          const user = await userStore.create({
+            email: parsed.email,
+            displayName: parsed.displayName,
+            role: parsed.role,
+            passwordHash,
+          });
+          console.log(`Created ${user.role} user ${user.email} (id ${user.id})`);
+        } catch (err) {
+          // Catch concurrent unique-violation (code 23505) and provide plain-English message
+          if (err instanceof Error && err.message.includes('23505')) {
+            throw new Error(`A user with email ${parsed.email} already exists`);
+          }
+          throw err;
+        }
         break;
       }
       case 'set-password': {

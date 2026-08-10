@@ -21,4 +21,30 @@ describe('parseAdminArgs', () => {
   test('unknown subcommand throws', () => {
     expect(() => parseAdminArgs(['frobnicate'])).toThrow('Unknown admin subcommand');
   });
+  test('rejects flag-shaped values', () => {
+    // --email with flag-shaped value
+    expect(() => parseAdminArgs(['create-user', '--email', '--password-stdin', '--role', 'admin']))
+      .toThrow('--email requires a value');
+    // --role with flag-shaped value
+    expect(() => parseAdminArgs(['create-user', '--email', 'a@b.c', '--role', '--display-name']))
+      .toThrow('--role requires a value');
+    // --display-name with flag-shaped value
+    expect(() => parseAdminArgs(['create-user', '--email', 'a@b.c', '--display-name', '--role']))
+      .toThrow('--display-name requires a value');
+  });
+  test('rejects missing flag values', () => {
+    // --email at end
+    expect(() => parseAdminArgs(['create-user', '--email']))
+      .toThrow('--email requires a value');
+    // --role at end
+    expect(() => parseAdminArgs(['create-user', '--email', 'a@b.c', '--role']))
+      .toThrow('--role requires a value');
+    // --display-name at end
+    expect(() => parseAdminArgs(['create-user', '--email', 'a@b.c', '--display-name']))
+      .toThrow('--display-name requires a value');
+  });
+  test('rejects unknown flags', () => {
+    expect(() => parseAdminArgs(['create-user', '--email', 'a@b.c', '--unknown-flag']))
+      .toThrow('Unknown flag: --unknown-flag');
+  });
 });
