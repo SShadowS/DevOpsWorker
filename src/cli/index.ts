@@ -82,6 +82,11 @@ async function main() {
       await reviewPR(args.slice(1));
       break;
     }
+    case 'admin': {
+      const { admin } = await import('./admin.ts');
+      await admin(args.slice(1));
+      break;
+    }
     default:
       console.log(`
 DevOps Pipeline CLI
@@ -98,6 +103,9 @@ Usage:
   pipeline webhook-server [--port <n>]                     Start webhook receiver
   pipeline review-pr     --pr-id <id> --repo-id <guid>    Review a pull request
   pipeline subagent-stats [--limit <n>] [--repo <key>]     Per-sub-agent cost/turns across reviews + pipeline runs
+  pipeline admin create-user  --email <x> [--role admin|operator] [--display-name <n>] [--password-stdin]
+  pipeline admin set-password --email <x> [--password-stdin]
+  pipeline admin list-users
 
 Options:
   --work-item, -w   Azure DevOps work item ID (required for run/continue/status)
