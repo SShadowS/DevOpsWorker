@@ -6,6 +6,8 @@ import { PgRunnerStatus } from './pg-runner-status.ts';
 import { PgWebhookEventStore } from './pg-webhook-event-store.ts';
 import { PgPRReviewStore } from './pg-pr-review-store.ts';
 import { PgPrReviewLogSink } from './pg-pr-review-log-sink.ts';
+import { PgUserStore } from './pg-user-store.ts';
+import { PgSessionStore } from './pg-session-store.ts';
 
 export async function connectStores() {
   const url = process.env['DATABASE_URL'];
@@ -18,6 +20,8 @@ export async function connectStores() {
     runnerStatus: new PgRunnerStatus(sql),
     webhookEventStore: new PgWebhookEventStore(sql),
     prReviewStore: new PgPRReviewStore(sql),
+    userStore: new PgUserStore(sql),
+    sessionStore: new PgSessionStore(sql),
     logSink: (workItemId: number) => new PgLogSink(sql, workItemId),
     prReviewLogSink: (prId: number, reviewRunId: string) => new PgPrReviewLogSink(sql, prId, reviewRunId),
   };
