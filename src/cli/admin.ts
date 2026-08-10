@@ -15,6 +15,10 @@ function requireValue(flag: string, value: string | undefined): string {
   return value;
 }
 
+export function isUniqueViolation(err: unknown): boolean {
+  return err !== null && typeof err === 'object' && (err as { code?: string }).code === '23505';
+}
+
 export function parseAdminArgs(args: string[]): AdminArgs {
   const sub = args[0];
   if (sub !== 'create-user' && sub !== 'set-password' && sub !== 'list-users') {
@@ -74,7 +78,7 @@ export async function admin(args: string[]): Promise<void> {
           console.log(`Created ${user.role} user ${user.email} (id ${user.id})`);
         } catch (err) {
           // Catch concurrent unique-violation (code 23505) and provide plain-English message
-          if (err instanceof Error && err.message.includes('23505')) {
+          if (isUniqueViolation(err)) {
             throw new Error(`A user with email ${parsed.email} already exists`);
           }
           throw err;

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { parseAdminArgs } from '../../src/cli/admin.ts';
+import { parseAdminArgs, isUniqueViolation } from '../../src/cli/admin.ts';
 
 describe('parseAdminArgs', () => {
   test('parses create-user flags', () => {
@@ -46,5 +46,27 @@ describe('parseAdminArgs', () => {
   test('rejects unknown flags', () => {
     expect(() => parseAdminArgs(['create-user', '--email', 'a@b.c', '--unknown-flag']))
       .toThrow('Unknown flag: --unknown-flag');
+  });
+});
+
+describe('isUniqueViolation', () => {
+  test('detects Postgres 23505 unique violation by error code', () => {
+    // Real Postgres error shape: code property carries SQLSTATE, not message
+    const postgresError = { code: '23505', message: 'duplicate key value violates unique constraint "users_email_key"' };
+    expect(isUniqueViolation(postgresError)).toBe(true);
+  });
+  test('rejects plain Error objects (no code property)', () => {
+    const plainError = new Error('some error');
+    expect(isUniqueViolation(plainError)).toBe(false);
+  });
+  test('rejects null and non-objects', () => {
+    expect(isUniqueViolation(null)).toBe(false);
+    expect(isUniqueViolation(undefined)).toBe(false);
+    expect(isUniqueViolation('error string')).toBe(false);
+    expect(isUniqueViolation(42)).toBe(false);
+  });
+  test('rejects non-23505 error codes', () => {
+    const otherError = { code: '23503', message: 'foreign key constraint violation' };
+    expect(isUniqueViolation(otherError)).toBe(false);
   });
 });
