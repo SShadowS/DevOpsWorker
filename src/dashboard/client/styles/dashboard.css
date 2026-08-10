@@ -34,6 +34,11 @@
      not held to a text-contrast bar and the saturated red reads correctly there.
      #f87171 was rejected at 4.50 on bg-tertiary — the threshold to the digit, no margin. */
   --color-error-text:    #ff8a8a;
+  /* Info as TEXT, for the same reason --color-error-text exists. --color-info (#3b82f6)
+     on an 18%-info-tinted badge measures 3.15:1 — blue text on a blue wash, under WCAG
+     AA's 4.5:1, and the badges that use it are 11px uppercase. #93c5fd measures 6.42:1
+     there and 8.11:1 on a plain row. Tints and borders keep #3b82f6. */
+  --color-info-text:     #93c5fd;
 
   /* Stage status colors */
   --color-stage-completed: var(--color-success);
@@ -541,7 +546,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn--success { border-color: var(--color-success); color: var(--color-success); }
 .btn--warning { border-color: var(--color-warning); color: var(--color-warning); }
-.btn--info { border-color: var(--color-info); color: var(--color-info); }
+.btn--info { border-color: var(--color-info); color: var(--color-info-text); }
 .btn--error { border-color: var(--color-error); color: var(--color-error-text); }
 .btn--pending {
   opacity: 0.7;
@@ -846,8 +851,8 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .badge--proceed, .badge--resolved { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
 .badge--needs-input, .badge--needs-clarification { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
 .badge--reject, .badge--blocking { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error-text); }
-.badge--nice-to-have { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
-.badge--complexity { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
+.badge--nice-to-have { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info-text); }
+.badge--complexity { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info-text); }
 .badge--create { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
 .badge--modify { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
 .badge--risk-low { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
@@ -943,15 +948,18 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
    18% tint the rest of this family uses. Badge only, deliberately: the row's
    border-left already carries test/error/pending, a review can be both a test run
    and a cherry-pick, and one border cannot say two things. */
-.pr-review__badge--cherry-pick { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
+.pr-review__badge--cherry-pick { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info-text); }
 
 .pr-review__findings { display: inline-flex; gap: 6px; }
 .pr-review__no-findings { font-size: 0.75rem; color: var(--color-text-muted); }
 .pr-review__pill { font-size: 0.7rem; padding: 1px 6px; border-radius: 3px; font-weight: 500; }
 .pr-review__pill--critical { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error-text); }
 .pr-review__pill--major { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
-.pr-review__pill--minor { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
-.pr-review__pill--nitpick { background: color-mix(in srgb, var(--color-text-muted) 12%, transparent); color: var(--color-text-muted); }
+/* Same measurement as the badge above: --color-info read 3.15:1 here and --color-text-muted
+   2.72:1, both under AA on their own tints. These are finding counts — the numbers someone
+   scans the list for — so they cannot be the least readable thing in the row. */
+.pr-review__pill--minor { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info-text); }
+.pr-review__pill--nitpick { background: color-mix(in srgb, var(--color-text-muted) 12%, transparent); color: var(--color-text-secondary); }
 
 .pr-review-row--clickable { cursor: pointer; }
 .pr-review-row--clickable:focus-visible { outline: 2px solid var(--color-accent, #58a6ff); outline-offset: -2px; }
@@ -1375,7 +1383,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   border-radius: 3px;
   letter-spacing: 0.03em;
 }
-.mobile-card__badge--active { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
+.mobile-card__badge--active { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info-text); }
 .mobile-card__badge--waiting { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
 .mobile-card__badge--completed { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
 .mobile-card__badge--error { background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error-text); }
@@ -1574,7 +1582,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
-.badge--info     { background: color-mix(in srgb, var(--color-info, #3b82f6) 18%, transparent);    color: var(--color-info, #3b82f6); }
+.badge--info     { background: color-mix(in srgb, var(--color-info, #3b82f6) 18%, transparent);    color: var(--color-info-text, #93c5fd); }
 .badge--running  { background: color-mix(in srgb, var(--color-warning, #f59e0b) 18%, transparent); color: var(--color-warning, #f59e0b); animation: pulse 1.5s infinite; }
 .badge--success  { background: color-mix(in srgb, var(--color-success, #10b981) 18%, transparent); color: var(--color-success, #10b981); }
 .badge--error    { background: color-mix(in srgb, var(--color-error, #ef4444) 18%, transparent);   color: var(--color-error-text, #ff8a8a); }

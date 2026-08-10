@@ -210,3 +210,50 @@ describe('PR review row text is readable', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// --color-info has the same split as --color-error: fine as a border or a tint, too dark
+// as text. On its own 18% tinted badge it measures 3.15:1; on a plain row 3.98:1. Both are
+// under WCAG AA's 4.5:1, and the badges wearing it are 11px uppercase. --color-info-text
+// (#93c5fd) measures 6.42:1 and 8.11:1 on those two surfaces.
+//
+// Same scan shape as the error guard above, and for the same reason: the token split only
+// holds if nothing reaches past it to the border-weight blue.
+const INFO_TEXT_COLOR_RE =
+  /(?:(?<![\w-])color|-webkit-text-fill-color|WebkitTextFillColor):\s*['"]?(var\(--color-(?:info|stage-active)(?![\w-])[^)'"]*\)|#3b82f6|rgba?\(\s*59\s*,\s*130\s*,\s*246\b[^)]*\))['"]?/gi;
+
+function findInfoTextColorRules(source: string): string[] {
+  return source.match(INFO_TEXT_COLOR_RE) ?? [];
+}
+
+describe('info text contrast', () => {
+  test('--color-info-text meets WCAG AA on all three base background surfaces', () => {
+    const fg = token('color-info-text');
+    for (const bg of ['color-bg-primary', 'color-bg-secondary', 'color-bg-tertiary']) {
+      expect(contrast(fg, token(bg))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test('nothing in the client sets `color:` to the border-weight --color-info, in any form', () => {
+    const offenders = styleBearingFiles(clientDir)
+      .map((file) => ({ file, rules: findInfoTextColorRules(readFileSync(file, 'utf8')) }))
+      .filter((o) => o.rules.length > 0);
+    expect(offenders).toEqual([]);
+  });
+
+  test('the scan catches every spelling, and spares borders and tints', () => {
+    expect(findInfoTextColorRules('.x { color: var(--color-info); }')).toHaveLength(1);
+    expect(findInfoTextColorRules('.x { color: var(--color-info, #3b82f6); }')).toHaveLength(1);
+    expect(findInfoTextColorRules('.x { color: var(--color-stage-active); }')).toHaveLength(1);
+    expect(findInfoTextColorRules("style={{ color: 'var(--color-info)' }}")).toHaveLength(1);
+    expect(findInfoTextColorRules('.x { color: #3b82f6; }')).toHaveLength(1);
+    // The correct token, and the border/tint uses that keep the saturated blue.
+    expect(findInfoTextColorRules('.x { color: var(--color-info-text); }')).toEqual([]);
+    expect(findInfoTextColorRules('.x { color: var(--color-info-text, #93c5fd); }')).toEqual([]);
+    expect(findInfoTextColorRules('.x { border-left-color: var(--color-info); }')).toEqual([]);
+    expect(findInfoTextColorRules('.x { background: color-mix(in srgb, var(--color-info) 18%, transparent); }')).toEqual([]);
+  });
+
+  test('--color-info itself is unchanged, so stripes and tints keep their weight', () => {
+    expect(token('color-info')).toBe('#3b82f6');
+  });
+});
