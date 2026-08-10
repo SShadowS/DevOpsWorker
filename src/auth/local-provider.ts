@@ -19,7 +19,9 @@ export async function verifyLocalLogin(
 ): Promise<AuthUser | null> {
   const found = await userStore.findByEmail(email);
   if (!found || found.disabled || !found.passwordHash) {
-    await Bun.password.verify(password, dummyHash).catch(() => {});
+    await Bun.password.verify(password, dummyHash).catch((err) => {
+      console.error('[auth] timing equaliser failed; login timing may now reveal whether an account exists:', err);
+    });
     return null;
   }
   const ok = await Bun.password.verify(password, found.passwordHash);
