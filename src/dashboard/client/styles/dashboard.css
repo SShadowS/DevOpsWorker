@@ -901,6 +901,13 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
    this badge family's approve/changes/discussion/error colours, which are all
    reserved for a verdict about the review itself. */
 .pr-review__badge--test { background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
+/* A cherry-pick review is a route, not a verdict, so it stays out of the
+   approve/changes/discussion/error colours. It borrows the blue already used for
+   "informational" elsewhere (the minor pill, the active-stage colour) at the same
+   18% tint the rest of this family uses. Badge only, deliberately: the row's
+   border-left already carries test/error/pending, a review can be both a test run
+   and a cherry-pick, and one border cannot say two things. */
+.pr-review__badge--cherry-pick { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
 
 .pr-review__findings { display: inline-flex; gap: 6px; }
 .pr-review__no-findings { font-size: 0.75rem; color: var(--color-text-muted); }

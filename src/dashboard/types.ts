@@ -125,6 +125,11 @@ export interface DashboardPRReview {
    *  (`?? false`), and a pending/in-progress row (no DB row yet) is never a
    *  test run by construction, so `readPRReviews` sets it explicitly there too. */
   isTest: boolean;
+  /** Which route the review took, as recorded by review-pr.ts: `sanity:<source pr id>`
+   *  when it was reviewed as a cherry-pick of an already-reviewed PR, `full:<reason>`
+   *  otherwise. null for a queued review (no row yet) and for every row written before
+   *  the column existed, so absence means "not known", never "was a full review". */
+  reviewPath: string | null;
 }
 
 export interface DashboardPRReviewDetail extends DashboardPRReview {

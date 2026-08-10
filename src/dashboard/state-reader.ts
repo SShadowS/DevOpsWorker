@@ -320,6 +320,7 @@ export async function readPRReviews(store: IPRReviewStore, actionStore?: IAction
     webUrl: buildPrWebUrl(r.repoKey, r.prId),
     pendingStatus: undefined as 'queued' | 'reviewing' | undefined,
     isTest: r.isTest,
+    reviewPath: r.reviewPath,
   }));
 
   // Merge pending/in-progress reviews from the action queue
@@ -350,6 +351,8 @@ export async function readPRReviews(store: IPRReviewStore, actionStore?: IAction
         // a test run by construction (isTestRun() is only evaluated once
         // review-pr.ts actually saves a completed or errored row).
         isTest: false,
+        // Nor does it have a route yet — that is decided when the review runs.
+        reviewPath: null,
       });
     }
   }
@@ -367,5 +370,6 @@ export async function readPRReviewDetail(store: IPRReviewStore, id: number): Pro
     durationMs: r.durationMs, turns: r.turns, toolCalls: r.toolCalls, error: r.error,
     createdAt: r.createdAt, webUrl: buildPrWebUrl(r.repoKey, r.prId),
     pendingStatus: undefined, reviewBody: r.reviewBody, isTest: r.isTest,
+    reviewPath: r.reviewPath,
   };
 }

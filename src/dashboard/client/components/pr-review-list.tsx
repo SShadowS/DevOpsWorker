@@ -20,6 +20,27 @@ export function badgeForReview(review: { isTest?: boolean }): 'test' | null {
   return review.isTest === true ? 'test' : null;
 }
 
+/**
+ * The PR this review was cherry-picked from, or null when it was not reviewed as a
+ * cherry-pick. `reviewPath` is written by review-pr.ts in one of two shapes:
+ * `sanity:<source pr id>` (sometimes with a `+merge-commit` suffix) when the review
+ * compared the change against an already-reviewed PR, and `full:<reason>` otherwise.
+ *
+ * Only the `sanity:` prefix counts. One of the `full:` reasons is "cherry-pick detected
+ * but no source PR id in the trailer" — that review saw a cherry-pick and read the whole
+ * change anyway, so matching on the words would badge a review that never took the path.
+ *
+ * A missing value means the row predates the column (everything before 2026-07-30) or
+ * has not run yet. Both return null: no badge, and no claim that it was a full review.
+ */
+export function cherryPickSourcePr(review: { reviewPath?: string | null }): number | null {
+  const path = review.reviewPath;
+  if (!path?.startsWith('sanity:')) return null;
+  // Stop at the '+' so 'sanity:52117+merge-commit' yields 52117 rather than NaN.
+  const id = Number.parseInt(path.slice('sanity:'.length), 10);
+  return Number.isFinite(id) ? id : null;
+}
+
 export function PRReviewList() {
   const reviews = prReviews.value;
 
@@ -69,6 +90,14 @@ export function PRReviewList() {
                 <FindingsPills findings={r.findings} />
                 {badgeForReview(r) && (
                   <span class="pr-review__badge pr-review__badge--test" title="Excluded from production statistics">test</span>
+                )}
+                {cherryPickSourcePr(r) != null && (
+                  <span
+                    class="pr-review__badge pr-review__badge--cherry-pick"
+                    title={`cherry-picked from PR #${cherryPickSourcePr(r)} — checked against that PR's review instead of read in full`}
+                  >
+                    cherry-pick
+                  </span>
                 )}
               </div>
               <div class="pr-review-row__meta">
