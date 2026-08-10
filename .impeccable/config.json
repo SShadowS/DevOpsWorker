@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/dashboard/client/styles/dashboard.css"
+        ],
+        "createdAt": "2026-08-10T13:21:50.815Z",
+        "reason": "Stripes encode state (error/warning/success/info/pending/accent), not decoration; vocabulary documented in the file and pinned by tests/dashboard/stripe-vocabulary.test.ts"
+      }
+    ]
+  }
+}

@@ -105,9 +105,10 @@ describe('cherry-pick badge', () => {
     expect(tsx).not.toContain('>sanity:');
   });
 
-  test('the row keeps ONE stripe: cherry-pick is a badge, not a fourth border colour', () => {
-    // A review can be both a test run and a cherry-pick. A single border-left cannot
-    // show two facts, and --color-info is already spent on the test stripe.
+  test('the row keeps ONE stripe: cherry-pick is a badge, not another border colour', () => {
+    // Which route a review took is a label, not a state, and the row's one edge belongs
+    // to its state — the same reason a test run has no stripe either. See the stripe
+    // vocabulary at the top of dashboard.css.
     expect(css).not.toContain('.pr-review-row--cherry-pick');
     expect(tsx).not.toContain('pr-review-row--cherry-pick');
   });

@@ -43,6 +43,35 @@
   --color-stage-pending:   #475569;
   --color-stage-skipped:   #475569;
 
+  /* ---- The coloured left edge ----
+   *
+   * Roughly twenty things in this dashboard carry a coloured strip down their left
+   * side. It is the only signal that says what state something is in, so it has to
+   * mean the same thing in every view — someone moving from the session list to the
+   * PR list should not have to relearn the code.
+   *
+   * Width says how big the thing is, never how important it is:
+   *   4px  a card that is its own row in a list  (session card, mobile card,
+   *        stats slot, status ribbon item)
+   *   3px  something inside a card               (PR review row, review item,
+   *        gap item, risk card, log entry, stats section)
+   *   2px  an inline mark                        (a figure marked unmeasured, the
+   *        uncertainty boundary on the cost bar)
+   *
+   * Colour says what state it is in, and each colour says only one thing:
+   *   --color-error            failed, blocking, high risk
+   *   --color-warning          stalled, needs revision, needs clarification, medium risk
+   *   --color-success          finished well, approved, low risk, ready
+   *   --color-info             in flight — running, loading, being reviewed
+   *   --color-stage-pending    not started, neutral, done and no longer interesting
+   *   --color-accent           waiting for a person to do something
+   *
+   * --color-accent is the only one that asks for action, so nothing else may use it —
+   * not "currently selected", not "this is a test run". Something that is a label
+   * rather than a state (a test run, for one) gets a badge, not a stripe: the stripe
+   * has one slot and the state of the thing has first claim on it.
+   */
+
   /* Spacing scale */
   --space-xs:  4px;
   --space-sm:  8px;
@@ -283,7 +312,9 @@ body {
 .session-card:hover { background: #1e2d42; }
 .session-card--selected { background: #1e2d42; }
 .session-card--running { border-left-color: var(--color-info); }
-.session-card--waiting { border-left-color: var(--color-success); }
+/* A checkpoint is the pipeline waiting for a person, so it takes the one colour that
+   asks for action. It was green, which read as "fine, nothing to do" — the opposite. */
+.session-card--waiting { border-left-color: var(--color-accent); }
 .session-card--failed { border-left-color: var(--color-error); background: rgba(239, 68, 68, 0.06); }
 .session-card--stalled { border-left-color: var(--color-warning); }
 .session-card--completed { border-left-color: var(--color-stage-pending); opacity: 0.7; }
@@ -826,7 +857,9 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .gap-item { padding: var(--space-sm); border-radius: 4px; border-left: 3px solid var(--color-border); background: var(--color-bg-secondary); }
 .gap-item--blocking { border-left-color: var(--color-error); }
 .gap-item--needs-clarification { border-left-color: var(--color-warning); }
-.gap-item--nice-to-have { border-left-color: var(--color-info); }
+/* Not --color-info: nothing is in flight about a nice-to-have. It is the lowest tier
+   of the three, so it takes the neutral. */
+.gap-item--nice-to-have { border-left-color: var(--color-stage-pending); }
 .gap-item__header { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; font-size: 0.85rem; }
 .gap-item__question { font-size: 0.8rem; color: var(--color-text-secondary); margin: var(--space-xs) 0 0; }
 .gap-item__resolution { font-size: 0.8rem; color: var(--color-text-muted); margin: var(--space-xs) 0 0; font-style: italic; }
@@ -871,14 +904,12 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .pr-review-row { display: flex; flex-direction: column; gap: 4px; padding: var(--space-sm) var(--space-md); background: var(--color-bg-secondary); border-radius: 6px; border-left: 3px solid var(--color-border); transition: background 0.15s; }
 .pr-review-row:hover { background: var(--color-bg-hover); }
-/* A test run is a fact, not a problem: it gets its own stripe colour but is NOT dimmed
-   the way --error and --pending are, and never uses --color-accent, which is reserved
-   across this tab for "needs attention". Declared BEFORE --error/--pending so that a
-   failed or in-flight test run still shows the stripe for the state that needs acting
-   on — the `test` badge continues to identify it either way. */
-.pr-review-row--test { border-left-color: var(--color-info); }
+/* A test run has no stripe. It is a label — which population the row belongs to — not a
+   state, and the stripe's one slot belongs to the state. It had --color-info, which now
+   means "in flight" everywhere, so a finished test run was wearing the running colour.
+   The `test` badge says it instead, and says it in a word. */
 .pr-review-row--error { border-left-color: var(--color-error); opacity: 0.7; }
-.pr-review-row--pending { border-left-color: var(--color-text-muted); opacity: 0.6; }
+.pr-review-row--pending { border-left-color: var(--color-stage-pending); opacity: 0.6; }
 .pr-review-row--pending .pr-review-row__pr { color: var(--color-text-secondary); }
 .pr-review-row__main { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
 .pr-review-row__pr { font-weight: 600; font-size: 0.85rem; color: var(--color-accent); min-width: 70px; text-decoration: none; }
@@ -1104,7 +1135,9 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .log-viewer__stage--active {
   color: var(--text-primary, #c0caf5);
   background: var(--bg-selected, #292a3e);
-  border-left: 3px solid var(--border-accent, #7aa2f7);
+  /* "You are looking at this one" is not "this needs you", so selection cannot wear
+     the accent. The background already marks it; the edge just makes it scannable. */
+  border-left: 3px solid var(--color-text-primary);
 }
 
 .log-viewer__content {
@@ -1192,9 +1225,11 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   font-weight: 600;
 }
 
+/* The two log entries that carry an edge use the shared tokens, not the loose blues and
+   reds this viewer was written with — a red bar has to be the same red everywhere. */
 .log-entry--prompt {
   background: rgba(122, 162, 247, 0.08);
-  border-left: 3px solid rgba(122, 162, 247, 0.4);
+  border-left: 3px solid color-mix(in srgb, var(--color-info) 55%, transparent);
   padding: 4px 8px;
   margin: 2px 0;
   border-radius: 0 4px 4px 0;
@@ -1209,7 +1244,7 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 
 .log-entry--error {
   background: rgba(247, 118, 142, 0.1);
-  border-left: 3px solid rgba(247, 118, 142, 0.6);
+  border-left: 3px solid color-mix(in srgb, var(--color-error) 70%, transparent);
   padding: 4px 8px;
   margin: 2px 0;
   border-radius: 0 4px 4px 0;
@@ -1296,14 +1331,18 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   padding: 12px 16px;
   background: var(--color-bg-secondary);
   border-radius: 6px;
-  border-left: 3px solid var(--color-border);
+  /* 4px: this is the same thing as a session card, just laid out for a phone. */
+  border-left: 4px solid var(--color-border);
   cursor: pointer;
   transition: background 0.15s;
 }
 .mobile-card:hover { background: var(--color-bg-hover); }
-.mobile-card--running { border-left-color: var(--color-stage-active); }
-.mobile-card--waiting { border-left-color: var(--color-stage-waiting); }
-.mobile-card--failed { border-left-color: var(--color-stage-error); background: rgba(239, 68, 68, 0.06); }
+/* Written with the same tokens as the session card above rather than the --color-stage-*
+   aliases. The two lists showed the SAME state in different colours: checkpoint-waiting
+   was green on desktop and amber here. Both are now the accent. */
+.mobile-card--running { border-left-color: var(--color-info); }
+.mobile-card--waiting { border-left-color: var(--color-accent); }
+.mobile-card--failed { border-left-color: var(--color-error); background: rgba(239, 68, 68, 0.06); }
 .mobile-card--completed { border-left-color: var(--color-stage-pending); opacity: 0.7; }
 .mobile-card--stalled { border-left-color: var(--color-warning); }
 

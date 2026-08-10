@@ -90,3 +90,6 @@ scripts/ab-results/
 /*.webp
 /*.gif
 /*.svg
+
+# Design detector: the shared config is committed, its dedup cache is per-machine
+.impeccable/hook.cache.json

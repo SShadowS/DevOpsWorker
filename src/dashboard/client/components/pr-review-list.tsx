@@ -56,7 +56,10 @@ export function PRReviewList() {
         return (
           <div key={r.id}>
             <div
-              class={`pr-review-row ${badgeForReview(r) ? 'pr-review-row--test' : ''} ${r.error ? 'pr-review-row--error' : ''} ${r.pendingStatus ? 'pr-review-row--pending' : ''} ${interactive ? 'pr-review-row--clickable' : ''}`}
+              // No modifier for a test run: the row's left edge shows the review's state,
+              // and being a test run is a label rather than a state. The `test` badge below
+              // carries it. See the stripe vocabulary at the top of dashboard.css.
+              class={`pr-review-row ${r.error ? 'pr-review-row--error' : ''} ${r.pendingStatus ? 'pr-review-row--pending' : ''} ${interactive ? 'pr-review-row--clickable' : ''}`}
               role={interactive ? 'button' : undefined}
               tabIndex={interactive ? 0 : undefined}
               aria-expanded={interactive ? expanded : undefined}

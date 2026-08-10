@@ -22,7 +22,7 @@ describe('badgeForReview', () => {
 });
 
 // The row's stripe colour is a CSS concern, so these are source-text pins — the
-// properties that matter (which signal drives the class, and the cascade order that
+// properties that matter (that a test run claims no stripe, and the cascade order that
 // decides which stripe wins) are invisible to a unit test on a pure function.
 describe('test-run row stripe', () => {
   const tsx = readFileSync(
@@ -34,28 +34,39 @@ describe('test-run row stripe', () => {
     'utf8',
   );
 
-  test('the row modifier derives from badgeForReview, not a second isTest check', () => {
-    expect(tsx).toContain("badgeForReview(r) ? 'pr-review-row--test' : ''");
-    // A second derivation is how the same fact starts disagreeing with itself.
-    expect(tsx).not.toContain("r.isTest ? 'pr-review-row--test'");
+  test('a test run claims no stripe — the badge carries it, the state keeps the edge', () => {
+    // The stripe used to be --color-info, which the shared vocabulary now spends on
+    // "in flight", so a finished test run wore the running colour. Both the rule and
+    // the class that would have asked for it are gone; either one coming back alone
+    // is a dead class or an unreachable rule.
+    expect(css).not.toContain('.pr-review-row--test {');
+    expect(tsx).not.toContain('pr-review-row--test');
   });
 
-  test('--error and --pending are declared AFTER --test so the state needing action wins', () => {
-    const test = css.indexOf('.pr-review-row--test {');
+  test('the badge is still the thing that says it, and still derives from badgeForReview', () => {
+    expect(tsx).toContain('badgeForReview(r) &&');
+    expect(tsx).toContain('pr-review__badge--test');
+    // A second derivation is how the same fact starts disagreeing with itself.
+    expect(tsx).not.toContain('r.isTest ?');
+  });
+
+  test('--error is declared before --pending, so a queued row reads as queued', () => {
     const error = css.indexOf('.pr-review-row--error {');
     const pending = css.indexOf('.pr-review-row--pending {');
-    expect(test).toBeGreaterThan(-1);
-    expect(error).toBeGreaterThan(test);
-    expect(pending).toBeGreaterThan(test);
+    expect(error).toBeGreaterThan(-1);
+    expect(pending).toBeGreaterThan(error);
   });
 
-  test('the test stripe does not spend --color-accent, which is reserved for attention', () => {
-    const rule = css.slice(css.indexOf('.pr-review-row--test {'));
-    expect(rule.slice(0, rule.indexOf('}'))).not.toContain('--color-accent');
+  test('neither row stripe spends --color-accent, which is reserved for attention', () => {
+    for (const selector of ['.pr-review-row--error {', '.pr-review-row--pending {']) {
+      const rule = css.slice(css.indexOf(selector));
+      expect(rule.slice(0, rule.indexOf('}'))).not.toContain('--color-accent');
+    }
   });
 
   test('a test run is not dimmed — it is a fact, not a degraded state', () => {
-    const rule = css.slice(css.indexOf('.pr-review-row--test {'));
-    expect(rule.slice(0, rule.indexOf('}'))).not.toContain('opacity');
+    // With no --test rule left, this is the guard that a test run is not quietly
+    // faded somewhere else instead.
+    expect(css).not.toMatch(/\.pr-review-row--test\b[^{]*\{[^}]*opacity/);
   });
 });
