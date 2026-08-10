@@ -280,6 +280,28 @@ ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS request_count INTEGE
 -- nowhere. Null on rows written before this column existed -> caller falls
 -- back to the default lookback and says so, same as the model column above.
 ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS lookback_days INTEGER;
+
+CREATE TABLE IF NOT EXISTS users (
+  id            SERIAL PRIMARY KEY,
+  email         TEXT NOT NULL UNIQUE,
+  display_name  TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('admin','operator')),
+  password_hash TEXT,
+  entra_oid     TEXT UNIQUE,
+  disabled      BOOLEAN NOT NULL DEFAULT false,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash    TEXT PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at    TIMESTAMPTZ NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user    ON sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expires_at);
 `;
 
 /**
