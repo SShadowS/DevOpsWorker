@@ -178,3 +178,35 @@ describe('error text contrast', () => {
     expect(token('color-error')).toBe('#ef4444');
   });
 });
+
+// The PR review list is a dense table of small text, so its colour choices are the ones
+// most likely to fall under the readability bar. --color-text-muted does: 3.07:1 on the
+// row's background and 2.62:1 once the row is hovered, against WCAG AA's 4.5:1 for normal
+// text — worst at the moment someone is actually reading the row. The token is fine on
+// larger or decorative text, which is why this guards the row rather than the token.
+describe('PR review row text is readable', () => {
+  const rowBackgrounds = ['color-bg-secondary', 'color-bg-hover'];
+
+  test('--color-text-secondary clears AA on the row, resting and hovered', () => {
+    const fg = token('color-text-secondary');
+    for (const bg of rowBackgrounds) {
+      expect(contrast(fg, token(bg))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test('--color-text-muted does not clear it — the measurement this guard rests on', () => {
+    // Pinned so the rule below reads as a decision with a reason rather than a preference.
+    // If the token is ever lightened past AA, this fails and the rule can be relaxed.
+    const fg = token('color-text-muted');
+    expect(contrast(fg, token('color-bg-secondary'))).toBeLessThan(4.5);
+  });
+
+  test('no text in a PR review row is painted with the muted token', () => {
+    const rowRules = css.match(/^\.pr-review-row__[a-z-]+ \{[^}]*\}$/gm) ?? [];
+    // Guard the guard: if the selectors are ever renamed this must not silently pass on
+    // an empty list.
+    expect(rowRules.length).toBeGreaterThanOrEqual(4);
+    const offenders = rowRules.filter((rule) => /color:\s*var\(--color-text-muted\)/.test(rule));
+    expect(offenders).toEqual([]);
+  });
+});

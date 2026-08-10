@@ -883,9 +883,14 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review-row__main { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
 .pr-review-row__pr { font-weight: 600; font-size: 0.85rem; color: var(--color-accent); min-width: 70px; text-decoration: none; }
 .pr-review-row__pr:hover { text-decoration: underline; }
-.pr-review-row__repo { font-size: 0.75rem; color: var(--color-text-muted); font-family: var(--font-mono); }
-.pr-review-row__branch { font-size: 0.75rem; color: var(--color-text-secondary); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px; }
-.pr-review-row__meta { display: flex; gap: var(--space-md); font-size: 0.75rem; color: var(--color-text-muted); }
+/* Row text is --color-text-secondary, not --color-text-muted. Muted measures 3.07:1 on
+   this row's background and 2.62:1 once the row is hovered — under WCAG AA's 4.5:1 for
+   normal text, and worst exactly when someone is reading the row. Secondary measures
+   5.71:1 and 4.86:1. Rank comes from size and weight instead: the PR number is the
+   accent, repo and branch sit a step down, the meta line a step below that. */
+.pr-review-row__repo { font-size: 0.8125rem; color: var(--color-text-secondary); font-family: var(--font-mono); }
+.pr-review-row__branch { font-size: 0.8125rem; color: var(--color-text-secondary); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px; }
+.pr-review-row__meta { display: flex; gap: var(--space-md); font-size: 0.75rem; color: var(--color-text-secondary); }
 .pr-review-row__error { font-size: 0.75rem; color: var(--color-error-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .pr-review__badge { display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; padding: 2px 8px; border-radius: 3px; letter-spacing: 0.03em; }
