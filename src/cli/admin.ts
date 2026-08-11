@@ -59,7 +59,7 @@ export async function admin(args: string[]): Promise<void> {
   const parsed = parseAdminArgs(args);
   const { connectStores } = await import('../db/connect-stores.ts');
   const { disconnectDatabase } = await import('../db/postgres.ts');
-  const { userStore } = await connectStores();
+  const { userStore, sessionStore } = await connectStores();
 
   try {
     switch (parsed.sub) {
@@ -90,7 +90,8 @@ export async function admin(args: string[]): Promise<void> {
         if (!user) throw new Error(`No user with email ${parsed.email}`);
         const { hashPassword } = await import('../auth/local-provider.ts');
         await userStore.setPassword(user.id, await hashPassword(await readPassword(parsed.passwordStdin)));
-        console.log(`Password updated for ${user.email}`);
+        await sessionStore.deleteByUser(user.id);
+        console.log(`Password updated for ${user.email}. Any existing sessions were signed out.`);
         break;
       }
       case 'list-users': {

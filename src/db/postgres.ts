@@ -3,7 +3,9 @@ import postgres from 'postgres';
 let _sql: postgres.Sql | undefined;
 let _cleanup: (() => void) | undefined;
 
-const SCHEMA = `
+// Exported so tests that open their own connection (rather than going through
+// the connectDatabase() singleton below) can still apply the schema.
+export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS pipeline_state (
   work_item_id  INTEGER PRIMARY KEY,
   state         JSONB NOT NULL,

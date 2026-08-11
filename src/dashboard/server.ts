@@ -144,6 +144,7 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
 
   const server = Bun.serve({
     port,
+    development: false, // never render a dev error page (stack trace, container paths) to an unauthenticated client
     idleTimeout: 255, // Max value — SSE connections are long-lived
     async fetch(req, server) {
       const url = new URL(req.url);

@@ -5,5 +5,7 @@ export interface ISessionStore {
   /** Update last_seen_at. */
   touch(tokenHash: string): Promise<void>;
   delete(tokenHash: string): Promise<void>;
+  /** Invalidate every session for one user — used when a password is rotated. */
+  deleteByUser(userId: number): Promise<void>;
   deleteExpired(): Promise<void>;
 }

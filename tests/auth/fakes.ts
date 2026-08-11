@@ -64,6 +64,12 @@ export class FakeSessionStore implements ISessionStore {
     this.rows.delete(tokenHash);
   }
 
+  async deleteByUser(userId: number): Promise<void> {
+    for (const [hash, row] of this.rows) {
+      if (row.userId === userId) this.rows.delete(hash);
+    }
+  }
+
   async deleteExpired(): Promise<void> {
     for (const [hash, row] of this.rows) {
       if (row.expiresAt.getTime() <= Date.now()) this.rows.delete(hash);

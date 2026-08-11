@@ -78,6 +78,18 @@ describe('authenticate + logout + me + status', () => {
     expect(await authenticate(bogus, deps)).toBeNull();
   });
 
+  test('logout still clears the cookie and returns 200 when the store delete fails', async () => {
+    const login = await handleLogin(loginReq({ email: 'op@x.y', password: 'correct-horse-battery' }), deps, '1.1.1.1');
+    const token = /dw_session=([^;]+)/.exec(login.headers.get('Set-Cookie')!)![1]!;
+    const authed = new Request('http://dash.local/api/sessions', { headers: { Cookie: `${SESSION_COOKIE}=${token}` } });
+
+    deps.sessionStore.delete = () => Promise.reject(new Error('db unreachable'));
+    const out = await handleLogout(authed, deps);
+
+    expect(out.status).toBe(200);
+    expect(out.headers.get('Set-Cookie')).toContain('Expires=Thu, 01 Jan 1970');
+  });
+
   test('status reports whether any user exists', async () => {
     expect(await (await handleAuthStatus(deps)).json()).toEqual({ usersExist: true });
     expect(await (await handleAuthStatus({ ...deps, userStore: new FakeUserStore() })).json()).toEqual({ usersExist: false });

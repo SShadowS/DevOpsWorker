@@ -61,9 +61,16 @@ export async function handleLogin(req: Request, deps: AuthDeps, ip: string): Pro
   });
 }
 
+/** Sign-out is best-effort on the server-side cleanup: a database hiccup must
+ *  never turn "log me out" into a 500 that leaves the browser still holding a
+ *  cookie it believes is valid. Always clear the cookie and return 200. */
 export async function handleLogout(req: Request, deps: AuthDeps): Promise<Response> {
   const token = parseCookies(req.headers.get('cookie'))[SESSION_COOKIE];
-  if (token) await deps.sessionStore.delete(hashToken(token));
+  if (token) {
+    await deps.sessionStore.delete(hashToken(token)).catch((err) => {
+      console.error('[auth] failed to delete session on logout; cookie is cleared anyway:', err);
+    });
+  }
   return Response.json({ ok: true }, { headers: { 'Set-Cookie': clearSessionCookie(deps.secureCookies) } });
 }
 

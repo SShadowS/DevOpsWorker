@@ -5,6 +5,11 @@ import { currentUser } from './store.ts';
 import { checkAuth } from './auth-client.ts';
 import { connectSSE, loadInitialSessions, loadPRReviews, loadRecentActions, startRunnerPolling } from './sse.ts';
 
+// Safe only because login() and logout() (auth-client.ts) always follow with
+// location.reload(): a full reload resets this module, so `booted` naturally
+// goes back to false for the next sign-in. If either call ever drops its
+// reload, this flag would stay true across the sign-out and the dashboard
+// would silently stop re-booting data on the next sign-in.
 let booted = false;
 function bootData(): void {
   if (booted) return;

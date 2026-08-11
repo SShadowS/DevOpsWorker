@@ -55,3 +55,18 @@ describe('session lifecycle', () => {
     expect(await resolveSession(users, sessions, token)).toBeNull();
   });
 });
+
+describe('deleteByUser', () => {
+  test('removes only the named user\'s sessions, leaving other users\' sessions valid', async () => {
+    const sessions = new FakeSessionStore();
+    const { token: a1 } = await createSession(sessions, 1);
+    const { token: a2 } = await createSession(sessions, 1);
+    const { token: b1 } = await createSession(sessions, 2);
+
+    await sessions.deleteByUser(1);
+
+    expect(await sessions.findValid(hashToken(a1))).toBeNull();
+    expect(await sessions.findValid(hashToken(a2))).toBeNull();
+    expect(await sessions.findValid(hashToken(b1))).toEqual({ userId: 2 });
+  });
+});

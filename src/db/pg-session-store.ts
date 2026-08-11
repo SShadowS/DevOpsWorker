@@ -25,6 +25,10 @@ export class PgSessionStore implements ISessionStore {
     await this.sql`DELETE FROM sessions WHERE token_hash = ${tokenHash}`;
   }
 
+  async deleteByUser(userId: number): Promise<void> {
+    await this.sql`DELETE FROM sessions WHERE user_id = ${userId}`;
+  }
+
   async deleteExpired(): Promise<void> {
     await this.sql`DELETE FROM sessions WHERE expires_at <= now()`;
   }
