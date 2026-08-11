@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals';
-import { sessionList, connectionStatus, selectedSession, selectedSessionId, runners, isMobile, mobileDetailId } from './store.ts';
+import { sessionList, connectionStatus, selectedSession, selectedSessionId, runners, isMobile, mobileDetailId, currentUser } from './store.ts';
 import { SessionCard } from './components/session-card.tsx';
 import { SessionDetail } from './components/session-detail.tsx';
 import { MobileSessionCard } from './components/mobile-session-card.tsx';
@@ -8,6 +8,7 @@ import { LogViewer } from './components/log-viewer.tsx';
 import { PRReviewList } from './components/pr-review-list.tsx';
 import { StatsView } from './components/stats-view.tsx';
 import { forcePull } from './sse.ts';
+import { logout } from './auth-client.ts';
 
 const editingConcurrency = signal(false);
 const concurrencyInput = signal('');
@@ -48,6 +49,14 @@ export function App() {
       <header class="dashboard-header">
         <h1>Pipeline Dashboard</h1>
         <div class="dashboard-header__right">
+          {currentUser.value && (
+            <span class="user-chip" title={currentUser.value.email}>
+              {currentUser.value.displayName}
+              <button type="button" class="user-chip__logout" onClick={() => { void logout(); }}>
+                Sign out
+              </button>
+            </span>
+          )}
           {r.processes && Object.keys(r.processes).length > 0 && (
             <div class="process-status">
               {Object.entries(r.processes).map(([name, info]) => (

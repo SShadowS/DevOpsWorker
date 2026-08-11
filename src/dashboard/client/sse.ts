@@ -69,6 +69,11 @@ export async function loadInitialSessions(): Promise<void> {
 async function pollRunners(): Promise<void> {
   try {
     const res = await fetch('/api/runners');
+    if (res.status === 401) {
+      const { currentUser } = await import('./store.ts');
+      currentUser.value = null;
+      return;
+    }
     runners.value = await res.json() as RunnerStatus;
   } catch { /* ignore */ }
 }

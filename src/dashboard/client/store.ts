@@ -175,3 +175,12 @@ export function closeLogViewer(): void {
   logLoadingOlder.value = false;
 }
 
+export interface CurrentUser {
+  email: string;
+  displayName: string;
+  role: 'admin' | 'operator';
+}
+
+/** undefined = we have not asked the server yet; null = not logged in. */
+export const currentUser = signal<CurrentUser | undefined | null>(undefined);
+
