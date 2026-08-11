@@ -9,7 +9,13 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Loopback only. Anyone who can write to this database can insert a row
+      # into `sessions` and mint themselves an admin cookie, which bypasses the
+      # dashboard login entirely. Nothing in the stack needs the port published
+      # to the network: the other services and every spawned container reach
+      # PostgreSQL by service name over pipeline-net, and host tools connect
+      # over loopback.
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pipeline"]
       interval: 5s
