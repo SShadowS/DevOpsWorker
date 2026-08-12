@@ -9,6 +9,11 @@ import type { IRunnerStatus } from '../../src/pipeline/runner-status.interface.t
 import type { ILogSink } from '../../src/pipeline/log-sink.interface.ts';
 import type { IPRReviewStore, PRReviewRow } from '../../src/pipeline/pr-review-store.interface.ts';
 import { FakeRegistryStore } from '../config/fixtures/fake-registry-store.ts';
+import { repos, replaceRepos } from '../../src/config/repos.ts';
+import { companionRegistry, replaceCompanions } from '../../src/config/companions.ts';
+import { _resetHydrationState } from '../../src/config/hydrate.ts';
+import type { RepoRegistry } from '../../src/config/repo-config.ts';
+import type { CompanionRegistry } from '../../src/config/registry-store.interface.ts';
 import type postgres from 'postgres';
 
 // ---------------------------------------------------------------------------
@@ -24,6 +29,15 @@ import type postgres from 'postgres';
 // assertions never reach any of them (the gate returns before dispatch); the
 // one authenticated case that does — POST /api/runners as admin — only needs
 // StubRunnerStatus.writeDynamicConcurrency to not throw.
+//
+// server.ts's fetch handler now calls refreshRegistry() before the gate runs
+// (registry hydration), which reads/replaces the real, process-global
+// `repos` / `companionRegistry` singletons and the module-level hydration
+// clock in src/config/hydrate.ts — every fetch() call in this file exercises
+// that, using an unseeded FakeRegistryStore. Snapshot/restore + resetting the
+// clock (same pattern as tests/config/hydrate.test.ts) keeps that side
+// effect from leaking into whichever test file bun runs next, and keeps this
+// suite's own pass/fail about authentication, never about registry state.
 // ---------------------------------------------------------------------------
 
 class StubStateStore implements IStateStore {
@@ -75,8 +89,16 @@ describe('dashboard auth gate (real HTTP round trip)', () => {
   let base: string;
   let operatorCookie: string;
   let adminCookie: string;
+  let repoSnapshot: RepoRegistry;
+  let companionSnapshot: CompanionRegistry;
 
   beforeAll(async () => {
+    // Snapshot before startDashboard/loginAs make their first request — the
+    // very first fetch() below already runs refreshRegistry() on the way in.
+    repoSnapshot = { ...repos };
+    companionSnapshot = { ...companionRegistry };
+    _resetHydrationState();
+
     const userStore = new FakeUserStore();
     const sessionStore = new FakeSessionStore();
     await userStore.create({ email: 'op@x.y', displayName: 'Op', role: 'operator', passwordHash: await hashPassword('op-password-1') });
@@ -117,6 +139,8 @@ describe('dashboard auth gate (real HTTP round trip)', () => {
 
   afterAll(() => {
     handle.stop();
+    replaceRepos(repoSnapshot);
+    replaceCompanions(companionSnapshot);
   });
 
   test('public shell is reachable without a cookie', async () => {

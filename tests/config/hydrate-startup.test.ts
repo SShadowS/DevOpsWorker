@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { repos, replaceRepos } from '../../src/config/repos.ts';
 import { companionRegistry, replaceCompanions } from '../../src/config/companions.ts';
 import { hydrateStartupRegistry } from '../../src/config/hydrate-startup.ts';
+import { _resetHydrationState } from '../../src/config/hydrate.ts';
 import type { RepoRegistry } from '../../src/config/repo-config.ts';
 import type { CompanionRegistry } from '../../src/config/registry-store.interface.ts';
 import type { OverlayManifest } from '../../src/overlay/types.ts';
@@ -10,13 +11,19 @@ import { FakeRegistryStore, mkRepo } from './fixtures/fake-registry-store.ts';
 // `hydrateStartupRegistry` mutates the real process-global `repos` /
 // `companionRegistry` singletons (via `applyOverlayRegistries` and
 // `hydrateRegistryFromDb`) — same reason `hydrate.test.ts` snapshots and
-// restores them, so this file's assertions can never leak into another.
+// restores them, so this file's assertions can never leak into another. It
+// also resets the module-level hydration clock in hydrate.ts: this file's
+// own calls never read it (hydrateStartupRegistry hydrates directly, not
+// through refreshRegistryIfStale), but a full reset here means this file
+// never leaves that shared clock in a state some OTHER file's test — one
+// that DOES read it — could depend on run order to avoid.
 let repoSnapshot: RepoRegistry;
 let companionSnapshot: CompanionRegistry;
 
 beforeEach(() => {
   repoSnapshot = { ...repos };
   companionSnapshot = { ...companionRegistry };
+  _resetHydrationState();
 });
 
 afterEach(() => {
