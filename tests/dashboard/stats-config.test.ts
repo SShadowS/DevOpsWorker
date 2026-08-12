@@ -28,6 +28,7 @@ import type {
 function builderFixture(overrides: Partial<BuilderResolution> = {}): BuilderResolution {
   return {
     raw: undefined,
+    fromSettings: undefined,
     model: 'claude-opus-5',
     effort: { raw: undefined, parsed: undefined, effective: '(SDK default: high)' },
     usedBy: [],
@@ -57,6 +58,7 @@ function configFixture(overrides: Partial<ConfigReport> = {}): ConfigReport {
     credential: { prReview: { envVar: 'PR_REVIEW_ANTHROPIC_API_KEY', set: false, length: null, mode: 'oauth-subscription' } },
     evalLevers: [],
     overlay: { agentOverrideCount: 0, agents: {} },
+    settingsApplied: {},
     ...overrides,
   };
 }

@@ -26,8 +26,8 @@ function configFixture(groups: ConfigReport['subAgents']['groups'], inline: Conf
   return {
     generatedAt: '2026-08-01T00:00:00.000Z',
     orchestratorModel: {
-      loadConfig: { raw: undefined, model: 'claude-opus-5', effort: { raw: undefined, parsed: undefined, effective: '(SDK default: high)' }, usedBy: [] },
-      buildConfigFromRepo: { raw: undefined, model: 'claude-opus-5', effort: { raw: undefined, parsed: undefined, effective: '(SDK default: high)' }, usedBy: [] },
+      loadConfig: { raw: undefined, fromSettings: undefined, model: 'claude-opus-5', effort: { raw: undefined, parsed: undefined, effective: '(SDK default: high)' }, usedBy: [] },
+      buildConfigFromRepo: { raw: undefined, fromSettings: undefined, model: 'claude-opus-5', effort: { raw: undefined, parsed: undefined, effective: '(SDK default: high)' }, usedBy: [] },
       agree: true,
       note: '',
     },
@@ -37,6 +37,7 @@ function configFixture(groups: ConfigReport['subAgents']['groups'], inline: Conf
     credential: { prReview: { envVar: 'PR_REVIEW_ANTHROPIC_API_KEY', set: false, length: null, mode: 'oauth-subscription' } },
     evalLevers: [],
     overlay: { agentOverrideCount: 0, agents: {} },
+    settingsApplied: {},
   };
 }
 

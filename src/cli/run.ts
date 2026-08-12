@@ -4,7 +4,8 @@ import { runPipeline } from '../pipeline/orchestrator.ts';
 import { buildDefaultPipeline, buildPipeline } from '../pipeline/pipeline-definition.ts';
 import { loadManifest } from '../overlay/index.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
-import { loadConfig, buildConfigFromRepo } from './config.ts';
+import type { ISettingsStore } from '../config/settings-store.interface.ts';
+import { loadConfig, buildConfigFromRepo, readAllSettingsSafely } from './config.ts';
 import { buildPipelineContext } from './context.ts';
 import type { PipelineConfig, PipelineState } from '../types/pipeline.types.ts';
 import type { RepoConfig } from '../config/repo-config.ts';
@@ -43,10 +44,20 @@ const fieldUpdates: Record<string, Record<string, string>> = {
 /**
  * Resolve PipelineConfig from either REPO_CONFIG env var (container mode)
  * or --session flag (local mode).
+ *
+ * `settingsStore` is optional and forwarded to `readAllSettingsSafely` unchanged
+ * — omitting it (as tests do) resolves exactly as before database settings
+ * existed. This is the fresh-start path; `pipeline continue` resolves through
+ * `loadConfigFromState` instead, which reads settings the same way. Both must
+ * apply the identical database > environment variable > code default
+ * precedence — see `buildModelsAndCosts` in `./config.ts`, which both
+ * `loadConfig` and `buildConfigFromRepo` call.
  */
-export function resolveConfig(
+export async function resolveConfig(
   sessionPath: string | undefined,
-): { config: PipelineConfig; repo?: RepoConfig } {
+  settingsStore?: ISettingsStore,
+): Promise<{ config: PipelineConfig; repo?: RepoConfig }> {
+  const settings = await readAllSettingsSafely(settingsStore);
   const repoKey = process.env['REPO_CONFIG'];
 
   if (repoKey) {
@@ -54,12 +65,13 @@ export function resolveConfig(
     const config = buildConfigFromRepo(
       repo,
       process.env as Record<string, string>,
+      settings,
     );
     return { config, repo };
   }
 
   if (sessionPath) {
-    return { config: loadConfig(sessionPath) };
+    return { config: loadConfig(sessionPath, settings) };
   }
 
   throw new Error(
@@ -77,8 +89,16 @@ export async function run(args: string[]): Promise<void> {
   console.log(`Starting pipeline for work item #${workItemId}`);
   if (sessionPath) console.log(`Session: ${sessionPath}`);
 
+  // Connect once, up front — reused below for settings (resolveConfig), state
+  // persistence, and logging. State persistence was already a hard dependency
+  // of a fresh run (nothing below can proceed without `stateStore`); moving
+  // the connection earlier changes WHEN a database outage would surface, not
+  // whether it's fatal. The settings READ itself stays soft-fail — see
+  // `readAllSettingsSafely` in `./config.ts`, which `resolveConfig` calls.
+  const { stateStore, logSink, settingsStore } = await connectStores();
+
   // Build config
-  const { config, repo } = resolveConfig(sessionPath);
+  const { config, repo } = await resolveConfig(sessionPath, settingsStore);
   // Fail loud on placeholder ADO config (missing env / incomplete overlay repo).
   assertRealAdoConfig(config, 'pipeline-run');
 
@@ -94,7 +114,7 @@ export async function run(args: string[]): Promise<void> {
   // Build pipeline context (fetches work item from Azure DevOps)
   const context = await buildPipelineContext(workItemId, config);
 
-  // Attach per-stage file logger (logDir computed here, logger created after db is open)
+  // Attach per-stage file logger
   const logDir = process.env['LOG_DIR']
     ?? (process.env['STATE_DIR'] ? join(resolve(process.env['STATE_DIR'], '..'), 'logs') : '.pipeline/logs');
 
@@ -102,7 +122,6 @@ export async function run(args: string[]): Promise<void> {
   config.overlay = await loadManifest();
   const stages = repo ? buildPipeline(config, repo) : buildDefaultPipeline(config);
   config.activeStages = stages.map(s => s.name);
-  const { stateStore, logSink } = await connectStores();
   const logger = new PipelineLogger(logDir, workItemId, logSink(workItemId));
   context.logger = logger;
   await stateStore.saveConfig(workItemId, config);

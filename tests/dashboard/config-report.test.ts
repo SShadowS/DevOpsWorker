@@ -10,7 +10,22 @@ import {
   buildConfigReport,
 } from '../../src/dashboard/config-report.ts';
 import type { AgentConfig } from '../../src/types/agent.types.ts';
+import type { ISettingsStore } from '../../src/config/settings-store.interface.ts';
 import { z } from 'zod';
+
+function fakeSettingsStore(overrides: Record<string, unknown> = {}, opts: { rejects?: boolean } = {}): ISettingsStore {
+  return {
+    async getAll() {
+      if (opts.rejects) throw new Error('settings table unreachable (fake)');
+      return { ...overrides };
+    },
+    async get<T>(key: string) {
+      return (key in overrides ? overrides[key] : null) as T | null;
+    },
+    async set() {},
+    async delete() {},
+  };
+}
 
 // No test in this file may open a database connection or a network connection —
 // config-report.ts needs neither. `buildConfigReport()` reads live `process.env`
@@ -434,5 +449,101 @@ describe('buildConfigReport', () => {
     process.env['AZURE_DEVOPS_PAT'] = secret;
     const report = await buildConfigReport({ manifest: {} });
     expect(JSON.stringify(report)).not.toContain(secret);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildConfigReport — database settings applied (fix round 1)
+//
+// Before this fix, the Config tab called loadConfig/buildConfigFromRepo with
+// no settings at all, so it always showed the env/code-default view — even
+// after an operator saved a database override. Worse, effort specifically was
+// recomputed independently from raw DEFAULT_EFFORT rather than read off the
+// resolved config, so a database `models.effort` setting would have been
+// invisible even after settings were threaded through everywhere else. These
+// tests pin both: the report must show what the pipeline would ACTUALLY use.
+// ---------------------------------------------------------------------------
+
+describe('buildConfigReport — database settings applied', () => {
+  function clearEnv() {
+    for (const k of ENV_KEYS) delete process.env[k];
+  }
+
+  test('a database models.default beats the environment variable on both builders', async () => {
+    clearEnv();
+    process.env['DEFAULT_MODEL'] = 'env-model';
+    const report = await buildConfigReport({
+      manifest: {},
+      settingsStore: fakeSettingsStore({ 'models.default': 'db-model' }),
+    });
+    expect(report.orchestratorModel.loadConfig.model).toBe('db-model');
+    expect(report.orchestratorModel.buildConfigFromRepo.model).toBe('db-model');
+    expect(report.orchestratorModel.loadConfig.fromSettings).toBe('db-model');
+    expect(report.orchestratorModel.loadConfig.raw).toBe('env-model');
+    expect(report.settingsApplied).toEqual({ 'models.default': 'db-model' });
+  });
+
+  test('with no settingsStore, resolution is unchanged from before this parameter existed', async () => {
+    clearEnv();
+    process.env['DEFAULT_MODEL'] = 'env-model';
+    const report = await buildConfigReport({ manifest: {} });
+    expect(report.orchestratorModel.loadConfig.model).toBe('env-model');
+    expect(report.orchestratorModel.loadConfig.fromSettings).toBeUndefined();
+    expect(report.settingsApplied).toEqual({});
+  });
+
+  test('a database models.effort is reflected in effort.effective — the bug this fix closes', async () => {
+    // Before this fix, effort.effective was recomputed from raw DEFAULT_EFFORT
+    // alone, so a database override here would have silently not shown up even
+    // though loadConfigResult.models.effort (the value that actually runs)
+    // already honoured it.
+    clearEnv();
+    process.env['DEFAULT_EFFORT'] = 'low';
+    const report = await buildConfigReport({
+      manifest: {},
+      settingsStore: fakeSettingsStore({ 'models.effort': 'max' }),
+    });
+    expect(report.orchestratorModel.loadConfig.effort.effective).toBe('max');
+    expect(report.orchestratorModel.loadConfig.effort.raw).toBe('low');
+    expect(report.orchestratorModel.buildConfigFromRepo.effort.effective).toBe('max');
+  });
+
+  test('this also fixes perAgent — a database models.default reaches the pipeline default every agent resolves against', async () => {
+    clearEnv();
+    const report = await buildConfigReport({
+      manifest: {},
+      settingsStore: fakeSettingsStore({ 'models.default': 'db-model' }),
+    });
+    const analyzer = report.perAgent.find((a) => a.name === 'analyzer')!;
+    expect(analyzer.pipelineDefaultModel).toBe('db-model');
+    expect(analyzer.effectiveModel).toBe('db-model');
+  });
+
+  test('a settingsStore whose getAll() rejects does not fail the request — falls back to env/default', async () => {
+    clearEnv();
+    process.env['DEFAULT_MODEL'] = 'env-model';
+    const report = await buildConfigReport({
+      manifest: {},
+      settingsStore: fakeSettingsStore({}, { rejects: true }),
+    });
+    expect(report.orchestratorModel.loadConfig.model).toBe('env-model');
+    expect(report.settingsApplied).toEqual({});
+  });
+
+  test('a malformed stored models.default is ignored (with a warning) rather than breaking the report', async () => {
+    clearEnv();
+    process.env['DEFAULT_MODEL'] = 'env-model';
+    const original = console.warn;
+    console.warn = () => {};
+    try {
+      const report = await buildConfigReport({
+        manifest: {},
+        settingsStore: fakeSettingsStore({ 'models.default': 123 }), // wrong type
+      });
+      expect(report.orchestratorModel.loadConfig.model).toBe('env-model');
+      expect(report.orchestratorModel.loadConfig.fromSettings).toBeUndefined();
+    } finally {
+      console.warn = original;
+    }
   });
 });

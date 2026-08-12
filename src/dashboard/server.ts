@@ -499,11 +499,13 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
         }
       }
 
-      // Stats & Config tab — resolved-configuration snapshot. No DB access;
-      // computed live from process env + static agent config + overlay manifest
-      // via the same functions production code calls (see config-report.ts).
+      // Stats & Config tab — resolved-configuration snapshot. Computed live
+      // from process env + static agent config + overlay manifest + database
+      // settings, via the same functions production code calls (see
+      // config-report.ts). settingsStore is best-effort — a settings-table
+      // outage falls back to env/code defaults rather than failing this route.
       if (path === '/api/config' && req.method === 'GET') {
-        return Response.json(await buildConfigReport());
+        return Response.json(await buildConfigReport({ settingsStore }));
       }
 
       // Stats & Config tab — data layer. Each handler clamps ?window= and

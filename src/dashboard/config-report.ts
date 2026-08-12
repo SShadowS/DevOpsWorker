@@ -10,19 +10,25 @@
  * config builders — see `orchestratorModel` below), both are resolved and
  * compared, not just one reported and the other assumed to agree.
  *
- * No database access — everything here is process env, static agent config,
- * and files already on disk (sub-agent frontmatter). Safe to call on every
- * dashboard request.
+ * Database access is now real, but optional and best-effort: `settingsStore`
+ * (an `ISettingsStore`, wired through from `connectStores()` by the caller)
+ * feeds the same `readSetting`/`buildModelsAndCosts` precedence every other
+ * config assembly uses, so this report shows what the pipeline would actually
+ * use — including a database override — rather than a stale env-only view. A
+ * missing store, or a failed read, falls back to `{}` (env/code defaults),
+ * exactly like every other caller of `readAllSettingsSafely`; this endpoint
+ * still never fails a dashboard request over a settings-table outage.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, buildConfigFromRepo, parseEffort } from '../cli/config.ts';
+import { loadConfig, buildConfigFromRepo, parseEffort, readSetting, readAllSettingsSafely } from '../cli/config.ts';
 import { loadManifest, resolveAgentKnobs } from '../overlay/index.ts';
 import type { OverlayManifest } from '../overlay/index.ts';
 import type { PipelineConfig } from '../types/pipeline.types.ts';
 import type { AgentConfig } from '../types/agent.types.ts';
 import type { RepoConfig } from '../config/repo-config.ts';
+import type { ISettingsStore } from '../config/settings-store.interface.ts';
 
 import { createAnalyzerConfig } from '../agents/analyzer/config.ts';
 import { createPlannerConfig } from '../agents/planner/config.ts';
@@ -48,17 +54,36 @@ import {
 
 export interface EffortResolution {
   raw: string | undefined;
-  /** `parseEffort`'s own result — `undefined` for unset, blank, AND unrecognised
-   *  values alike (a typo is a no-op, not an error — see parseEffort's jsdoc). */
+  /** `parseEffort`'s own result on `raw` ALONE — `undefined` for unset, blank,
+   *  AND unrecognised values alike (a typo is a no-op, not an error — see
+   *  parseEffort's jsdoc). Deliberately ignores any database setting, so a
+   *  reader can compare it against `effective` to see whether a database
+   *  override, not the historical env-divergence bug, explains a mismatch. */
   parsed: PipelineConfig['models']['effort'];
-  /** What actually takes effect. Never blank: an unparsed value reads as the
-   *  SDK's own default rather than as an empty or misleadingly-raw string. */
+  /** What actually takes effect — the SAME value `buildModelsAndCosts` produced
+   *  for the real config this report is describing, honouring a database
+   *  `models.effort` setting when present. Never blank: an unresolved value
+   *  reads as the SDK's own default rather than as an empty or misleadingly-raw
+   *  string. */
   effective: string;
 }
 
-export function resolveEffortDisplay(raw: string | undefined): EffortResolution {
+/**
+ * `resolved` is the real, already-resolved `PipelineConfig['models']['effort']`
+ * (i.e. `loadConfigResult.models.effort`, which already honours a database
+ * setting) — NOT recomputed from `raw` here, so this can never silently drift
+ * from what `buildModelsAndCosts` itself produced. Omitting it (as this
+ * module's own unit tests do, and as any caller with no resolved config yet
+ * may) falls back to parsing `raw` alone, identical to this function's
+ * behaviour before database settings existed.
+ */
+export function resolveEffortDisplay(
+  raw: string | undefined,
+  resolved?: PipelineConfig['models']['effort'],
+): EffortResolution {
   const parsed = parseEffort(raw);
-  return { raw, parsed, effective: parsed ?? '(SDK default: high)' };
+  const effective = resolved ?? parsed;
+  return { raw, parsed, effective: effective ?? '(SDK default: high)' };
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +486,12 @@ export interface BuilderResolution {
    *  Mirrors `EffortResolution.raw`, which already carries this distinction
    *  on the effort side. */
   raw: string | undefined;
+  /** The database `models.default` setting, when present and valid —
+   *  `undefined` when absent or malformed, in which case `raw`/the code default
+   *  apply exactly as they did before settings existed. Read with the same
+   *  `readSetting` `buildModelsAndCosts` itself uses, so this can never show a
+   *  value that isn't the one actually feeding `model` below. */
+  fromSettings: string | undefined;
   model: string;
   effort: EffortResolution;
   /** Real call sites that resolve config through this builder. */
@@ -495,26 +526,38 @@ function buildRepoEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   };
 }
 
-function resolveOrchestratorModel(): OrchestratorModelReport {
+/**
+ * `settings` is the database settings this request already fetched (via
+ * `readAllSettingsSafely`, see `buildConfigReport`) — passed in rather than
+ * read here again, so `orchestratorModel` and `perAgent` below are guaranteed
+ * to describe the SAME settings snapshot for one request.
+ */
+function resolveOrchestratorModel(settings: Record<string, unknown>): OrchestratorModelReport {
   // Builder 1 — reads process.env directly (src/cli/config.ts:53-118). Not
   // parameterisable by env, so this always reflects the real process env,
   // unlike everything else in this module.
-  const loadConfigResult = loadConfig('.');
+  const loadConfigResult = loadConfig('.', settings);
 
   // Builder 2 — takes env explicitly (src/cli/config.ts:140-238). STUB_REPO
   // supplies the RepoConfig arg; only .models is read from the result.
-  const buildConfigFromRepoResult = buildConfigFromRepo(STUB_REPO, buildRepoEnv(process.env));
+  const buildConfigFromRepoResult = buildConfigFromRepo(STUB_REPO, buildRepoEnv(process.env), settings);
 
   const loadConfigModel = loadConfigResult.models.default;
   const buildConfigFromRepoModel = buildConfigFromRepoResult.models.default;
 
   const rawDefaultModel = process.env['DEFAULT_MODEL'];
+  // Same key, same validation, as `buildModelsAndCosts` used to produce
+  // `loadConfigModel`/`buildConfigFromRepoModel` above — this can only ever
+  // agree with them, never drift into showing a different "what the database
+  // says" than what actually resolved.
+  const fromSettingsModel = readSetting<string>(settings, 'models.default');
 
   return {
     loadConfig: {
       raw: rawDefaultModel,
+      fromSettings: fromSettingsModel,
       model: loadConfigModel,
-      effort: resolveEffortDisplay(process.env['DEFAULT_EFFORT']),
+      effort: resolveEffortDisplay(process.env['DEFAULT_EFFORT'], loadConfigResult.models.effort),
       usedBy: [
         'PR review (pr-reviewer, cherry-pick-reviewer) — src/cli/review-pr.ts:980',
         'watcher polling config — src/cli/watch.ts:539',
@@ -523,8 +566,9 @@ function resolveOrchestratorModel(): OrchestratorModelReport {
     },
     buildConfigFromRepo: {
       raw: rawDefaultModel,
+      fromSettings: fromSettingsModel,
       model: buildConfigFromRepoModel,
-      effort: resolveEffortDisplay(process.env['DEFAULT_EFFORT']),
+      effort: resolveEffortDisplay(process.env['DEFAULT_EFFORT'], buildConfigFromRepoResult.models.effort),
       usedBy: [
         'spawned pipeline containers (analyzer..docs-writer) when REPO_CONFIG is set — src/cli/config.ts:250-253',
       ],
@@ -533,7 +577,10 @@ function resolveOrchestratorModel(): OrchestratorModelReport {
     note:
       'Two independent builders resolve DEFAULT_MODEL/DEFAULT_EFFORT — a historical bug had one carry a ' +
       'hardcoded literal while the other read the env, leaving the setting inert on one path only with no ' +
-      'error. Both are resolved here, live, every request — a divergence would show up as agree:false.',
+      'error. Both are resolved here, live, every request — a divergence would show up as agree:false. A ' +
+      'database `models.default`/`models.effort` setting (see fromSettings on each builder, and the ' +
+      'top-level settingsApplied) now also participates in this precedence and wins over both env and the ' +
+      'hardcoded literal — that is expected, not a regression of the historical bug.',
   };
 }
 
@@ -554,6 +601,19 @@ export interface ConfigReport {
   credential: { prReview: CredentialResolution };
   evalLevers: LeverStatus[];
   overlay: OverlayReport;
+  /** The raw database settings this report actually read and folded into
+   *  `orchestratorModel`/`perAgent` above (empty `{}` when the settings table
+   *  had nothing stored, or was unreachable — everything below then comes from
+   *  environment/code defaults, same as before this field existed). Shown
+   *  verbatim so an operator can see exactly what is stored without having to
+   *  trust that every resolved field downstream reflects it correctly. Not
+   *  every settings key participates in THIS report yet — `costs.*` and
+   *  `runner.maxConcurrency` are applied in real config assembly (see
+   *  `buildModelsAndCosts` / `readConcurrencySetting`) but have no
+   *  corresponding display field here, so a value stored under those keys is
+   *  visible here (in this raw map) even though no other field of this report
+   *  reflects it. */
+  settingsApplied: Record<string, unknown>;
 }
 
 export interface BuildConfigReportOptions {
@@ -561,16 +621,24 @@ export interface BuildConfigReportOptions {
    *  `private/` on a deployment machine. Production callers omit this and get
    *  the real, live manifest. */
   manifest?: OverlayManifest;
+  /** Wired from `connectStores()` by the caller (`src/dashboard/server.ts`).
+   *  Optional and best-effort — see `readAllSettingsSafely`: a missing store or
+   *  a failed read falls back to `{}`, matching the module doc's "no request
+   *  ever fails over a settings-table outage." Omitting it (as this module's
+   *  own tests do) reports exactly what this endpoint showed before the
+   *  database was wired in. */
+  settingsStore?: ISettingsStore;
 }
 
 export async function buildConfigReport(opts: BuildConfigReportOptions = {}): Promise<ConfigReport> {
   const manifest = opts.manifest ?? (await loadManifest());
   const env = process.env;
+  const settings = await readAllSettingsSafely(opts.settingsStore);
 
-  const orchestratorModel = resolveOrchestratorModel();
+  const orchestratorModel = resolveOrchestratorModel(settings);
 
-  const loadConfigResult = loadConfig('.');
-  const buildConfigFromRepoResult = buildConfigFromRepo(STUB_REPO, buildRepoEnv(env));
+  const loadConfigResult = loadConfig('.', settings);
+  const buildConfigFromRepoResult = buildConfigFromRepo(STUB_REPO, buildRepoEnv(env), settings);
 
   const perAgent = AGENT_ENTRIES.map((entry) => {
     const config = entry.configBuilder === 'loadConfig' ? loadConfigResult : buildConfigFromRepoResult;
@@ -593,5 +661,6 @@ export async function buildConfigReport(opts: BuildConfigReportOptions = {}): Pr
     credential: { prReview: resolvePrReviewCredential(env) },
     evalLevers: resolveEvalLevers(env),
     overlay: buildOverlayReport(manifest),
+    settingsApplied: settings,
   };
 }

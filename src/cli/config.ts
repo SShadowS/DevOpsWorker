@@ -53,6 +53,30 @@ export function parseEffort(raw: string | undefined): PipelineConfig['models']['
 }
 
 /**
+ * Read one settings key, validated against its zod schema (`src/config/schemas.ts`).
+ * Returns `undefined` for a key that is absent AND for one that is present but
+ * malformed (wrong type, out of range, unknown enum member) — the two are
+ * deliberately indistinguishable to the caller, because both mean "fall through
+ * to the next precedence tier," exactly as an absent key always did. A malformed
+ * value logs a `console.warn` rather than throwing: this runs on every config
+ * assembly, so one bad row in `settings` must not brick every pipeline run.
+ *
+ * Exported so a display-only reader of settings (the dashboard's Config tab,
+ * `config-report.ts`) can show exactly what `buildModelsAndCosts` itself would
+ * use, rather than re-validating independently and risking the two silently
+ * drifting apart.
+ */
+export function readSetting<T>(settings: Record<string, unknown>, key: string): T | undefined {
+  if (!(key in settings)) return undefined;
+  const result = validateSetting(key, settings[key]);
+  if (!result.valid) {
+    console.warn(`  ⚠️  Ignoring malformed "${key}" setting: ${result.errors.map(e => e.message).join('; ')}`);
+    return undefined;
+  }
+  return result.value as T;
+}
+
+/**
  * Build the models/costs block shared by `loadConfig` and `buildConfigFromRepo`.
  *
  * This used to be duplicated verbatim between the two builders, with `perAgent`
@@ -61,26 +85,13 @@ export function parseEffort(raw: string | undefined): PipelineConfig['models']['
  * exactly one copy, so the two builders cannot drift apart again.
  *
  * Precedence, checked independently per field: a database `settings` value wins
- * when present and passes its zod schema (`src/config/schemas.ts`); otherwise the
- * matching environment variable; otherwise the code default below. A malformed
- * stored value (wrong type, out of range, unknown enum member) is IGNORED with a
- * `console.warn` rather than thrown — this runs on every config assembly, so one
- * bad row in `settings` must not brick every pipeline run that reads it.
+ * when present and valid (see `readSetting`); otherwise the matching environment
+ * variable; otherwise the code default below.
  */
 export function buildModelsAndCosts(
   env: Record<string, string | undefined>,
   settings: Record<string, unknown>,
 ): { models: PipelineConfig['models']; costs: PipelineConfig['costs'] } {
-  function fromSettings<T>(key: string): T | undefined {
-    if (!(key in settings)) return undefined;
-    const result = validateSetting(key, settings[key]);
-    if (!result.valid) {
-      console.warn(`  ⚠️  Ignoring malformed "${key}" setting: ${result.errors.map(e => e.message).join('; ')}`);
-      return undefined;
-    }
-    return result.value as T;
-  }
-
   return {
     models: {
       // `||` not `??`: the container env forwards unset vars as '', and an empty
@@ -91,9 +102,9 @@ export function buildModelsAndCosts(
       // variable IS in the container env allowlist and DOES arrive correctly.
       // Measured on a spawned container: process.env.DEFAULT_MODEL was
       // "claude-opus-4-8" while models.default resolved to "claude-opus-5".
-      default: fromSettings<string>('models.default') ?? (env['DEFAULT_MODEL'] || 'claude-opus-5'),
-      effort: fromSettings<PipelineConfig['models']['effort']>('models.effort') ?? parseEffort(env['DEFAULT_EFFORT']),
-      perAgent: fromSettings<Record<string, string>>('models.perAgent') ?? {
+      default: readSetting<string>(settings, 'models.default') ?? (env['DEFAULT_MODEL'] || 'claude-opus-5'),
+      effort: readSetting<PipelineConfig['models']['effort']>(settings, 'models.effort') ?? parseEffort(env['DEFAULT_EFFORT']),
+      perAgent: readSetting<Record<string, string>>(settings, 'models.perAgent') ?? {
         // planner inherits the Opus 5 default — strong planning, cheap (Sonnet) coding.
         'coder': 'claude-sonnet-5',
         'draft-pr': 'claude-sonnet-5',
@@ -103,8 +114,8 @@ export function buildModelsAndCosts(
     },
 
     costs: {
-      maxBudgetPerAgentUsd: fromSettings<number>('costs.maxBudgetPerAgentUsd'),
-      maxBudgetPerRunUsd: fromSettings<number>('costs.maxBudgetPerRunUsd'),
+      maxBudgetPerAgentUsd: readSetting<number>(settings, 'costs.maxBudgetPerAgentUsd'),
+      maxBudgetPerRunUsd: readSetting<number>(settings, 'costs.maxBudgetPerRunUsd'),
     },
   };
 }
@@ -260,8 +271,13 @@ export function buildConfigFromRepo(
  * settings must not be REQUIRED for a pipeline to run: on a missing store or a
  * failed read, this returns `{}` so config assembly falls back to environment
  * variables and code defaults, exactly as it did before settings existed.
+ *
+ * Exported for every other config-assembly site that needs the same guard —
+ * `resolveConfig` (`src/cli/run.ts`, the fresh-start path) and `buildConfigReport`
+ * (`src/dashboard/config-report.ts`, the Config tab) both call this rather than
+ * re-implementing the same try/catch.
  */
-async function readAllSettingsSafely(store: ISettingsStore | undefined): Promise<Record<string, unknown>> {
+export async function readAllSettingsSafely(store: ISettingsStore | undefined): Promise<Record<string, unknown>> {
   if (!store) return {};
   try {
     return await store.getAll();
