@@ -169,6 +169,26 @@ describe('seedRegistryFromManifest', () => {
     expect(await store.getCompanion('WouldSeed')).toBeNull();
   });
 
+  test('companions seed while repos do not, decided independently (the mirror direction)', async () => {
+    const store = new FakeRegistryStore();
+    // Repos table is already non-empty; companions table is empty.
+    await store.upsertRepo('existing', mkRepo({ repoKey: 'existing' }), null);
+
+    const manifest: OverlayManifest = {
+      repos: { 'would-seed': mkRepo({ repoKey: 'would-seed' }) },
+      companions: { 'Comp': mkCompanion() },
+    };
+
+    const result = await seedRegistryFromManifest(store, manifest);
+
+    expect(result.reposSeeded).toBe(0);
+    expect(result.companionsSeeded).toBe(1);
+    expect(await store.countRepos()).toBe(1);
+    expect(await store.countCompanions()).toBe(1);
+    expect(await store.getRepo('would-seed')).toBeNull();
+    expect(await store.getCompanion('Comp')).not.toBeNull();
+  });
+
   test('a malformed manifest repo entry throws and names the offending key, without half-seeding', async () => {
     const store = new FakeRegistryStore();
     const manifest = {
@@ -194,6 +214,84 @@ describe('seedRegistryFromManifest', () => {
     } as unknown as OverlayManifest;
 
     await expect(seedRegistryFromManifest(store, manifest)).rejects.toThrow(/BadComp/);
+    expect(await store.countCompanions()).toBe(0);
+  });
+
+  // Regression test for the coupling bug from review round 1: a malformed repo
+  // entry must never block an unrelated, valid companion manifest from seeding.
+  // The two tables are attempted to completion independently — the error
+  // surfaces the repo failure AND records that the companion still seeded.
+  test('a malformed repo entry does NOT prevent a valid, independent companion manifest from seeding', async () => {
+    const store = new FakeRegistryStore();
+    const manifest = {
+      repos: {
+        // Missing required azureDevOps.repositoryId / areaPath.
+        'bad-repo': { url: 'https://example.invalid/bad.git', branch: 'main' },
+      },
+      companions: {
+        'GoodComp': mkCompanion(),
+      },
+    } as unknown as OverlayManifest;
+
+    let thrown: Error | undefined;
+    try {
+      await seedRegistryFromManifest(store, manifest);
+    } catch (error) {
+      thrown = error as Error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(thrown!.message).toMatch(/bad-repo/);
+    expect(thrown!.message).toMatch(/1 companion/);
+    expect(await store.countRepos()).toBe(0);
+    expect(await store.countCompanions()).toBe(1);
+    expect(await store.getCompanion('GoodComp')).not.toBeNull();
+  });
+
+  test('two malformed repo entries in the same manifest are both named in the error, not just the first', async () => {
+    const store = new FakeRegistryStore();
+    const manifest = {
+      repos: {
+        'bad-one': { url: 'https://example.invalid/bad1.git', branch: 'main' },
+        'bad-two': { url: 'https://example.invalid/bad2.git', branch: 'main' },
+      },
+    } as unknown as OverlayManifest;
+
+    let thrown: Error | undefined;
+    try {
+      await seedRegistryFromManifest(store, manifest);
+    } catch (error) {
+      thrown = error as Error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(thrown!.message).toMatch(/bad-one/);
+    expect(thrown!.message).toMatch(/bad-two/);
+    expect(await store.countRepos()).toBe(0);
+  });
+
+  test('when both tables have a malformed entry, the error names both tables', async () => {
+    const store = new FakeRegistryStore();
+    const manifest = {
+      repos: {
+        'bad-repo': { url: 'https://example.invalid/bad.git', branch: 'main' },
+      },
+      companions: {
+        'BadComp': { defaultBranch: 'main' }, // missing required url
+      },
+    } as unknown as OverlayManifest;
+
+    let thrown: Error | undefined;
+    try {
+      await seedRegistryFromManifest(store, manifest);
+    } catch (error) {
+      thrown = error as Error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(thrown!.message).toMatch(/bad-repo/);
+    expect(thrown!.message).toMatch(/BadComp/);
+    expect(await store.countRepos()).toBe(0);
     expect(await store.countCompanions()).toBe(0);
   });
 });
