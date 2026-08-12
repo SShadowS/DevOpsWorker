@@ -37,7 +37,7 @@ const envProvisionSchema = z.object({
 }).strict();
 
 const docsWriterSchema = z.object({
-  docsRepoUrl: z.string().min(1).describe('Git URL of the docs repository the documenter agent writes to'),
+  docsRepoUrl: z.string().describe('Git URL of the docs repository the documenter agent writes to'),
 }).strict();
 
 const companionOverrideSchema = z.object({
