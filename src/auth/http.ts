@@ -50,7 +50,13 @@ export async function handleLogin(req: Request, deps: AuthDeps, ip: string): Pro
   }
   const email = body.email?.trim().toLowerCase();
   const password = body.password;
-  if (!email || !password) {
+  // An over-long value gets the SAME 400 as a missing one, on purpose: it is
+  // malformed input, not an account-existence signal, and this check runs
+  // before the rate limiter, the event store, and verifyLocalLogin touch
+  // anything. 254 is RFC 5321's maximum mailbox length; 1024 is far past any
+  // real password and bounds the argon2 work an unauthenticated caller can
+  // force per request.
+  if (!email || !password || email.length > 254 || password.length > 1024) {
     return Response.json({ error: 'Email and password are required' }, { status: 400 });
   }
 

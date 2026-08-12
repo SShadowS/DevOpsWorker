@@ -101,3 +101,51 @@ describe('login/logout event recording', () => {
     expect(res.headers.get('Set-Cookie')).toContain(`${SESSION_COOKIE}=`);
   });
 });
+
+describe('login request size caps', () => {
+  test('an over-long email is 400, writes no event, and never reaches the rate limiter or user store', async () => {
+    deps.rateLimiter.check = () => { throw new Error('rate limiter must not be consulted'); };
+    deps.userStore.findByEmail = () => { throw new Error('user store must not be consulted'); };
+    const res = await handleLogin(
+      loginReq({ email: `${'a'.repeat(255)}@x.y`, password: 'correct-horse-battery' }),
+      deps,
+      '1.1.1.1',
+    );
+    expect(res.status).toBe(400);
+    expect(events.rows).toHaveLength(0);
+  });
+
+  test('an over-long password is 400, writes no event, and never reaches the rate limiter or user store', async () => {
+    deps.rateLimiter.check = () => { throw new Error('rate limiter must not be consulted'); };
+    deps.userStore.findByEmail = () => { throw new Error('user store must not be consulted'); };
+    const res = await handleLogin(loginReq({ email: 'op@x.y', password: 'a'.repeat(1025) }), deps, '1.1.1.1');
+    expect(res.status).toBe(400);
+    expect(events.rows).toHaveLength(0);
+  });
+
+  test('over-long-email, over-long-password, and missing-field 400s are byte-identical', async () => {
+    const missing = await handleLogin(loginReq({ email: 'op@x.y' }), deps, '1.1.1.1');
+    const longEmail = await handleLogin(
+      loginReq({ email: `${'a'.repeat(255)}@x.y`, password: 'correct-horse-battery' }),
+      deps,
+      '1.1.1.1',
+    );
+    const longPassword = await handleLogin(loginReq({ email: 'op@x.y', password: 'a'.repeat(1025) }), deps, '1.1.1.1');
+
+    const missingStatus = missing.status;
+    const missingBody = await missing.json();
+    const missingHeaders = [...missing.headers.entries()].sort();
+    for (const res of [longEmail, longPassword]) {
+      expect(res.status).toBe(missingStatus);
+      expect(await res.json()).toEqual(missingBody);
+      expect([...res.headers.entries()].sort()).toEqual(missingHeaders);
+    }
+  });
+
+  test('a normal-length email and password still log in exactly as before', async () => {
+    const res = await handleLogin(loginReq({ email: 'op@x.y', password: 'correct-horse-battery' }), deps, '1.1.1.1');
+    expect(res.status).toBe(200);
+    expect(events.rows).toHaveLength(1);
+    expect(events.rows[0]).toMatchObject({ kind: 'login-success', email: 'op@x.y' });
+  });
+});
