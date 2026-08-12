@@ -55,8 +55,15 @@ mkdir -p "${SESSION_ROOT}"
 git config --global --add safe.directory '*'
 
 # --- Phase 1: initial resolve (need repoKey + appRoot before we can read app.json) ---
-INITIAL_INFO=$(cd /app && bun scripts/resolve-companions.ts "${REPO_CONFIG}" 2>&1) || {
-  echo "ERROR: Failed to resolve companions: ${INITIAL_INFO}"
+# stdout only is captured here — resolve-companions.ts's output contract with this
+# script is a single JSON line on stdout, parsed by jq below. Diagnostics the script
+# prints (e.g. a database-unreachable warning while it best-effort hydrates the repo
+# registry) go to stderr, which is deliberately left UNcaptured so it can never land
+# inside the string jq has to parse; it still reaches the container's own stderr, so
+# it's visible in `docker logs`. On failure, whatever the script printed to stderr
+# already appeared above this point — the exit branch below just marks where to look.
+INITIAL_INFO=$(cd /app && bun scripts/resolve-companions.ts "${REPO_CONFIG}") || {
+  echo "ERROR: Failed to resolve companions (see error output above)"
   exit 1
 }
 REPO_KEY=$(echo "${INITIAL_INFO}" | jq -r '.repoKey')
@@ -89,8 +96,9 @@ fi
 INITIAL_BC_BRANCH=$(echo "${INITIAL_INFO}" | jq -r '.companions[] | select(.name == "BC") | .branch' 2>/dev/null || echo "")
 
 if [ -n "${BC_PLATFORM}" ]; then
-  REPO_INFO=$(cd /app && bun scripts/resolve-companions.ts "${REPO_CONFIG}" --bc-platform "${BC_PLATFORM}" 2>&1) || {
-    echo "ERROR: Failed to resolve companions with bc-platform: ${REPO_INFO}"
+  # Same stdout-only capture as Phase 1 above, and for the same reason.
+  REPO_INFO=$(cd /app && bun scripts/resolve-companions.ts "${REPO_CONFIG}" --bc-platform "${BC_PLATFORM}") || {
+    echo "ERROR: Failed to resolve companions with bc-platform (see error output above)"
     exit 1
   }
 else

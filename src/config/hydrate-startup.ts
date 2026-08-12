@@ -100,8 +100,13 @@ function logSeedResult(seedResult: { repos: TableSeedResult; companions: TableSe
  * as "(...)" with nothing inside the parentheses, useless for whoever reads
  * the startup log. The actual reason lives in `.errors[]` (or, for a single
  * plain error, directly on `.code`).
+ *
+ * Exported so other one-shot database-optional callers (e.g.
+ * `scripts/resolve-companions.ts`, which hits this same connection path
+ * before the CLI's own startup hydration even runs) get the same readable
+ * message instead of re-deriving it.
  */
-function errorMessage(err: unknown): string {
+export function errorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
   const nested = (err as { errors?: unknown[] } | undefined)?.errors;
   if (Array.isArray(nested) && nested.length > 0) {
