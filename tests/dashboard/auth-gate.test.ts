@@ -9,6 +9,7 @@ import type { IRunnerStatus } from '../../src/pipeline/runner-status.interface.t
 import type { ILogSink } from '../../src/pipeline/log-sink.interface.ts';
 import type { IPRReviewStore, PRReviewRow } from '../../src/pipeline/pr-review-store.interface.ts';
 import type { ISettingsStore } from '../../src/config/settings-store.interface.ts';
+import type { IAuditStore, AuditRow } from '../../src/config/audit-store.interface.ts';
 import { FakeRegistryStore } from '../config/fixtures/fake-registry-store.ts';
 import { repos, replaceRepos } from '../../src/config/repos.ts';
 import { companionRegistry, replaceCompanions } from '../../src/config/companions.ts';
@@ -92,6 +93,11 @@ class StubSettingsStore implements ISettingsStore {
   async delete(): Promise<void> {}
 }
 
+class StubAuditStore implements IAuditStore {
+  async list(): Promise<AuditRow[]> { return []; }
+  async write(): Promise<void> {}
+}
+
 describe('dashboard auth gate (real HTTP round trip)', () => {
   let handle: DashboardHandle;
   let base: string;
@@ -126,6 +132,7 @@ describe('dashboard auth gate (real HTTP round trip)', () => {
       authEventStore: new FakeAuthEventStore(),
       registryStore: new FakeRegistryStore(),
       settingsStore: new StubSettingsStore(),
+      auditStore: new StubAuditStore(),
     });
     base = `http://localhost:${handle.server.port}`;
 

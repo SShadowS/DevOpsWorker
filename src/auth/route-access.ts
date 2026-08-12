@@ -4,7 +4,8 @@
 export type Access = 'public' | 'operator' | 'admin';
 
 export interface RouteRule {
-  method: string;
+  /** An HTTP method, or `'*'` to match every method. */
+  method: string | '*';
   pattern: RegExp;
   access: Access;
 }
@@ -28,13 +29,20 @@ export const routeRules: RouteRule[] = [
 
   // Admin-only global mutations.
   { method: 'POST', pattern: /^\/api\/runners$/, access: 'admin' },
+
+  // Admin config API — repos, companions, settings, audit log. The
+  // default-deny below already covers this (nothing here is marked
+  // 'public'), so this rule changes no behaviour; it exists to make the
+  // intent readable rather than left implicit. `'*'` covers every method
+  // used under this prefix (GET/PUT/DELETE) without one row per method.
+  { method: '*', pattern: /^\/api\/admin\//, access: 'admin' },
 ];
 
 /** `path` must already be normalised and free of a query string, and `method`
  *  must already be uppercase — this function does neither itself. */
 export function requiredAccess(method: string, path: string): Access {
   for (const rule of routeRules) {
-    if (rule.method === method && rule.pattern.test(path)) return rule.access;
+    if ((rule.method === method || rule.method === '*') && rule.pattern.test(path)) return rule.access;
   }
   return 'operator';
 }

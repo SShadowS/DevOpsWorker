@@ -13,8 +13,10 @@ import type { ILogSink } from '../pipeline/log-sink.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import type { IRegistryStore } from '../config/registry-store.interface.ts';
 import type { ISettingsStore } from '../config/settings-store.interface.ts';
+import type { IAuditStore } from '../config/audit-store.interface.ts';
 import { validateSetting } from '../config/schemas.ts';
 import { refreshRegistryIfStale } from '../config/hydrate.ts';
+import { handleAdminApi } from './admin-api.ts';
 import { LogPoller } from './log-poller.ts';
 import { parseWindow, parsePopulation, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getReviewValueStats, getDriftStats } from './stats.ts';
 import { buildConfigReport } from './config-report.ts';
@@ -76,6 +78,9 @@ export interface DashboardOptions {
   sessionStore: ISessionStore;
   authEventStore: IAuthEventStore;
   registryStore: IRegistryStore;
+  /** Backing store for the admin config API (`/api/admin/*`) — see
+   *  `src/dashboard/admin-api.ts`. */
+  auditStore: IAuditStore;
 }
 
 /** How stale the repo/companion registry may be before a request or the
@@ -98,7 +103,7 @@ export interface DashboardHandle {
 }
 
 export function startDashboard(options: DashboardOptions): DashboardHandle {
-  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, registryStore, settingsStore } = options;
+  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, registryStore, settingsStore, auditStore } = options;
 
   /** Best-effort registry refresh — a database blip must never fail the
    *  caller (a request, or the background poller below). */
@@ -210,6 +215,14 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
       if (path === '/api/auth/me' && req.method === 'GET') return handleMe(user!);
       if (path === '/api/auth/logout' && req.method === 'POST') {
         return handleLogout(req, authDeps, server.requestIP(req)?.address ?? 'unknown');
+      }
+
+      // Admin config API — repos, companions, settings, audit log. The gate
+      // above already required the 'admin' role for every method under this
+      // prefix (see the '*' rule in route-access.ts), so `user` is a
+      // confirmed admin here.
+      if (path.startsWith('/api/admin/')) {
+        return handleAdminApi(req, url, user!, { sql, registryStore, settingsStore, auditStore });
       }
 
       // Action submission endpoint

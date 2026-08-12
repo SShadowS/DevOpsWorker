@@ -18,7 +18,7 @@ export async function dashboard(args: string[]): Promise<void> {
     }
   }
 
-  const { stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, userStore, sessionStore, authEventStore, registryStore, settingsStore } = await connectStores();
+  const { stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, userStore, sessionStore, authEventStore, registryStore, settingsStore, auditStore } = await connectStores();
 
-  startDashboard({ port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, userStore, sessionStore, authEventStore, registryStore, settingsStore });
+  startDashboard({ port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, userStore, sessionStore, authEventStore, registryStore, settingsStore, auditStore });
 }

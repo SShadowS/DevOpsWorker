@@ -42,6 +42,22 @@ describe('route access (pinned invariant)', () => {
     expect(requiredAccess('GET', '/api/runners')).toBe('operator'); // reading is fine
   });
 
+  test('the admin config API needs an admin for every method', () => {
+    expect(requiredAccess('GET', '/api/admin/repos')).toBe('admin');
+    expect(requiredAccess('GET', '/api/admin/repos/some-key')).toBe('admin');
+    expect(requiredAccess('PUT', '/api/admin/repos/some-key')).toBe('admin');
+    expect(requiredAccess('DELETE', '/api/admin/repos/some-key')).toBe('admin');
+    expect(requiredAccess('GET', '/api/admin/companions/some-key')).toBe('admin');
+    expect(requiredAccess('PUT', '/api/admin/companions/some-key')).toBe('admin');
+    expect(requiredAccess('DELETE', '/api/admin/companions/some-key')).toBe('admin');
+    expect(requiredAccess('GET', '/api/admin/settings')).toBe('admin');
+    expect(requiredAccess('PUT', '/api/admin/settings/some-key')).toBe('admin');
+    expect(requiredAccess('DELETE', '/api/admin/settings/some-key')).toBe('admin');
+    expect(requiredAccess('GET', '/api/admin/audit')).toBe('admin');
+    // A method this table has never seen is still covered by the '*' rule.
+    expect(requiredAccess('PATCH', '/api/admin/repos/some-key')).toBe('admin');
+  });
+
   test('DEFAULT-DENY: routes nobody declared require auth', () => {
     expect(requiredAccess('GET', '/api/some-future-endpoint')).toBe('operator');
     expect(requiredAccess('POST', '/anything/else')).toBe('operator');
