@@ -289,6 +289,62 @@ describe('buildAgentKnobsReport', () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildAgentKnobsReport — database knobs (5th argument)
+// ---------------------------------------------------------------------------
+
+describe('buildAgentKnobsReport — database knobs', () => {
+  test('omitting settings resolves exactly as before database knobs existed', () => {
+    const r = buildAgentKnobsReport(
+      dummyAgent({ name: 'coder', model: 'claude-sonnet-5' }),
+      { agents: { coder: { model: 'claude-opus-5' } } },
+      { default: 'claude-opus-4-8', perAgent: { coder: 'claude-haiku-4-5' } },
+    );
+    expect(r.effectiveModel).toBe('claude-opus-5');
+    expect(r.dbOverrideModel).toBeNull();
+    expect(r.dbOverrideMaxTurns).toBeNull();
+  });
+
+  test('a database model override wins over the overlay override, and is reported distinctly', () => {
+    const r = buildAgentKnobsReport(
+      dummyAgent({ name: 'coder', model: 'claude-sonnet-5' }),
+      { agents: { coder: { model: 'claude-opus-5' } } },
+      { default: 'claude-opus-4-8', perAgent: { coder: 'claude-haiku-4-5' } },
+      'buildConfigFromRepo',
+      { 'models.perAgent': { coder: 'db-coder-model' } },
+    );
+    expect(r.effectiveModel).toBe('db-coder-model');
+    expect(r.dbOverrideModel).toBe('db-coder-model');
+    // The overlay's own value is still visible — a database win doesn't erase it.
+    expect(r.overlayOverrideModel).toBe('claude-opus-5');
+  });
+
+  test('a database maxTurns override wins over the overlay override, and is reported distinctly', () => {
+    const r = buildAgentKnobsReport(
+      dummyAgent({ name: 'coder', maxTurns: 80 }),
+      { agents: { coder: { maxTurns: 40 } } },
+      { default: 'claude-opus-5' },
+      'buildConfigFromRepo',
+      { 'agents.coder.maxTurns': 200 },
+    );
+    expect(r.effectiveMaxTurns).toBe(200);
+    expect(r.dbOverrideMaxTurns).toBe(200);
+    expect(r.overlayOverrideMaxTurns).toBe(40);
+  });
+
+  test('a database row for a DIFFERENT agent has no effect on this one', () => {
+    const r = buildAgentKnobsReport(
+      dummyAgent({ name: 'coder', model: 'claude-sonnet-5' }),
+      {},
+      { default: 'claude-opus-5' },
+      'buildConfigFromRepo',
+      { 'models.perAgent': { planner: 'db-planner-model' } },
+    );
+    expect(r.effectiveModel).toBe('claude-sonnet-5');
+    expect(r.dbOverrideModel).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildConfigReport — end to end, both config builders
 // ---------------------------------------------------------------------------
 

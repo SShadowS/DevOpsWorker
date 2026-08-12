@@ -22,9 +22,11 @@ import {
   parseReviewPrArgs,
   collectAppliedLevers,
   isTestRun,
+  buildReviewBaseConfig,
 } from '../../src/cli/review-pr.ts';
 import { findingKey, markerFor } from '../../src/sdk/ado/finding-key.ts';
 import type { ReviewThread } from '../../src/sdk/ado/pull-requests.ts';
+import type { ISettingsStore } from '../../src/config/settings-store.interface.ts';
 
 // ---------------------------------------------------------------------------
 // EVAL-ONLY A/B hooks
@@ -1777,6 +1779,58 @@ describe('parseReviewPrArgs', () => {
     expect(parsed.sourceBranch).toBe('');
     expect(parsed.targetBranch).toBe('');
     expect(parsed.forceFull).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildReviewBaseConfig — review-pr's config assembly now honours database
+// settings. Before this existed, `reviewPR` called `loadConfig(sessionRoot)`
+// directly with no settings at all — the only config-assembly path in the
+// pipeline that never read the settings table, so a database model/maxTurns
+// override silently never reached pr-reviewer or cherry-pick-reviewer.
+// ---------------------------------------------------------------------------
+
+function fakeSettingsStore(overrides: Record<string, unknown> = {}): ISettingsStore {
+  return {
+    async getAll() { return { ...overrides }; },
+    async get<T>(key: string) { return (key in overrides ? overrides[key] : null) as T | null; },
+    async set() {},
+    async delete() {},
+  };
+}
+
+describe('buildReviewBaseConfig', () => {
+  test('a database models.default setting reaches the resolved config', async () => {
+    const config = await buildReviewBaseConfig('/tmp/session', fakeSettingsStore({ 'models.default': 'db-model' }));
+    expect(config.models.default).toBe('db-model');
+  });
+
+  test('the raw settings snapshot is carried through as settingsApplied', async () => {
+    const settings = { 'models.perAgent': { coder: 'db-coder-model' } };
+    const config = await buildReviewBaseConfig('/tmp/session', fakeSettingsStore(settings));
+    expect(config.settingsApplied).toEqual(settings);
+  });
+
+  test('omitting the settings store falls back to env/code defaults, matching the pre-fix behaviour', async () => {
+    const config = await buildReviewBaseConfig('/tmp/session');
+    expect(config.settingsApplied).toEqual({});
+  });
+
+  test('a settings-store read failure falls back to {} rather than throwing (review must not fail over a DB outage)', async () => {
+    const rejecting: ISettingsStore = {
+      async getAll() { throw new Error('settings table unreachable (fake)'); },
+      async get<T>() { return null as T | null; },
+      async set() {},
+      async delete() {},
+    };
+    const original = console.warn;
+    console.warn = () => {};
+    try {
+      const config = await buildReviewBaseConfig('/tmp/session', rejecting);
+      expect(config.settingsApplied).toEqual({});
+    } finally {
+      console.warn = original;
+    }
   });
 });
 

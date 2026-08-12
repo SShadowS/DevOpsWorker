@@ -70,6 +70,26 @@ export interface PipelineConfig {
     maxBudgetPerRunUsd?: number;
   };
 
+  /**
+   * The raw database `settings` rows this config was built from (see
+   * `readAllSettingsSafely` / `buildModelsAndCosts` in `src/cli/config.ts`).
+   * `undefined`/`{}` when the settings table had nothing stored, was
+   * unreachable, or this config was built by a path that predates settings
+   * (e.g. a bare test fixture) — same fallback contract as every other
+   * settings consumer.
+   *
+   * Carried through so `resolveDbAgentKnobs` (`src/cli/config.ts`) can look up
+   * ONE agent's database override at the `runAgent` chokepoint without a second
+   * database round-trip. Deliberately NOT the same thing as `models.perAgent`
+   * above: that field already falls back to a hardcoded per-agent default map
+   * when no database row exists, so treating it as "the database said so" would
+   * let a checked-in default outrank an overlay override or the agent's own
+   * config — exactly backwards for `resolveAgentKnobs`'s database-wins
+   * precedence. This field is the untouched settings snapshot, so a lookup
+   * against it is `undefined` unless an operator actually set something.
+   */
+  settingsApplied?: Record<string, unknown>;
+
   /** Private overlay manifest, loaded once at startup (empty `{}` when no overlay
    *  is installed). Carries proprietary pipeline edits, repo/companion additions,
    *  model overrides, etc. See src/overlay. */

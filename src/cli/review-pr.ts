@@ -1,7 +1,8 @@
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { loadConfig } from './config.ts';
+import { loadConfig, readAllSettingsSafely } from './config.ts';
+import type { ISettingsStore } from '../config/settings-store.interface.ts';
 import { runPRReview, detectCherryPick } from '../agents/pr-reviewer/config.ts';
 import type { PRFinding, PRReviewResult } from '../agents/pr-reviewer/schema.ts';
 import { runBackportReview } from '../agents/cherry-pick-reviewer/config.ts';
@@ -952,6 +953,31 @@ export async function applyInlineFindings(
   return result;
 }
 
+/**
+ * Build review-pr's base `PipelineConfig`, honouring database settings the
+ * same way every other config-assembly path does — see `buildModelsAndCosts`
+ * in `cli/config.ts`, which `loadConfig` calls. Extracted from `reviewPR` so
+ * this is unit-testable without the full agent + DB stack `reviewPR` needs.
+ *
+ * `settingsStore` is optional and best-effort, matching `readAllSettingsSafely`'s
+ * contract: a missing store or a failed read falls back to `{}` (env/code
+ * defaults), so a settings-table outage costs a review its database overrides,
+ * never the review itself.
+ *
+ * Before this existed, `reviewPR` called `loadConfig(sessionRoot)` with no
+ * settings at all — the ONLY config-assembly path in the pipeline that never
+ * read the settings table, so a database `models.default`/`models.perAgent`/
+ * `models.effort`/per-agent `maxTurns` override silently never reached
+ * pr-reviewer or cherry-pick-reviewer, no matter what an operator configured.
+ */
+export async function buildReviewBaseConfig(
+  sessionRoot: string,
+  settingsStore?: ISettingsStore,
+): Promise<PipelineConfig> {
+  const settings = await readAllSettingsSafely(settingsStore);
+  return loadConfig(sessionRoot, settings);
+}
+
 export async function reviewPR(args: string[]): Promise<void> {
   const { prId, repoId, sourceBranch, targetBranch, prUrl, prTitle, prDescription, actionId, forceFull } = parseReviewPrArgs(args);
 
@@ -988,8 +1014,22 @@ export async function reviewPR(args: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // Connect to DB up front — settings (baseConfig, below) need it before the
+  // config exists, and the same connection is reused for `prReviewStore`
+  // further down. Optional and best-effort: on a failed connect, the review
+  // still runs on env/code defaults, only losing database settings AND result
+  // persistence, never the review itself.
+  let stores: Awaited<ReturnType<typeof connectStores>> | undefined;
+  try {
+    stores = await connectStores();
+    console.log('[review-pr] Connected to database');
+  } catch (dbErr) {
+    console.warn(`Warning: could not connect to database — review result will not be persisted, and database settings will not apply: ${dbErr}`);
+  }
+  const prReviewStore = stores?.prReviewStore;
+
   const sessionRoot = process.env['SESSION_ROOT'] ?? process.cwd();
-  const baseConfig = loadConfig(sessionRoot);
+  const baseConfig = await buildReviewBaseConfig(sessionRoot, stores?.settingsStore);
   // Take the ADO coordinates from the resolved repo (the overlay registration),
   // including organization/orgUrl — NOT just project/repo. Spawned review
   // containers don't receive AZURE_DEVOPS_ORG, so relying on baseConfig's org
@@ -1013,16 +1053,6 @@ export async function reviewPR(args: string[]): Promise<void> {
   // defaults (e.g. organization='your-org') — better an obvious error than a
   // silent stream of 404s from the ADO MCP.
   assertRealAdoConfig(config, 'pr-review');
-
-  // Connect to DB for persisting review result
-  let prReviewStore: Awaited<ReturnType<typeof connectStores>>['prReviewStore'] | undefined;
-  try {
-    const stores = await connectStores();
-    prReviewStore = stores.prReviewStore;
-    console.log('[review-pr] Connected to database');
-  } catch (dbErr) {
-    console.warn(`Warning: could not connect to database — review result will not be persisted: ${dbErr}`);
-  }
 
   const shortBranch = sourceBranch.replace('refs/heads/', '');
   const shortTarget = targetBranch.replace('refs/heads/', '');

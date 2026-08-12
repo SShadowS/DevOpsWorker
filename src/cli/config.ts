@@ -120,6 +120,32 @@ export function buildModelsAndCosts(
   };
 }
 
+/**
+ * Resolve database-sourced knobs for ONE named agent — the model pin from
+ * `models.perAgent` and the turn cap from `agents.<name>.maxTurns` — for
+ * `resolveAgentKnobs`'s 4th argument (`src/overlay/agent-knobs.ts`).
+ *
+ * Reads the raw `settings` object directly with `readSetting`, NOT via
+ * `buildModelsAndCosts`'s already-merged `models.perAgent`: that field falls
+ * back to a hardcoded per-agent default map (see `buildModelsAndCosts` above)
+ * whenever no database row exists, so treating it as "the database's value"
+ * would let that code-level fallback outrank an overlay override or the
+ * agent's own declared model — exactly backwards for `resolveAgentKnobs`'s
+ * database-wins precedence. This function only ever returns a field when an
+ * operator genuinely set it; both fields are `undefined` otherwise, which
+ * `resolveAgentKnobs` falls through past exactly like every other tier.
+ */
+export function resolveDbAgentKnobs(
+  name: string,
+  settings: Record<string, unknown>,
+): { model?: string; maxTurns?: number } {
+  const perAgent = readSetting<Record<string, string>>(settings, 'models.perAgent');
+  return {
+    model: perAgent?.[name],
+    maxTurns: readSetting<number>(settings, `agents.${name}.maxTurns`),
+  };
+}
+
 export function loadConfig(sessionPath: string, settings: Record<string, unknown> = {}): PipelineConfig {
   const pat = process.env['AZURE_DEVOPS_PAT'] ?? '';
   // `getCachedManifest()` is sync and may be `null` if `loadManifest()` hasn't
@@ -166,6 +192,7 @@ export function loadConfig(sessionPath: string, settings: Record<string, unknown
     },
 
     ...buildModelsAndCosts(process.env, settings),
+    settingsApplied: settings,
 
     environment: {
       profileId: process.env['ENV_PROFILE_ID'],
@@ -249,6 +276,7 @@ export function buildConfigFromRepo(
     },
 
     ...buildModelsAndCosts(env, settings),
+    settingsApplied: settings,
 
     environment: repo.envProvision
       ? {
@@ -360,5 +388,9 @@ export async function loadConfigFromState(
     revisionLoops: current.revisionLoops,
     costs: current.costs,
     checkpoints: current.checkpoints,
+    // Operational policy, taken fresh — same reasoning as `models` above. A
+    // resumed run must see an operator's just-saved per-agent model/maxTurns
+    // setting immediately, not the snapshot from when this work item first started.
+    settingsApplied: current.settingsApplied,
   };
 }

@@ -22,7 +22,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, buildConfigFromRepo, parseEffort, readSetting, readAllSettingsSafely } from '../cli/config.ts';
+import { loadConfig, buildConfigFromRepo, parseEffort, readSetting, readAllSettingsSafely, resolveDbAgentKnobs } from '../cli/config.ts';
 import { loadManifest, resolveAgentKnobs } from '../overlay/index.ts';
 import type { OverlayManifest } from '../overlay/index.ts';
 import type { PipelineConfig } from '../types/pipeline.types.ts';
@@ -326,10 +326,18 @@ export interface PerAgentReport {
   perAgentPin: string | null;
   pipelineDefaultModel: string;
   overlayOverrideModel: string | null;
-  /** `resolveAgentKnobs`'s actual precedence: overlay > declared > perAgent > default. */
+  /** A database `models.perAgent.<name>` entry, when an operator has actually
+   *  set one — `null` otherwise. Distinct from `perAgentPin`: that field comes
+   *  from the already-merged `pipelineModels.perAgent`, which falls back to a
+   *  hardcoded default map when no database row exists, so it cannot tell "an
+   *  operator set this" from "nobody did." This field can. */
+  dbOverrideModel: string | null;
+  /** `resolveAgentKnobs`'s actual precedence: database > overlay > declared > perAgent > default. */
   effectiveModel: string;
   maxTurnsDeclared: number | null;
   overlayOverrideMaxTurns: number | null;
+  /** A database `agents.<name>.maxTurns` entry, when an operator has actually set one. */
+  dbOverrideMaxTurns: number | null;
   effectiveMaxTurns: number;
   disallowedTools: string[];
   overlayAllowedToolsOverridden: boolean;
@@ -337,18 +345,25 @@ export interface PerAgentReport {
 
 /**
  * Wraps `resolveAgentKnobs` — the exact function `run-agent.ts` calls for every
- * real run — and additionally exposes each precedence input (declared /
- * perAgent / overlay) so a caller can see WHY the effective value won, not
- * just what it is. `base.name` (not a separately-passed name) drives every
- * lookup, matching `resolveAgentKnobs`'s own behaviour exactly.
+ * real run — and additionally exposes each precedence input (database /
+ * overlay / declared / perAgent) so a caller can see WHY the effective value
+ * won, not just what it is. `base.name` (not a separately-passed name) drives
+ * every lookup, matching `resolveAgentKnobs`'s own behaviour exactly.
+ *
+ * `settings` is the raw database settings this report is describing —
+ * defaults to `{}` so existing callers (and this module's own tests, which
+ * predate database knobs) resolve exactly as they did before this parameter
+ * existed.
  */
 export function buildAgentKnobsReport(
   base: AgentConfig<any>,
   manifest: OverlayManifest,
   pipelineModels: { default: string; perAgent?: Record<string, string> },
   configBuilder: PerAgentReport['configBuilder'] = 'buildConfigFromRepo',
+  settings: Record<string, unknown> = {},
 ): PerAgentReport {
-  const knobs = resolveAgentKnobs(base, manifest, pipelineModels);
+  const dbKnobs = resolveDbAgentKnobs(base.name, settings);
+  const knobs = resolveAgentKnobs(base, manifest, pipelineModels, dbKnobs);
   const overlayOverride = manifest.agents?.[base.name];
   return {
     name: base.name,
@@ -357,9 +372,11 @@ export function buildAgentKnobsReport(
     perAgentPin: pipelineModels.perAgent?.[base.name] ?? null,
     pipelineDefaultModel: pipelineModels.default,
     overlayOverrideModel: overlayOverride?.model ?? null,
+    dbOverrideModel: dbKnobs.model ?? null,
     effectiveModel: knobs.model,
     maxTurnsDeclared: base.maxTurns ?? null,
     overlayOverrideMaxTurns: overlayOverride?.maxTurns ?? null,
+    dbOverrideMaxTurns: dbKnobs.maxTurns ?? null,
     effectiveMaxTurns: knobs.maxTurns,
     disallowedTools: base.disallowedTools ?? [],
     overlayAllowedToolsOverridden: overlayOverride?.allowedTools != null,
@@ -643,7 +660,7 @@ export async function buildConfigReport(opts: BuildConfigReportOptions = {}): Pr
   const perAgent = AGENT_ENTRIES.map((entry) => {
     const config = entry.configBuilder === 'loadConfig' ? loadConfigResult : buildConfigFromRepoResult;
     const base = entry.build(config);
-    return buildAgentKnobsReport(base, manifest, config.models, entry.configBuilder);
+    return buildAgentKnobsReport(base, manifest, config.models, entry.configBuilder, settings);
   });
 
   const subAgentGroups = buildSubAgentGroups();

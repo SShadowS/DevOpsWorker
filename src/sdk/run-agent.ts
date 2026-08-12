@@ -10,6 +10,7 @@ import { stageAgentWorkspace, type StagedWorkspace } from './agent-workspace.ts'
 import { consumeAgentStream, parseAgentOutput } from './agent-stream.ts';
 import { resolveAgentOverlayDir, loadManifest, resolveAgentKnobs } from '../overlay/index.ts';
 import type { OverlayManifest } from '../overlay/index.ts';
+import { resolveDbAgentKnobs } from '../cli/config.ts';
 import { AgentExecutionError, AgentValidationError, BudgetExceededError, RateLimitError, TransientAgentError } from './errors.ts';
 
 // ---------------------------------------------------------------------------
@@ -208,7 +209,8 @@ export async function runAgent<T extends z.ZodType>(
 ): Promise<AgentResult<z.infer<T>>> {
   const prompt = config.buildPrompt(state, context);
   const manifest = await loadManifest();
-  const knobs = resolveAgentKnobs(config, manifest, context.config.models);
+  const dbKnobs = resolveDbAgentKnobs(config.name, context.config.settingsApplied ?? {});
+  const knobs = resolveAgentKnobs(config, manifest, context.config.models, dbKnobs);
   const model = knobs.model;
   const cwd = config.cwd ?? process.cwd();
   const logger = context.logger;

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildModelsAndCosts, loadConfig, buildConfigFromRepo } from '../../src/cli/config.ts';
+import { buildModelsAndCosts, loadConfig, buildConfigFromRepo, resolveDbAgentKnobs } from '../../src/cli/config.ts';
 import { readConcurrencySetting } from '../../src/cli/watch.ts';
 import type { ISettingsStore } from '../../src/config/settings-store.interface.ts';
 import type { IRunnerStatus } from '../../src/pipeline/runner-status.interface.ts';
@@ -137,6 +137,75 @@ describe('loadConfig and buildConfigFromRepo both honour the settings parameter'
   test('omitting settings entirely still works (every existing call site)', () => {
     expect(() => loadConfig('/tmp/session')).not.toThrow();
     expect(() => buildConfigFromRepo(testRepo, fakeAdoEnv())).not.toThrow();
+  });
+
+  test('both builders carry the raw settings snapshot through as settingsApplied', () => {
+    const settings = { 'models.perAgent': { coder: 'db-coder-model' } };
+    expect(loadConfig('/tmp/session', settings).settingsApplied).toEqual(settings);
+    expect(buildConfigFromRepo(testRepo, fakeAdoEnv(), settings).settingsApplied).toEqual(settings);
+  });
+
+  test('omitting settings leaves settingsApplied as the empty-object default', () => {
+    expect(loadConfig('/tmp/session').settingsApplied).toEqual({});
+    expect(buildConfigFromRepo(testRepo, fakeAdoEnv()).settingsApplied).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveDbAgentKnobs — resolveAgentKnobs's 4th argument, for ONE named agent.
+//
+// Reads the raw settings directly rather than through buildModelsAndCosts's
+// already-merged models.perAgent, which falls back to a hardcoded per-agent
+// default map when no database row exists. The tests below pin that this
+// function never surfaces that fallback as if it were a database value.
+// ---------------------------------------------------------------------------
+
+describe('resolveDbAgentKnobs', () => {
+  test('returns the model pin for this agent from a stored models.perAgent map', () => {
+    const knobs = resolveDbAgentKnobs('coder', { 'models.perAgent': { coder: 'db-coder-model' } });
+    expect(knobs.model).toBe('db-coder-model');
+  });
+
+  test('returns undefined model when models.perAgent is stored but has no entry for this agent', () => {
+    const knobs = resolveDbAgentKnobs('coder', { 'models.perAgent': { planner: 'db-planner-model' } });
+    expect(knobs.model).toBeUndefined();
+  });
+
+  test('returns undefined model when models.perAgent is not stored at all — never the code-level fallback', () => {
+    // buildModelsAndCosts's merged perAgent would show 'claude-sonnet-5' for
+    // 'coder' here (its hardcoded fallback default) — resolveDbAgentKnobs must
+    // NOT surface that as if an operator had set it.
+    const knobs = resolveDbAgentKnobs('coder', {});
+    expect(knobs.model).toBeUndefined();
+  });
+
+  test('returns the maxTurns pin for this agent from agents.<name>.maxTurns', () => {
+    const knobs = resolveDbAgentKnobs('coder', { 'agents.coder.maxTurns': 200 });
+    expect(knobs.maxTurns).toBe(200);
+  });
+
+  test('returns undefined maxTurns when no key is stored for this agent', () => {
+    const knobs = resolveDbAgentKnobs('coder', { 'agents.planner.maxTurns': 30 });
+    expect(knobs.maxTurns).toBeUndefined();
+  });
+
+  test('a malformed maxTurns value is ignored with a warning, not thrown', () => {
+    const original = console.warn;
+    const calls: string[] = [];
+    console.warn = (msg: string) => { calls.push(msg); };
+    try {
+      const knobs = resolveDbAgentKnobs('coder', { 'agents.coder.maxTurns': -5 });
+      expect(knobs.maxTurns).toBeUndefined();
+      expect(calls.some(c => c.includes('agents.coder.maxTurns'))).toBe(true);
+    } finally {
+      console.warn = original;
+    }
+  });
+
+  test('both fields are undefined when settings is empty', () => {
+    const knobs = resolveDbAgentKnobs('coder', {});
+    expect(knobs.model).toBeUndefined();
+    expect(knobs.maxTurns).toBeUndefined();
   });
 });
 
