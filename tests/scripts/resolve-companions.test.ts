@@ -1,5 +1,5 @@
 import { describe, test, expect, spyOn, beforeEach, afterEach } from 'bun:test';
-import { parseArgs, hydrateFromDbBestEffort, restoreCoreCompanionDefaults } from '../../scripts/resolve-companions.ts';
+import { parseArgs, hydrateFromDbBestEffort } from '../../scripts/resolve-companions.ts';
 import { repos, replaceRepos } from '../../src/config/repos.ts';
 import { companionRegistry, replaceCompanions } from '../../src/config/companions.ts';
 import type { RepoRegistry } from '../../src/config/repo-config.ts';
@@ -68,7 +68,27 @@ describe('hydrateFromDbBestEffort', () => {
     await hydrateFromDbBestEffort({ connectStores: async () => ({ registryStore: store }) });
 
     expect(Object.keys(repos)).toEqual(['from-db']);
-    expect(Object.keys(companionRegistry)).toEqual(['DbComp']);
+    // 'BC' is here too even though the database only supplied 'DbComp' — the core's
+    // hardcoded companion default survives replaceCompanions's REPLACE (fixed at the
+    // source in src/config/companions.ts).
+    expect(Object.keys(companionRegistry).sort()).toEqual(['BC', 'DbComp']);
+  });
+
+  // This is the exact regression that turned wiring the database into this script into
+  // an immediate "Unknown companion "BC"" crash: confirmed live, every repo in a real
+  // deployment's registry references "BC" as a companion, and companionRegistry's real
+  // module-level default already includes it (unlike the test above, which starts from
+  // an explicitly emptied registry). The fix now lives in companions.ts's
+  // replaceCompanions, so this is an integration check that THIS script's call path
+  // actually benefits from it, not a re-test of the mechanism itself.
+  test('the real "BC" companion survives hydration even when the database does not supply it', async () => {
+    const store = new FakeRegistryStore();
+    await store.upsertCompanion('DbOnlyComp', mkCompanion(), null);
+
+    await hydrateFromDbBestEffort({ connectStores: async () => ({ registryStore: store }) });
+
+    expect(companionRegistry['BC']).toBeDefined();
+    expect(companionRegistry['DbOnlyComp']).toBeDefined();
   });
 
   test('on a connectStores failure (e.g. no DATABASE_URL), resolves without throwing and leaves the manifest registry intact', async () => {
@@ -128,50 +148,11 @@ describe('hydrateFromDbBestEffort', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The second regression this file guards against.
-//
-// The public core's "BC" companion (Microsoft's code-history mirror) is
-// registered as a hardcoded default in companions.ts, not seeded from the
-// overlay manifest into the database — `seedRegistryFromManifest` only ever
-// seeds the OVERLAY's own companions. `hydrateRegistryBestEffort` REPLACES
-// the live registry with exactly the database's rows (correct: a companion
-// deleted from the database must disappear), so on a database that is
-// reachable, "BC" vanishes from `companionRegistry` the instant hydration
-// succeeds — unless something restores it. Confirmed against a real, live
-// deployment's database, where every registered repo referenced "BC" as a
-// companion: without this restore, wiring the database into
-// resolve-companions.ts would turn every container's companion-resolution
-// step for such a repo from a silent staleness bug into an immediate
-// "Unknown companion "BC"" crash.
-// ---------------------------------------------------------------------------
-describe('restoreCoreCompanionDefaults', () => {
-  test('restores a core default the database hydration replaced away', () => {
-    const before = { BC: companionRegistry['BC'] ?? mkCompanion({ url: 'https://example.invalid/bc.git' }) };
-    replaceCompanions({ DbComp: mkCompanion() }); // simulates hydrateRegistryBestEffort's REPLACE dropping BC
-
-    restoreCoreCompanionDefaults(before);
-
-    expect(companionRegistry['BC']).toEqual(before['BC']);
-    expect(companionRegistry['DbComp']).toBeDefined(); // the database's own companion is untouched
-  });
-
-  test('never overwrites a companion the database DID supply — the database still wins there', () => {
-    const staleCore = { Shared: mkCompanion({ url: 'https://example.invalid/stale.git' }) };
-    const fresh = mkCompanion({ url: 'https://example.invalid/fresh.git' });
-    replaceCompanions({ Shared: fresh });
-
-    restoreCoreCompanionDefaults(staleCore);
-
-    expect(companionRegistry['Shared']).toEqual(fresh);
-  });
-
-  test('no-op when nothing is missing', () => {
-    replaceCompanions({ BC: mkCompanion() });
-    const before = { BC: companionRegistry['BC']! };
-
-    restoreCoreCompanionDefaults(before);
-
-    expect(Object.keys(companionRegistry)).toEqual(['BC']);
-  });
-});
+// The "BC" companion regression this file used to guard against locally (a
+// script-scoped `restoreCoreCompanionDefaults`) is now fixed at the source —
+// see src/config/companions.ts's `replaceCompanions` and
+// tests/config/companions.test.ts for the mechanism's own tests, and
+// tests/config/hydrate-startup.test.ts for the end-to-end regression test
+// matching the real "N companion(s) active" startup log line. This file only
+// needed the one integration check above (the "real 'BC' companion survives
+// hydration" test) proving this script's own call path benefits from it.

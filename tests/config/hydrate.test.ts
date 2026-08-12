@@ -76,14 +76,18 @@ describe('replaceCompanions', () => {
       Keep: mkCompanion({ url: 'https://example.invalid/v1.git' }),
       Drop: mkCompanion(),
     });
-    expect(Object.keys(companionRegistry).sort()).toEqual(['Drop', 'Keep']);
+    // 'BC' is the core's own hardcoded companion default (src/config/companions.ts) —
+    // it survives every replace regardless of what the caller supplies; see
+    // tests/config/companions.test.ts's own `replaceCompanions` suite for that
+    // behavior's dedicated coverage. Here it's just noise this test has to account for.
+    expect(Object.keys(companionRegistry).sort()).toEqual(['BC', 'Drop', 'Keep']);
 
     replaceCompanions({
       Keep: mkCompanion({ url: 'https://example.invalid/v2.git' }),
       Added: mkCompanion(),
     });
 
-    expect(Object.keys(companionRegistry).sort()).toEqual(['Added', 'Keep']);
+    expect(Object.keys(companionRegistry).sort()).toEqual(['Added', 'BC', 'Keep']);
     expect(companionRegistry['Keep']?.url).toBe('https://example.invalid/v2.git');
     expect(companionRegistry['Drop']).toBeUndefined();
   });
@@ -101,7 +105,8 @@ describe('hydrateRegistryFromDb', () => {
     await hydrateRegistryFromDb(store);
 
     expect(Object.keys(repos)).toEqual(['repo-a']);
-    expect(Object.keys(companionRegistry)).toEqual(['Comp']);
+    // 'BC' survives alongside the database's own 'Comp' — see the note above.
+    expect(Object.keys(companionRegistry).sort()).toEqual(['BC', 'Comp']);
     expect(getRepoConfig('repo-a').repoKey).toBe('repo-a');
   });
 });

@@ -159,6 +159,39 @@ describe('hydrateStartupRegistry', () => {
     expect(companionRegistry['GoodComp']).toBeDefined();
   });
 
+  // The exact shape of the real production bug this catches: a deployment's
+  // overlay manifest supplies N companions (none of them "BC" — the public
+  // core's own hardcoded companion, never present in any overlay manifest).
+  // Those N get seeded into an empty database, then hydrated back into the
+  // live registry. Before the fix in `replaceCompanions`, that hydrate step
+  // REPLACED `companionRegistry` with exactly those N rows, dropping "BC" —
+  // this is the `hydrateStartupRegistry` call every real process (watcher,
+  // dashboard, webhook-server, and each container's own CLI) makes at
+  // startup, and its own "[registry] hydrated from the database — N repo(s),
+  // M companion(s) active" log line is the symptom that was silently wrong
+  // (confirmed live: it read 6, not 7). The assertion below is the one that
+  // would have caught it: the live registry must end up with 7, BC included,
+  // not 6.
+  test('BC survives a real startup hydration alongside the manifest\'s own companions — the "N companion(s) active" count must include it', async () => {
+    const store = new FakeRegistryStore(); // empty database — first run
+    const manifest: OverlayManifest = {
+      companions: {
+        Comp1: mkCompanion({ url: 'https://example.invalid/1.git' }),
+        Comp2: mkCompanion({ url: 'https://example.invalid/2.git' }),
+        Comp3: mkCompanion({ url: 'https://example.invalid/3.git' }),
+        Comp4: mkCompanion({ url: 'https://example.invalid/4.git' }),
+        Comp5: mkCompanion({ url: 'https://example.invalid/5.git' }),
+        Comp6: mkCompanion({ url: 'https://example.invalid/6.git' }),
+      },
+    };
+
+    await hydrateStartupRegistry(manifest, { connectStores: async () => ({ registryStore: store }) });
+
+    expect(await store.countCompanions()).toBe(6); // seeded exactly what the manifest supplied — no more
+    expect(Object.keys(companionRegistry)).toHaveLength(7); // the 6 seeded + the core's own "BC"
+    expect(companionRegistry['BC']).toBeDefined();
+  });
+
   // Regression test: a real `postgres` connection failure (e.g. nothing
   // listening on the configured host/port) surfaces as a Node
   // `AggregateError` whose OWN `.message` is an empty string — confirmed by

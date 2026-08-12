@@ -33,6 +33,14 @@ export function registerRepos(extra: RepoRegistry): void {
  * one object, so this deletes the current keys and assigns the new ones onto
  * the SAME object rather than reassigning the binding (which would be a
  * compile error, and would leave existing holders pointing at the old copy).
+ *
+ * Unlike `companions.ts`'s `replaceCompanions`, this does NOT protect any
+ * "core defaults" — `repos` above ships as an EMPTY object with nothing ever
+ * assigned to it except through `registerRepos`/`replaceRepos` themselves
+ * (confirmed: `registerRepos` has exactly one caller anywhere in the core or
+ * overlay, `applyOverlayRegistries`, which only ever passes the overlay
+ * manifest's repos). There is no core-shipped default repo for a REPLACE to
+ * wipe, so there is nothing to protect here.
  */
 export function replaceRepos(next: RepoRegistry): void {
   for (const key of Object.keys(repos)) {

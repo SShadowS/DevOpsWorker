@@ -16,14 +16,13 @@
  *  - When --bc-platform is omitted, behavior is unchanged from the previous version.
  */
 import { getRepoConfig } from '../src/config/repos.ts';
-import { getCompanions, companionRegistry, registerCompanions } from '../src/config/companions.ts';
+import { getCompanions } from '../src/config/companions.ts';
 import { loadManifest, applyOverlayRegistries } from '../src/overlay/index.ts';
 import { hydrateRegistryBestEffort } from '../src/config/hydrate.ts';
 import { connectStores } from '../src/db/connect-stores.ts';
 import { disconnectDatabase } from '../src/db/postgres.ts';
 import { errorMessage } from '../src/config/hydrate-startup.ts';
 import type { HydrateStartupDeps } from '../src/config/hydrate-startup.ts';
-import type { CompanionRegistry } from '../src/config/registry-store.interface.ts';
 
 export function parseArgs(argv: string[]): { registryKey: string | undefined; bcPlatform: string | undefined } {
   const registryKey = argv[0];
@@ -62,6 +61,11 @@ export function parseArgs(argv: string[]): { registryKey: string | undefined; bc
  * script — an open handle would keep it running until Postgres's own
  * `idle_timeout` (30s) closed it, silently stalling the entrypoint that long
  * on every single invocation.
+ *
+ * Companion resolution below (`getCompanions`) is safe to call after this —
+ * `replaceCompanions` (used internally by `hydrateRegistryBestEffort`) keeps
+ * the core's own hardcoded companions (e.g. "BC") even when the database's
+ * rows don't include them; there is no local workaround needed here for that.
  */
 export async function hydrateFromDbBestEffort(
   deps: HydrateStartupDeps = { connectStores: () => connectStores({ maxRetries: 2, retryDelayMs: 500 }) },
@@ -76,46 +80,13 @@ export async function hydrateFromDbBestEffort(
   }
 }
 
-/**
- * Re-merge any companion `hydrateFromDbBestEffort` dropped that isn't managed
- * by the database at all — the public core's built-in "BC" companion (the
- * Microsoft code-history mirror a deployment's repo configs can depend on)
- * being the one that actually exists. `hydrateRegistryBestEffort` REPLACES
- * `companionRegistry` with exactly the database's rows (by design — a
- * companion an operator deletes from the database must disappear, not
- * linger), but only the overlay's OWN companions ever get seeded into that
- * table (`seedRegistryFromManifest` seeds `overlay.companions`, never the
- * core's hardcoded defaults). So a REPLACE silently drops "BC" the moment the
- * database is reachable — dormant everywhere else in the codebase today,
- * because `getCompanions()` (below) has exactly one real caller, but not
- * dormant here: it turns into "Unknown companion "BC"" for every repo that
- * references it, the moment this script resolves one.
- *
- * `before` is a snapshot taken BEFORE the overlay/database touch the
- * registry, so it reflects only what the core module itself registered.
- * Never overwrites a key the database DID supply — the database still wins
- * there — only fills back in a key hydration made vanish entirely.
- */
-export function restoreCoreCompanionDefaults(before: CompanionRegistry): void {
-  const missing: CompanionRegistry = {};
-  for (const [key, def] of Object.entries(before)) {
-    if (!(key in companionRegistry)) missing[key] = def;
-  }
-  if (Object.keys(missing).length > 0) registerCompanions(missing);
-}
-
 if (import.meta.main) {
-  // Snapshot the core's hardcoded companion defaults before anything else
-  // touches the registry — see restoreCoreCompanionDefaults's jsdoc.
-  const coreCompanionDefaults = { ...companionRegistry };
-
   // This is a standalone entry point (run by docker/entrypoint.sh), so it must load
   // the private overlay itself — the core ships an empty repo/companion registry and
   // only populates it from the overlay. Without this, getRepoConfig throws
   // "Unknown repo key" because the registry is empty.
   applyOverlayRegistries(await loadManifest());
   await hydrateFromDbBestEffort();
-  restoreCoreCompanionDefaults(coreCompanionDefaults);
 
   const { registryKey, bcPlatform } = parseArgs(process.argv.slice(2));
 
