@@ -13,9 +13,32 @@ export const repos: RepoRegistry = {};
  * Merge overlay-provided repo registrations into the live registry.
  * Idempotent (later registration of the same key overwrites). Called once per
  * process at startup from the CLI entrypoint after loading the overlay manifest.
+ *
+ * This MERGES and never deletes — the manifest path only ever adds repos, so a
+ * key removed from the manifest simply stays registered until the process
+ * restarts. That is fine for a one-time startup load, but wrong for a live
+ * source of truth (the database): use `replaceRepos` for that case instead.
  */
 export function registerRepos(extra: RepoRegistry): void {
   Object.assign(repos, extra);
+}
+
+/**
+ * Replace the live registry with `next`, in place. Unlike `registerRepos`,
+ * this REMOVES every key not present in `next` — once the database is the
+ * source of truth, a repo deleted from the database must disappear from
+ * every consumer's view, not linger from a merge that only ever adds.
+ *
+ * `repos` is an `export const`: every consumer holds a live reference to this
+ * one object, so this deletes the current keys and assigns the new ones onto
+ * the SAME object rather than reassigning the binding (which would be a
+ * compile error, and would leave existing holders pointing at the old copy).
+ */
+export function replaceRepos(next: RepoRegistry): void {
+  for (const key of Object.keys(repos)) {
+    delete repos[key];
+  }
+  Object.assign(repos, next);
 }
 
 /**

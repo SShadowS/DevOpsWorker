@@ -32,9 +32,26 @@ export const companionRegistry: Record<string, CompanionDef> = {
 /**
  * Merge overlay-provided companion definitions into the live registry.
  * Idempotent. Called once per process at startup from the CLI entrypoint.
+ *
+ * This MERGES and never deletes — see `replaceCompanions` for the database-
+ * backed case where a removed row must actually disappear.
  */
 export function registerCompanions(extra: Record<string, CompanionDef>): void {
   Object.assign(companionRegistry, extra);
+}
+
+/**
+ * Replace the live registry with `next`, in place. Unlike `registerCompanions`,
+ * this REMOVES every key not present in `next` — mirrors `replaceRepos` in
+ * `repos.ts` for the same reason: `companionRegistry` is an `export const`
+ * every consumer holds a live reference to, so this mutates that object
+ * (delete current keys, assign the new ones) instead of reassigning it.
+ */
+export function replaceCompanions(next: Record<string, CompanionDef>): void {
+  for (const key of Object.keys(companionRegistry)) {
+    delete companionRegistry[key];
+  }
+  Object.assign(companionRegistry, next);
 }
 
 /** Derive the BC companion git branch from a source app.json platform version.
