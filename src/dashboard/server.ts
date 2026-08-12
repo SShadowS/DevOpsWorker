@@ -506,6 +506,16 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
             return Response.json({ error: result.errors.map(e => e.message).join('; ') }, { status: 400 });
           }
           await settingsStore.set('runner.maxConcurrency', result.value, user?.email ?? null);
+          // Finding M-2: clear the legacy key on the first successful write
+          // through this path, so a later DELETE of the setting can never
+          // resurrect it. Best-effort — the setting write above already
+          // succeeded, so a failure here must not turn that success into an
+          // error response.
+          try {
+            await runnerStatus.clearDynamicConcurrency();
+          } catch (err) {
+            console.warn(`[dashboard] failed to clear the legacy runner_status concurrency key: ${err instanceof Error ? err.message : err}`);
+          }
           return Response.json({ ok: true, maxConcurrency: result.value });
         } catch {
           return Response.json({ error: 'Invalid request' }, { status: 400 });

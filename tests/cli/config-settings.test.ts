@@ -228,13 +228,28 @@ function fakeSettingsStore(value: unknown): ISettingsStore {
 }
 
 function fakeRunnerStatus(legacyValue: number | null): IRunnerStatus {
+  let legacy = legacyValue;
   return {
     async writeStatus() {},
     async readStatus() { return null; },
-    async readDynamicConcurrency() { return legacyValue; },
-    async writeDynamicConcurrency() {},
+    async readDynamicConcurrency() { return legacy; },
+    async writeDynamicConcurrency(maxConcurrency) { legacy = maxConcurrency; },
+    async clearDynamicConcurrency() { legacy = null; },
     async writeHeartbeat() {},
     async readHeartbeats() { return {}; },
+  };
+}
+
+/** A settings store that actually remembers what was set/deleted, for tests
+ *  that need to exercise a write-then-delete sequence rather than a single
+ *  fixed value (unlike `fakeSettingsStore` above, which is read-only). */
+function mutableSettingsStore(): ISettingsStore {
+  const values = new Map<string, unknown>();
+  return {
+    async getAll() { return Object.fromEntries(values); },
+    async get<T>(key: string) { return (values.has(key) ? values.get(key) : null) as T | null; },
+    async set(key, value) { values.set(key, value); },
+    async delete(key) { values.delete(key); },
   };
 }
 
@@ -265,5 +280,35 @@ describe('readConcurrencySetting', () => {
     } finally {
       console.warn = original;
     }
+  });
+
+  // Regression test for Finding M-2: deleting the `runner.maxConcurrency`
+  // setting must not resurrect a pre-migration value that a later write
+  // already made obsolete. The fix is "clear the legacy runner_status
+  // 'config' key on the first successful write through the settings path" —
+  // modelled here by calling `clearDynamicConcurrency()` right alongside the
+  // settings write, exactly as `PUT /api/admin/settings/runner.maxConcurrency`
+  // and `POST /api/runners` now do.
+  test('deleting the setting after a write reads null (the code default), not the pre-migration legacy value', async () => {
+    const settingsStore = mutableSettingsStore();
+    const runnerStatus = fakeRunnerStatus(2); // pre-migration value, already stored
+
+    // Before any modern-path write, the legacy value is still the fallback —
+    // an existing deployment upgrading must not silently reset to the code
+    // default the moment it upgrades.
+    expect(await readConcurrencySetting(settingsStore, runnerStatus)).toBe(2);
+
+    // An admin writes a new value through the modern settings path. The real
+    // write sites (server.ts's POST /api/runners, admin-api.ts's putSetting)
+    // clear the legacy key in the same step — modelled here explicitly.
+    await settingsStore.set('runner.maxConcurrency', 10, 'admin@x.y');
+    await runnerStatus.clearDynamicConcurrency();
+    expect(await readConcurrencySetting(settingsStore, runnerStatus)).toBe(10);
+
+    // The admin now deletes the setting, expecting the code default to take
+    // over. Without the clear above, this would silently come back as 2 —
+    // the old value the admin already overrode and has no reason to expect.
+    await settingsStore.delete('runner.maxConcurrency');
+    expect(await readConcurrencySetting(settingsStore, runnerStatus)).toBeNull();
   });
 });

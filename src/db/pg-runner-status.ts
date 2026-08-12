@@ -50,6 +50,10 @@ export class PgRunnerStatus implements IRunnerStatus {
     `;
   }
 
+  async clearDynamicConcurrency(): Promise<void> {
+    await this.sql`DELETE FROM runner_status WHERE key = 'config'`;
+  }
+
   async writeHeartbeat(processName: string): Promise<void> {
     const key = `heartbeat:${processName}`;
     const now = new Date().toISOString();

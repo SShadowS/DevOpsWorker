@@ -6,12 +6,13 @@ import { _resetHydrationState } from '../../src/config/hydrate.ts';
 import type { RepoRegistry } from '../../src/config/repo-config.ts';
 import type { CompanionRegistry } from '../../src/config/registry-store.interface.ts';
 import type { OverlayManifest } from '../../src/overlay/types.ts';
-import { FakeRegistryStore, mkRepo } from './fixtures/fake-registry-store.ts';
+import { FakeRegistryStore, mkRepo, mkCompanion } from './fixtures/fake-registry-store.ts';
 
 // `hydrateStartupRegistry` mutates the real process-global `repos` /
-// `companionRegistry` singletons (via `applyOverlayRegistries` and
-// `hydrateRegistryFromDb`) — same reason `hydrate.test.ts` snapshots and
-// restores them, so this file's assertions can never leak into another. It
+// `companionRegistry` singletons (via `applyOverlayRegistries` and its own
+// per-table `replaceRepos`/`replaceCompanions` calls) — same reason
+// `hydrate.test.ts` snapshots and restores them, so this file's assertions
+// can never leak into another. It
 // also resets the module-level hydration clock in hydrate.ts: this file's
 // own calls never read it (hydrateStartupRegistry hydrates directly, not
 // through refreshRegistryIfStale), but a full reset here means this file
@@ -98,6 +99,64 @@ describe('hydrateStartupRegistry', () => {
     // Seeding failed (store already had a row anyway, so it would have been a
     // no-op regardless) but hydration from the database still ran.
     expect(repos['good-from-db']).toBeDefined();
+  });
+
+  // Regression test for Finding M-1: on a FRESH (empty) database, one invalid
+  // manifest entry must not erase the manifest's OTHER, valid entries. Before
+  // this fix, `hydrateStartupRegistry` always replaced the live registry with
+  // whatever the (still-empty) database read back — `replaceRepos({})` — even
+  // though the seed never wrote anything, wiping out the good entry
+  // `applyOverlayRegistries` had already put there. This is exactly what one
+  // malformed `docsRepoUrl` field did to the live deployment: every process
+  // ran with an EMPTY repo registry, not with nine of ten repos, or even the
+  // manifest's ten — with zero.
+  test('a seed failure on an EMPTY database leaves the manifest\'s repos in place instead of wiping them to nothing', async () => {
+    const store = new FakeRegistryStore(); // repos table starts empty
+    const manifest = {
+      repos: {
+        'good-repo': mkRepo({ repoKey: 'good-repo' }),
+        // Missing required azureDevOps fields — fails validation, and (per
+        // seedRepos's "validate everything before inserting anything" rule)
+        // takes 'good-repo' down with it as far as the DATABASE is concerned.
+        'bad-repo': { url: 'https://example.invalid/bad.git', branch: 'main' },
+      },
+    } as unknown as OverlayManifest;
+
+    await expect(
+      hydrateStartupRegistry(manifest, { connectStores: async () => ({ registryStore: store }) }),
+    ).resolves.toBeUndefined();
+
+    // Nothing was written to the database — the "no half-seeding" rule holds.
+    expect(await store.countRepos()).toBe(0);
+    // But the live registry still has the manifest's good entry: the seed
+    // failure must not erase what `applyOverlayRegistries` already applied.
+    expect(repos['good-repo']).toBeDefined();
+    expect(repos['bad-repo']).toBeDefined();
+  });
+
+  // Mirror of the above for companions, and proof the two tables are still
+  // independent under the fix: a repos-table seed failure must not cause the
+  // companions table (which seeded successfully) to be skipped too.
+  test('a repos seed failure does not stop a successful, independent companions seed from being reflected live', async () => {
+    const store = new FakeRegistryStore(); // both tables start empty
+    const manifest = {
+      repos: {
+        'bad-repo': { url: 'https://example.invalid/bad.git', branch: 'main' },
+      },
+      companions: {
+        'GoodComp': mkCompanion(),
+      },
+    } as unknown as OverlayManifest;
+
+    await expect(
+      hydrateStartupRegistry(manifest, { connectStores: async () => ({ registryStore: store }) }),
+    ).resolves.toBeUndefined();
+
+    expect(await store.countRepos()).toBe(0);
+    expect(await store.countCompanions()).toBe(1);
+    // The companion DID seed, so it comes from the database read, same as
+    // the "order matters" test above — not merely surviving from the manifest.
+    expect(companionRegistry['GoodComp']).toBeDefined();
   });
 
   // Regression test: a real `postgres` connection failure (e.g. nothing

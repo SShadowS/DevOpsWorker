@@ -336,6 +336,14 @@ async function putSetting(req: Request, user: AuthUser, deps: AdminApiDeps, key:
         ON CONFLICT (key) DO UPDATE
           SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
       `;
+      // Finding M-2: this is the OTHER path (besides POST /api/runners) that
+      // can write `runner.maxConcurrency` through the settings table. Clear
+      // the legacy runner_status "config" key in the SAME transaction, so a
+      // later DELETE of this setting reads null (the code default) instead of
+      // resurrecting whatever pre-migration value still sat there.
+      if (key === 'runner.maxConcurrency') {
+        await tx`DELETE FROM runner_status WHERE key = 'config'`;
+      }
       await deps.auditStore.write({
         actorEmail: user.email,
         action: before === null ? 'create' : 'update',

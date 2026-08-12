@@ -10,6 +10,7 @@ import { buildPipelineContext } from './context.ts';
 import type { PipelineConfig, PipelineState } from '../types/pipeline.types.ts';
 import type { RepoConfig } from '../config/repo-config.ts';
 import { getRepoConfig } from '../config/repos.ts';
+import { hydrateRegistryBestEffort } from '../config/hydrate.ts';
 import { formatPlanComment, formatReadinessComment, formatTelemetrySummary, formatConvergenceEscalation } from '../formatters/devops-comment.ts';
 import { postWorkItemComment, addWorkItemTags, removeWorkItemTags, updateWorkItemFields } from '../sdk/azure-devops-client.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
@@ -95,7 +96,15 @@ export async function run(args: string[]): Promise<void> {
   // the connection earlier changes WHEN a database outage would surface, not
   // whether it's fatal. The settings READ itself stays soft-fail — see
   // `readAllSettingsSafely` in `./config.ts`, which `resolveConfig` calls.
-  const { stateStore, logSink, settingsStore } = await connectStores();
+  const { stateStore, logSink, settingsStore, registryStore } = await connectStores();
+
+  // Re-hydrate the repo/companion registry now that OUR connection attempt
+  // has succeeded — closes the startup-hydration race (see
+  // hydrateRegistryBestEffort's jsdoc): this connectStores() call's larger
+  // retry budget can win after index.ts's smaller startup one already gave
+  // up, and nothing else would ever refresh the registry `resolveConfig`
+  // (below) reads from for the rest of this run.
+  await hydrateRegistryBestEffort(registryStore);
 
   // Build config
   const { config, repo } = await resolveConfig(sessionPath, settingsStore);

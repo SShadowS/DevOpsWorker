@@ -2,6 +2,7 @@ import { connectStores } from '../db/connect-stores.ts';
 import { runPipeline } from '../pipeline/orchestrator.ts';
 import { buildDefaultPipeline } from '../pipeline/pipeline-definition.ts';
 import { loadManifest } from '../overlay/index.ts';
+import { hydrateRegistryBestEffort } from '../config/hydrate.ts';
 import { loadConfigFromState } from './config.ts';
 import { buildPipelineContext } from './context.ts';
 import { formatTelemetrySummary } from '../formatters/devops-comment.ts';
@@ -21,7 +22,15 @@ export async function cont(args: string[]): Promise<void> {
   console.log(`Continuing pipeline for work item #${workItemId}`);
 
   // Load existing state
-  const { stateStore, logSink, settingsStore } = await connectStores();
+  const { stateStore, logSink, settingsStore, registryStore } = await connectStores();
+
+  // Re-hydrate the repo/companion registry now that OUR connection attempt
+  // has succeeded — see hydrateRegistryBestEffort's jsdoc for the race this
+  // closes. `loadConfigFromState` (below) reads the registry through
+  // `getRepoConfig`, so it must see this, not whatever a slower-starting
+  // startup hydration left behind.
+  await hydrateRegistryBestEffort(registryStore);
+
   // Use same log path logic as run.ts — write to Docker volume when STATE_DIR is set
   const logDir = process.env['LOG_DIR']
     ?? (process.env['STATE_DIR'] ? join(resolve(process.env['STATE_DIR'], '..'), 'logs') : '.pipeline/logs');

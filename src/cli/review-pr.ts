@@ -8,6 +8,7 @@ import type { PRFinding, PRReviewResult } from '../agents/pr-reviewer/schema.ts'
 import { runBackportReview } from '../agents/cherry-pick-reviewer/config.ts';
 import type { BackportReview } from '../agents/cherry-pick-reviewer/schema.ts';
 import { findRepoByRepositoryId } from '../config/repos.ts';
+import { hydrateRegistryBestEffort } from '../config/hydrate.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
 import { connectStores } from '../db/connect-stores.ts';
 import type { AppliedLevers } from '../pipeline/pr-review-store.interface.ts';
@@ -1008,17 +1009,20 @@ export async function reviewPR(args: string[]): Promise<void> {
     securityBcOnly: maybeTrimSecurityDomains(),
   });
 
-  const repo = findRepoByRepositoryId(repoId);
-  if (!repo) {
-    console.error(`Unknown repository ID: ${repoId}`);
-    process.exit(1);
-  }
-
   // Connect to DB up front — settings (baseConfig, below) need it before the
   // config exists, and the same connection is reused for `prReviewStore`
   // further down. Optional and best-effort: on a failed connect, the review
   // still runs on env/code defaults, only losing database settings AND result
   // persistence, never the review itself.
+  //
+  // Ahead of the repo lookup that follows (not after it, as it once was):
+  // this connectStores() call's ~20s retry budget can succeed after
+  // index.ts's much smaller startup-hydration budget already gave up, and
+  // `findRepoByRepositoryId` below is exactly the read Finding I-1 named —
+  // resolving it against the manifest snapshot instead of a just-recovered
+  // database would run the whole review on a repo's pre-edit coordinates,
+  // silently. Re-hydrating before the lookup, not just after, is what makes
+  // that lookup see the database's version.
   let stores: Awaited<ReturnType<typeof connectStores>> | undefined;
   try {
     stores = await connectStores();
@@ -1026,7 +1030,16 @@ export async function reviewPR(args: string[]): Promise<void> {
   } catch (dbErr) {
     console.warn(`Warning: could not connect to database — review result will not be persisted, and database settings will not apply: ${dbErr}`);
   }
+  if (stores) {
+    await hydrateRegistryBestEffort(stores.registryStore);
+  }
   const prReviewStore = stores?.prReviewStore;
+
+  const repo = findRepoByRepositoryId(repoId);
+  if (!repo) {
+    console.error(`Unknown repository ID: ${repoId}`);
+    process.exit(1);
+  }
 
   const sessionRoot = process.env['SESSION_ROOT'] ?? process.cwd();
   const baseConfig = await buildReviewBaseConfig(sessionRoot, stores?.settingsStore);

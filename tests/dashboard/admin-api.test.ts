@@ -149,6 +149,7 @@ class StubRunnerStatus implements IRunnerStatus {
   async readStatus(): Promise<null> { return null; }
   async readDynamicConcurrency(): Promise<null> { return null; }
   async writeDynamicConcurrency(): Promise<void> {}
+  async clearDynamicConcurrency(): Promise<void> {}
   async writeHeartbeat(): Promise<void> {}
   async readHeartbeats(): Promise<Record<string, never>> { return {}; }
 }

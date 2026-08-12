@@ -18,6 +18,30 @@ export async function hydrateRegistryFromDb(store: IRegistryStore): Promise<void
   replaceCompanions(companionsFromDb);
 }
 
+/**
+ * `hydrateRegistryFromDb`, but a failure warns instead of throwing.
+ *
+ * `src/cli/index.ts` gives every process's startup hydration a small
+ * (2×500ms) retry budget before falling back to the manifest-only registry.
+ * A command's own `connectStores()` call — `run.ts`, `continue.ts`,
+ * `review-pr.ts` — then retries the database connection for up to ~20s, and
+ * can succeed AFTER that startup hydration already gave up. Nothing
+ * re-hydrates the registry when that later connection succeeds, so a
+ * container in that state serves the manifest snapshot — frozen at whatever
+ * it was seeded with, arbitrarily old the moment an admin edits a repo — for
+ * its entire run, with no error. Call this immediately after your own
+ * `connectStores()` succeeds, before reading `repos` or `companionRegistry`,
+ * to close that gap the same way the watcher's per-tick hydrate already does
+ * for the long-running processes.
+ */
+export async function hydrateRegistryBestEffort(store: IRegistryStore): Promise<void> {
+  try {
+    await hydrateRegistryFromDb(store);
+  } catch (err) {
+    console.warn(`[registry] failed to refresh repo/companion registry from database: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 // Timestamp of the last hydration done through `refreshRegistryIfStale`, in
 // whatever clock that call's `now` argument supplied. Module-level because
 // `repos`/`companionRegistry` are themselves module-level singletons — one

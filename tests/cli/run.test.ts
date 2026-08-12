@@ -1,8 +1,12 @@
-import { describe, test, expect, afterEach, beforeAll } from 'bun:test';
+import { describe, test, expect, afterEach, beforeAll, beforeEach } from 'bun:test';
 import { resolveConfig } from '../../src/cli/run.ts';
-import { registerRepos } from '../../src/config/repos.ts';
-import type { RepoConfig } from '../../src/config/repo-config.ts';
+import { registerRepos, repos, replaceRepos } from '../../src/config/repos.ts';
+import { companionRegistry, replaceCompanions } from '../../src/config/companions.ts';
+import { hydrateRegistryBestEffort } from '../../src/config/hydrate.ts';
+import type { RepoConfig, RepoRegistry } from '../../src/config/repo-config.ts';
+import type { CompanionRegistry } from '../../src/config/registry-store.interface.ts';
 import type { ISettingsStore } from '../../src/config/settings-store.interface.ts';
+import { FakeRegistryStore } from '../config/fixtures/fake-registry-store.ts';
 
 // The public core ships an empty repo registry; concrete repos arrive from the
 // private overlay at startup. Register a neutral fixture so resolveConfig has a
@@ -153,5 +157,65 @@ describe('resolveConfig — fresh-start settings parity', () => {
 
     const { config } = await resolveConfig('/tmp/test-session', fakeSettingsStore({}, { rejects: true }));
     expect(config.models.default).toBe('env-model');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Finding I-1 regression: a container that lost the startup-hydration race
+// (index.ts's small 2×500ms budget) must still see an admin's database edit
+// once ITS OWN connectStores() call — a much larger retry budget — succeeds.
+// `run()` now calls `hydrateRegistryBestEffort(registryStore)` right after
+// that connect, before `resolveConfig` runs. This proves the read
+// `resolveConfig` performs (via `getRepoConfig`, container mode) sees the
+// database's version, not whatever the manifest/startup hydration left
+// behind — the exact gap the final review named.
+// ---------------------------------------------------------------------------
+
+describe('container-mode resolve after a failed-then-recovered hydration (Finding I-1)', () => {
+  const originalEnv = { ...process.env };
+  let repoSnapshot: RepoRegistry;
+  let companionSnapshot: CompanionRegistry;
+
+  beforeEach(() => {
+    // `hydrateRegistryBestEffort` (via `hydrateRegistryFromDb`) replaces BOTH
+    // registries, removing every key not in the store it reads — snapshot
+    // and restore both, so this test can't affect any other file's repos OR
+    // companions, regardless of run order (same convention as hydrate.test.ts
+    // and hydrate-startup.test.ts).
+    repoSnapshot = { ...repos };
+    companionSnapshot = { ...companionRegistry };
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    replaceRepos(repoSnapshot);
+    replaceCompanions(companionSnapshot);
+  });
+
+  test('sees the database repo, not the manifest one, after hydrateRegistryBestEffort runs', async () => {
+    process.env['REPO_CONFIG'] = 'sample-repo';
+    process.env['AZURE_DEVOPS_PAT'] = 'test-pat';
+
+    // Before any recovery: only the manifest's registration (from this
+    // file's top-level beforeAll) is in `repos` — standing in for a
+    // container whose own startup hydration lost the race and never ran.
+    const { config: beforeRecovery } = await resolveConfig(undefined);
+    expect(beforeRecovery.azureDevOps.areaPath).toBe(fixture.azureDevOps.areaPath);
+
+    // An admin edited this repo in the database while this (hypothetical)
+    // container was still starting up.
+    const editedRepo: RepoConfig = {
+      ...fixture,
+      azureDevOps: { ...fixture.azureDevOps, areaPath: 'Edited Project\\New Area' },
+    };
+    const store = new FakeRegistryStore();
+    store.seedRawRepo('sample-repo', editedRepo);
+
+    // This is what `run()` now does right after its own connectStores() call
+    // succeeds — the "later, larger-budget connection" winning the race.
+    await hydrateRegistryBestEffort(store);
+
+    const { config: afterRecovery } = await resolveConfig(undefined);
+    expect(afterRecovery.azureDevOps.areaPath).toBe('Edited Project\\New Area');
   });
 });

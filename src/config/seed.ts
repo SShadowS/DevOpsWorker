@@ -2,9 +2,27 @@ import type { IRegistryStore } from './registry-store.interface.ts';
 import type { OverlayManifest } from '../overlay/types.ts';
 import { repoConfigSchema, companionConfigSchema } from './schemas.ts';
 
+/** Outcome of attempting to seed ONE table from the manifest. */
+export interface TableSeedResult {
+  /** Rows inserted from the manifest. 0 covers three different, ordinary
+   *  cases — an empty manifest, a table that was already non-empty (seeding
+   *  is a no-op past the first run), or a validation failure (see `failed`)
+   *  — callers that need to tell those apart must check `failed`, not just
+   *  `seeded === 0`. */
+  seeded: number;
+  /** True only when this table was empty and the manifest's entries for it
+   *  failed schema validation. `seedRepos`/`seedCompanions` validate every
+   *  entry BEFORE inserting any of them, so `failed: true` always means
+   *  nothing was written — the table is still exactly as empty as it was
+   *  before this call. */
+  failed: boolean;
+  /** Present only when `failed` is true; names the offending entries. */
+  error?: string;
+}
+
 export interface SeedResult {
-  reposSeeded: number;
-  companionsSeeded: number;
+  repos: TableSeedResult;
+  companions: TableSeedResult;
 }
 
 /**
@@ -18,42 +36,29 @@ export interface SeedResult {
  *
  * The two tables are decided, attempted, and reported on INDEPENDENTLY: a
  * malformed repo entry must never prevent a valid companion manifest from
- * seeding (or vice versa). Both are always attempted to completion; if either
- * fails validation, the other's outcome — success or failure — stands on its
- * own. Failures are collected and thrown together, naming every table that
- * failed and every invalid entry within it, plus a note of what did seed
- * successfully despite the failure (there is no other way to surface a
- * partial success once an error is thrown).
+ * seeding (or vice versa), and each table's own success or failure is
+ * reported through its own `TableSeedResult`. This function never throws —
+ * a malformed manifest entry is data for the caller to act on, not an
+ * exception. That matters for `hydrateStartupRegistry`, which needs to know,
+ * PER TABLE, whether the seed failed validation so it can leave that one
+ * table on the manifest instead of replacing it with an empty database read.
  */
 export async function seedRegistryFromManifest(
   store: IRegistryStore,
   manifest: OverlayManifest,
 ): Promise<SeedResult> {
-  let reposSeeded = 0;
-  let companionsSeeded = 0;
-  const failures: string[] = [];
+  return {
+    repos: await seedTable(() => seedRepos(store, manifest)),
+    companions: await seedTable(() => seedCompanions(store, manifest)),
+  };
+}
 
+async function seedTable(attempt: () => Promise<number>): Promise<TableSeedResult> {
   try {
-    reposSeeded = await seedRepos(store, manifest);
+    return { seeded: await attempt(), failed: false };
   } catch (error) {
-    failures.push(`repos — ${errorMessage(error)}`);
+    return { seeded: 0, failed: true, error: errorMessage(error) };
   }
-
-  try {
-    companionsSeeded = await seedCompanions(store, manifest);
-  } catch (error) {
-    failures.push(`companions — ${errorMessage(error)}`);
-  }
-
-  if (failures.length > 0) {
-    const seeded: string[] = [];
-    if (reposSeeded > 0) seeded.push(`${reposSeeded} repo(s)`);
-    if (companionsSeeded > 0) seeded.push(`${companionsSeeded} companion(s)`);
-    const seededNote = seeded.length > 0 ? ` Seeded successfully despite this: ${seeded.join(', ')}.` : '';
-    throw new Error(`Registry seeding failed — ${failures.join(' | ')}.${seededNote}`);
-  }
-
-  return { reposSeeded, companionsSeeded };
 }
 
 async function seedRepos(store: IRegistryStore, manifest: OverlayManifest): Promise<number> {

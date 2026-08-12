@@ -15,7 +15,7 @@ describe('seedRegistryFromManifest', () => {
 
     const result = await seedRegistryFromManifest(store, manifest);
 
-    expect(result.reposSeeded).toBe(2);
+    expect(result.repos).toEqual({ seeded: 2, failed: false });
     expect(await store.countRepos()).toBe(2);
     expect((await store.getRepo('repo-a'))?.repoKey).toBe('repo-a');
     expect((await store.getRepo('repo-b'))?.repoKey).toBe('repo-b');
@@ -35,7 +35,7 @@ describe('seedRegistryFromManifest', () => {
 
     const result = await seedRegistryFromManifest(store, manifest);
 
-    expect(result.reposSeeded).toBe(0);
+    expect(result.repos).toEqual({ seeded: 0, failed: false });
     expect(await store.countRepos()).toBe(1);
     // Not just "count unchanged" — the pre-existing row's content must be untouched.
     expect(await store.getRepo('existing')).toEqual(existing);
@@ -47,8 +47,8 @@ describe('seedRegistryFromManifest', () => {
 
     const result = await seedRegistryFromManifest(store, {});
 
-    expect(result.reposSeeded).toBe(0);
-    expect(result.companionsSeeded).toBe(0);
+    expect(result.repos).toEqual({ seeded: 0, failed: false });
+    expect(result.companions).toEqual({ seeded: 0, failed: false });
     expect(await store.countRepos()).toBe(0);
     expect(await store.countCompanions()).toBe(0);
   });
@@ -61,10 +61,10 @@ describe('seedRegistryFromManifest', () => {
     };
 
     const first = await seedRegistryFromManifest(store, manifest);
-    expect(first).toEqual({ reposSeeded: 1, companionsSeeded: 1 });
+    expect(first).toEqual({ repos: { seeded: 1, failed: false }, companions: { seeded: 1, failed: false } });
 
     const second = await seedRegistryFromManifest(store, manifest);
-    expect(second).toEqual({ reposSeeded: 0, companionsSeeded: 0 });
+    expect(second).toEqual({ repos: { seeded: 0, failed: false }, companions: { seeded: 0, failed: false } });
 
     expect(await store.countRepos()).toBe(1);
     expect(await store.countCompanions()).toBe(1);
@@ -82,8 +82,8 @@ describe('seedRegistryFromManifest', () => {
 
     const result = await seedRegistryFromManifest(store, manifest);
 
-    expect(result.reposSeeded).toBe(1);
-    expect(result.companionsSeeded).toBe(0);
+    expect(result.repos).toEqual({ seeded: 1, failed: false });
+    expect(result.companions).toEqual({ seeded: 0, failed: false });
     expect(await store.countRepos()).toBe(1);
     expect(await store.countCompanions()).toBe(1);
     expect(await store.getCompanion('WouldSeed')).toBeNull();
@@ -101,15 +101,15 @@ describe('seedRegistryFromManifest', () => {
 
     const result = await seedRegistryFromManifest(store, manifest);
 
-    expect(result.reposSeeded).toBe(0);
-    expect(result.companionsSeeded).toBe(1);
+    expect(result.repos).toEqual({ seeded: 0, failed: false });
+    expect(result.companions).toEqual({ seeded: 1, failed: false });
     expect(await store.countRepos()).toBe(1);
     expect(await store.countCompanions()).toBe(1);
     expect(await store.getRepo('would-seed')).toBeNull();
     expect(await store.getCompanion('Comp')).not.toBeNull();
   });
 
-  test('a malformed manifest repo entry throws and names the offending key, without half-seeding', async () => {
+  test('a malformed manifest repo entry fails that table only, naming the offending key, without half-seeding', async () => {
     const store = new FakeRegistryStore();
     const manifest = {
       repos: {
@@ -119,12 +119,15 @@ describe('seedRegistryFromManifest', () => {
       },
     } as unknown as OverlayManifest;
 
-    await expect(seedRegistryFromManifest(store, manifest)).rejects.toThrow(/bad-repo/);
+    const result = await seedRegistryFromManifest(store, manifest);
+
+    expect(result.repos.failed).toBe(true);
+    expect(result.repos.error).toMatch(/bad-repo/);
     // Nothing was inserted — a half-seeded registry is worse than an empty one.
     expect(await store.countRepos()).toBe(0);
   });
 
-  test('a malformed manifest companion entry throws and names the offending key, without half-seeding', async () => {
+  test('a malformed manifest companion entry fails that table only, naming the offending key, without half-seeding', async () => {
     const store = new FakeRegistryStore();
     const manifest = {
       companions: {
@@ -133,14 +136,17 @@ describe('seedRegistryFromManifest', () => {
       },
     } as unknown as OverlayManifest;
 
-    await expect(seedRegistryFromManifest(store, manifest)).rejects.toThrow(/BadComp/);
+    const result = await seedRegistryFromManifest(store, manifest);
+
+    expect(result.companions.failed).toBe(true);
+    expect(result.companions.error).toMatch(/BadComp/);
     expect(await store.countCompanions()).toBe(0);
   });
 
   // Regression test for the coupling bug from review round 1: a malformed repo
   // entry must never block an unrelated, valid companion manifest from seeding.
-  // The two tables are attempted to completion independently — the error
-  // surfaces the repo failure AND records that the companion still seeded.
+  // The two tables are attempted to completion independently, and each reports
+  // its own outcome — the repo table fails while the companion table succeeds.
   test('a malformed repo entry does NOT prevent a valid, independent companion manifest from seeding', async () => {
     const store = new FakeRegistryStore();
     const manifest = {
@@ -153,22 +159,17 @@ describe('seedRegistryFromManifest', () => {
       },
     } as unknown as OverlayManifest;
 
-    let thrown: Error | undefined;
-    try {
-      await seedRegistryFromManifest(store, manifest);
-    } catch (error) {
-      thrown = error as Error;
-    }
+    const result = await seedRegistryFromManifest(store, manifest);
 
-    expect(thrown).toBeDefined();
-    expect(thrown!.message).toMatch(/bad-repo/);
-    expect(thrown!.message).toMatch(/1 companion/);
+    expect(result.repos.failed).toBe(true);
+    expect(result.repos.error).toMatch(/bad-repo/);
+    expect(result.companions).toEqual({ seeded: 1, failed: false });
     expect(await store.countRepos()).toBe(0);
     expect(await store.countCompanions()).toBe(1);
     expect(await store.getCompanion('GoodComp')).not.toBeNull();
   });
 
-  test('two malformed repo entries in the same manifest are both named in the error, not just the first', async () => {
+  test('two malformed repo entries in the same manifest are both named in the failure, not just the first', async () => {
     const store = new FakeRegistryStore();
     const manifest = {
       repos: {
@@ -177,20 +178,15 @@ describe('seedRegistryFromManifest', () => {
       },
     } as unknown as OverlayManifest;
 
-    let thrown: Error | undefined;
-    try {
-      await seedRegistryFromManifest(store, manifest);
-    } catch (error) {
-      thrown = error as Error;
-    }
+    const result = await seedRegistryFromManifest(store, manifest);
 
-    expect(thrown).toBeDefined();
-    expect(thrown!.message).toMatch(/bad-one/);
-    expect(thrown!.message).toMatch(/bad-two/);
+    expect(result.repos.failed).toBe(true);
+    expect(result.repos.error).toMatch(/bad-one/);
+    expect(result.repos.error).toMatch(/bad-two/);
     expect(await store.countRepos()).toBe(0);
   });
 
-  test('when both tables have a malformed entry, the error names both tables', async () => {
+  test('when both tables have a malformed entry, each table reports its own failure', async () => {
     const store = new FakeRegistryStore();
     const manifest = {
       repos: {
@@ -201,16 +197,12 @@ describe('seedRegistryFromManifest', () => {
       },
     } as unknown as OverlayManifest;
 
-    let thrown: Error | undefined;
-    try {
-      await seedRegistryFromManifest(store, manifest);
-    } catch (error) {
-      thrown = error as Error;
-    }
+    const result = await seedRegistryFromManifest(store, manifest);
 
-    expect(thrown).toBeDefined();
-    expect(thrown!.message).toMatch(/bad-repo/);
-    expect(thrown!.message).toMatch(/BadComp/);
+    expect(result.repos.failed).toBe(true);
+    expect(result.repos.error).toMatch(/bad-repo/);
+    expect(result.companions.failed).toBe(true);
+    expect(result.companions.error).toMatch(/BadComp/);
     expect(await store.countRepos()).toBe(0);
     expect(await store.countCompanions()).toBe(0);
   });
