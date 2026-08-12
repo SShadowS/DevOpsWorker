@@ -12,6 +12,8 @@ import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
 import type { ILogSink } from '../pipeline/log-sink.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import type { IRegistryStore } from '../config/registry-store.interface.ts';
+import type { ISettingsStore } from '../config/settings-store.interface.ts';
+import { validateSetting } from '../config/schemas.ts';
 import { refreshRegistryIfStale } from '../config/hydrate.ts';
 import { LogPoller } from './log-poller.ts';
 import { parseWindow, parsePopulation, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getReviewValueStats, getDriftStats } from './stats.ts';
@@ -62,6 +64,10 @@ export interface DashboardOptions {
   logSink: (workItemId: number) => ILogSink;
   prReviewStore: IPRReviewStore;
   prReviewLogSink: (prId: number, reviewRunId: string) => ILogSink;
+  /** Operator-editable deployment settings — `POST /api/runners` writes
+   *  `runner.maxConcurrency` here (see `src/cli/config.ts`'s
+   *  `readConcurrencySetting` for the read side, in `watch.ts`). */
+  settingsStore: ISettingsStore;
   /** Raw Postgres connection for `/api/stats/*` and `/api/drift` — those
    *  endpoints need `percentile_cont` and per-row JSONB shaping that the
    *  typed store interfaces don't expose (see `src/dashboard/stats.ts`). */
@@ -92,7 +98,7 @@ export interface DashboardHandle {
 }
 
 export function startDashboard(options: DashboardOptions): DashboardHandle {
-  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, registryStore } = options;
+  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, registryStore, settingsStore } = options;
 
   /** Best-effort registry refresh — a database blip must never fail the
    *  caller (a request, or the background poller below). */
@@ -474,15 +480,20 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
         });
       }
 
-      // Set concurrency dynamically
+      // Set concurrency dynamically — writes the `runner.maxConcurrency` setting
+      // the watcher's readConcurrencySetting() reads (src/cli/watch.ts). This
+      // replaced a direct write to runner_status's now-legacy "config" key,
+      // which the watcher still reads as a one-tier fallback for deployments
+      // upgrading with a value already stored there.
       if (path === '/api/runners' && req.method === 'POST') {
         try {
           const body = (await req.json()) as { maxConcurrency?: number };
-          if (!body.maxConcurrency || body.maxConcurrency < 1) {
-            return Response.json({ error: 'maxConcurrency must be >= 1' }, { status: 400 });
+          const result = validateSetting('runner.maxConcurrency', body.maxConcurrency);
+          if (!result.valid) {
+            return Response.json({ error: result.errors.map(e => e.message).join('; ') }, { status: 400 });
           }
-          await runnerStatus.writeDynamicConcurrency(body.maxConcurrency);
-          return Response.json({ ok: true, maxConcurrency: body.maxConcurrency });
+          await settingsStore.set('runner.maxConcurrency', result.value, user?.email ?? null);
+          return Response.json({ ok: true, maxConcurrency: result.value });
         } catch {
           return Response.json({ error: 'Invalid request' }, { status: 400 });
         }

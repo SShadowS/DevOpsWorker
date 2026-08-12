@@ -2,6 +2,8 @@ import { execSync } from 'node:child_process';
 import type { IStateStore } from '../pipeline/state-store.interface.ts';
 import type { IActionStore } from '../pipeline/action-store.interface.ts';
 import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
+import type { ISettingsStore } from '../config/settings-store.interface.ts';
+import { validateSetting } from '../config/schemas.ts';
 import { connectStores } from '../db/connect-stores.ts';
 import { loadConfig } from './config.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
@@ -521,6 +523,38 @@ export function parseWatchArgs(args: string[]): { intervalMinutes: number; concu
 }
 
 // ---------------------------------------------------------------------------
+// Dynamic concurrency — runner.maxConcurrency setting, with a legacy fallback
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the watcher's concurrency limit for this tick.
+ *
+ * Precedence: the `runner.maxConcurrency` setting (written by the dashboard's
+ * `POST /api/runners`) when present and valid; otherwise the `runner_status`
+ * `config` key it replaces, read as a fallback so an existing deployment does
+ * not silently reset to its code default the moment it upgrades; `null` when
+ * neither is set, meaning "no change" — the caller keeps whatever value it
+ * already had.
+ *
+ * A malformed stored setting (not a positive integer) is ignored with a
+ * warning rather than applied — matching `buildModelsAndCosts` in
+ * `src/cli/config.ts`, the same defensive pattern for the same reason: an
+ * operator saving one bad value must not corrupt the watcher's concurrency.
+ */
+export async function readConcurrencySetting(
+  settingsStore: ISettingsStore,
+  runnerStatus: IRunnerStatus,
+): Promise<number | null> {
+  const stored = await settingsStore.get<unknown>('runner.maxConcurrency');
+  if (stored !== null && stored !== undefined) {
+    const result = validateSetting('runner.maxConcurrency', stored);
+    if (result.valid) return result.value as number;
+    console.warn(`  ⚠️  Ignoring malformed "runner.maxConcurrency" setting: ${result.errors.map(e => e.message).join('; ')}`);
+  }
+  return runnerStatus.readDynamicConcurrency();
+}
+
+// ---------------------------------------------------------------------------
 // Main watch loop
 // ---------------------------------------------------------------------------
 
@@ -582,7 +616,7 @@ export async function watch(args: string[]): Promise<void> {
   // Fail loud if AZURE_DEVOPS_* env vars weren't supplied — otherwise the watcher
   // polls 'your-org'/'Your Project' and every WIQL query 404s silently.
   assertRealAdoConfig(pollingConfig, 'watcher');
-  const { stateStore, actionStore, runnerStatus, prReviewStore, registryStore } = await connectStores();
+  const { stateStore, actionStore, runnerStatus, prReviewStore, registryStore, settingsStore } = await connectStores();
 
   // Independent heartbeat — runs every 30s regardless of poll loop or container blocking
   const heartbeatInterval = setInterval(async () => {
@@ -652,11 +686,18 @@ export async function watch(args: string[]): Promise<void> {
     // Reap settled promises
     await reapSettled(running);
 
-    // Check for dynamic concurrency changes from dashboard
-    const dynamicMax = await runnerStatus.readDynamicConcurrency();
-    if (dynamicMax !== null && dynamicMax !== maxConcurrency) {
-      log(`Concurrency changed dynamically: ${maxConcurrency} → ${dynamicMax}`);
-      maxConcurrency = dynamicMax;
+    // Check for dynamic concurrency changes from the settings store (falls back
+    // to the legacy runner_status key it replaces — see readConcurrencySetting).
+    // A database outage here must not kill the watcher — log and keep polling
+    // with the last-known value, same pattern as the registry refresh above.
+    try {
+      const dynamicMax = await readConcurrencySetting(settingsStore, runnerStatus);
+      if (dynamicMax !== null && dynamicMax !== maxConcurrency) {
+        log(`Concurrency changed dynamically: ${maxConcurrency} → ${dynamicMax}`);
+        maxConcurrency = dynamicMax;
+      }
+    } catch (err) {
+      logError('Warning: failed to read dynamic concurrency setting', err);
     }
 
     // Process any pending dashboard actions (launches into pool)

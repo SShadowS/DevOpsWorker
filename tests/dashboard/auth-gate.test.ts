@@ -8,6 +8,7 @@ import type { IActionStore, ActionRecord } from '../../src/pipeline/action-store
 import type { IRunnerStatus } from '../../src/pipeline/runner-status.interface.ts';
 import type { ILogSink } from '../../src/pipeline/log-sink.interface.ts';
 import type { IPRReviewStore, PRReviewRow } from '../../src/pipeline/pr-review-store.interface.ts';
+import type { ISettingsStore } from '../../src/config/settings-store.interface.ts';
 import { FakeRegistryStore } from '../config/fixtures/fake-registry-store.ts';
 import { repos, replaceRepos } from '../../src/config/repos.ts';
 import { companionRegistry, replaceCompanions } from '../../src/config/companions.ts';
@@ -28,7 +29,7 @@ import type postgres from 'postgres';
 // The non-auth stores below are thin stand-ins. The unauthenticated-path
 // assertions never reach any of them (the gate returns before dispatch); the
 // one authenticated case that does — POST /api/runners as admin — only needs
-// StubRunnerStatus.writeDynamicConcurrency to not throw.
+// StubSettingsStore.set to not throw.
 //
 // server.ts's fetch handler now calls refreshRegistry() before the gate runs
 // (registry hydration), which reads/replaces the real, process-global
@@ -84,6 +85,13 @@ class StubPRReviewStore implements IPRReviewStore {
   async findLatestByPrId(): Promise<null> { return null; }
 }
 
+class StubSettingsStore implements ISettingsStore {
+  async getAll(): Promise<Record<string, unknown>> { return {}; }
+  async get<T>(): Promise<T | null> { return null; }
+  async set(): Promise<void> {}
+  async delete(): Promise<void> {}
+}
+
 describe('dashboard auth gate (real HTTP round trip)', () => {
   let handle: DashboardHandle;
   let base: string;
@@ -117,6 +125,7 @@ describe('dashboard auth gate (real HTTP round trip)', () => {
       sessionStore,
       authEventStore: new FakeAuthEventStore(),
       registryStore: new FakeRegistryStore(),
+      settingsStore: new StubSettingsStore(),
     });
     base = `http://localhost:${handle.server.port}`;
 

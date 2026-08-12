@@ -21,7 +21,7 @@ export async function cont(args: string[]): Promise<void> {
   console.log(`Continuing pipeline for work item #${workItemId}`);
 
   // Load existing state
-  const { stateStore, logSink } = await connectStores();
+  const { stateStore, logSink, settingsStore } = await connectStores();
   // Use same log path logic as run.ts — write to Docker volume when STATE_DIR is set
   const logDir = process.env['LOG_DIR']
     ?? (process.env['STATE_DIR'] ? join(resolve(process.env['STATE_DIR'], '..'), 'logs') : '.pipeline/logs');
@@ -51,7 +51,7 @@ export async function cont(args: string[]): Promise<void> {
   }
 
   // Load config from persisted file
-  const config = await loadConfigFromState(stateStore, workItemId);
+  const config = await loadConfigFromState(stateStore, workItemId, settingsStore);
 
   // Remove need-input tag (safety net — even if checkpoint-resolution removal failed)
   try {

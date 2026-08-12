@@ -19,6 +19,15 @@ export class PgRunnerStatus implements IRunnerStatus {
     return rows[0]!.value as any;
   }
 
+  /**
+   * @deprecated Reads the `runner_status` `config` key, which the `runner.maxConcurrency`
+   * row in the `settings` table has replaced as the primary source (see
+   * `readConcurrencySetting` in `src/cli/watch.ts`). Kept only as that function's
+   * one-tier fallback, so a deployment upgrading with a value already stored here
+   * does not silently reset to the code default the moment it upgrades. Nothing
+   * writes this key going forward — the dashboard's `POST /api/runners` now writes
+   * the setting instead (see `writeDynamicConcurrency` below).
+   */
   async readDynamicConcurrency(): Promise<number | null> {
     const rows = await this.sql`SELECT value FROM runner_status WHERE key = 'config'`;
     if (rows.length === 0) return null;
@@ -26,6 +35,13 @@ export class PgRunnerStatus implements IRunnerStatus {
     return data?.maxConcurrency ?? null;
   }
 
+  /**
+   * @deprecated Writes the legacy `runner_status` `config` key. No production code
+   * calls this anymore — `POST /api/runners` writes the `runner.maxConcurrency`
+   * setting instead. Kept on the interface so existing callers/tests of
+   * `IRunnerStatus` are not forced to change in this task; safe to remove once
+   * nothing references it.
+   */
   async writeDynamicConcurrency(maxConcurrency: number): Promise<void> {
     await this.sql`
       INSERT INTO runner_status (key, value, updated_at)
