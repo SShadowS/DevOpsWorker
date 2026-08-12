@@ -5,7 +5,7 @@ import { startDashboard, type DashboardHandle } from '../../src/dashboard/server
 import { hashPassword } from '../../src/auth/local-provider.ts';
 import { SESSION_COOKIE } from '../../src/auth/cookies.ts';
 import { FakeUserStore, FakeSessionStore, FakeAuthEventStore } from '../auth/fakes.ts';
-import { isDangerousKey } from '../../src/dashboard/admin-api.ts';
+import { isDangerousKey, containsDangerousKey } from '../../src/dashboard/admin-api.ts';
 import { SCHEMA } from '../../src/db/postgres.ts';
 import { PgRegistryStore } from '../../src/db/pg-registry-store.ts';
 import { PgSettingsStore } from '../../src/db/pg-settings-store.ts';
@@ -38,6 +38,33 @@ describe('isDangerousKey', () => {
   test('accepts an ordinary key', () => {
     expect(isDangerousKey('my-repo')).toBe(false);
     expect(isDangerousKey('')).toBe(false);
+  });
+});
+
+describe('containsDangerousKey', () => {
+  // These use JSON.parse, not a `{ __proto__: ... }` object literal: writing
+  // `__proto__` as a bare/quoted key in literal syntax is special-cased by
+  // JS to set the object's prototype rather than create an own property (the
+  // real attack, and the real request path — a JSON body — goes through
+  // JSON.parse's CreateDataProperty instead, which does not special-case it).
+  // A literal would make this test assert something that isn't the real
+  // shape, exactly the gap the brief warned about.
+  test('finds a dangerous key nested inside an object, at any depth', () => {
+    expect(containsDangerousKey(JSON.parse('{"companions":{"__proto__":{"branch":"x"}}}'))).toBe(true);
+    expect(containsDangerousKey({ a: { b: { c: { constructor: 1 } } } })).toBe(true);
+    expect(containsDangerousKey({ value: { prototype: 'x' } })).toBe(true);
+  });
+
+  test('finds a dangerous key nested inside an array of objects', () => {
+    expect(containsDangerousKey(JSON.parse('[{"ok":1},{"__proto__":1}]'))).toBe(true);
+  });
+
+  test('accepts an ordinary nested body', () => {
+    expect(containsDangerousKey({ companions: { BC: { branch: 'w1-28' } }, url: 'x' })).toBe(false);
+    expect(containsDangerousKey({ a: [1, 2, { b: 'c' }] })).toBe(false);
+    expect(containsDangerousKey(null)).toBe(false);
+    expect(containsDangerousKey('a string')).toBe(false);
+    expect(containsDangerousKey(42)).toBe(false);
   });
 });
 
@@ -130,6 +157,7 @@ describe.skipIf(!url)('admin API (real server + real Postgres)', () => {
   let adminEmail: string;
   let repoSnapshot: RepoRegistry;
   let companionSnapshot: CompanionRegistry;
+  let seededCompanionCount: number;
 
   async function cleanupTestRows(): Promise<void> {
     await sql`DELETE FROM repo_registry WHERE repo_key LIKE 'admintest-%'`;
@@ -148,6 +176,15 @@ describe.skipIf(!url)('admin API (real server + real Postgres)', () => {
     });
     await sql.unsafe(SCHEMA);
     await cleanupTestRows();
+
+    // A DIRECT query, not a snapshot of the in-memory `companionRegistry`
+    // singleton: at this point in a fresh test process, that singleton has
+    // only ever seen `companions.ts`'s hardcoded `BC` entry (1 key) — nothing
+    // has hydrated it from the database yet, so it would silently understate
+    // the real seeded count and make the "untouched" assertion below vacuous
+    // in the opposite direction (comparing against 1 instead of the real 6).
+    const seededRows = await sql`SELECT companion_key FROM companion_registry WHERE companion_key NOT LIKE 'admintest-%'`;
+    seededCompanionCount = seededRows.length;
 
     repoSnapshot = { ...repos };
     companionSnapshot = { ...companionRegistry };
@@ -230,14 +267,20 @@ describe.skipIf(!url)('admin API (real server + real Postgres)', () => {
 
   test('unauthenticated requests are rejected', async () => {
     expect((await fetch(`${base}/api/admin/repos`)).status).toBe(401);
+    expect((await fetch(`${base}/api/admin/companions`)).status).toBe(401);
+    expect((await fetch(`${base}/api/admin/settings`)).status).toBe(401);
     expect((await fetch(`${base}/api/admin/audit`)).status).toBe(401);
     expect((await fetch(`${base}/api/admin/repos/admintest-x`, { method: 'PUT', body: '{}' })).status).toBe(401);
   });
 
   test('an authenticated operator (non-admin) is rejected', async () => {
     expect((await fetch(`${base}/api/admin/repos`, asOperator())).status).toBe(403);
+    expect((await fetch(`${base}/api/admin/companions`, asOperator())).status).toBe(403);
+    expect((await fetch(`${base}/api/admin/settings`, asOperator())).status).toBe(403);
     expect((await fetch(`${base}/api/admin/audit`, asOperator())).status).toBe(403);
     expect((await fetch(`${base}/api/admin/repos/admintest-x`, asOperator(putJson({})))).status).toBe(403);
+    expect((await fetch(`${base}/api/admin/companions/admintest-x`, asOperator(putJson({})))).status).toBe(403);
+    expect((await fetch(`${base}/api/admin/settings/admintest-x`, asOperator(putJson({ value: 1 })))).status).toBe(403);
   });
 
   // -------------------------------------------------------------------------
@@ -336,6 +379,33 @@ describe.skipIf(!url)('admin API (real server + real Postgres)', () => {
       const rows = await sql`SELECT repo_key FROM repo_registry WHERE repo_key IN ('__proto__', 'constructor', 'prototype')`;
       expect(rows.length).toBe(0);
     });
+
+    // Regression test for the Important review finding: `RepoConfig.companions`
+    // is an open-key record (necessarily not `.strict()`), so a dangerous key
+    // can arrive NESTED inside an otherwise-valid body, not just as the URL
+    // `:key`. Built via a hand-written JSON string, not a `{ __proto__: ... }`
+    // object literal — see the containsDangerousKey pure tests above for why
+    // that distinction matters. This is what the real request body construction
+    // (JSON.parse inside `req.json()`) actually produces.
+    test('a dangerous key nested inside companions is rejected, and nothing is polluted', async () => {
+      const protoBefore = Object.getPrototypeOf({});
+      const bodyText = JSON.stringify(mkRepo({ repoKey: 'admintest-proto-repo' }))
+        .replace('"companions":{}', '"companions":{"__proto__":{"branch":"pwned"}}');
+      // Sanity: the string-splice above actually landed the raw JSON text we intend.
+      expect(bodyText).toContain('"companions":{"__proto__":{"branch":"pwned"}}');
+
+      const res = await fetch(`${base}/api/admin/repos/admintest-proto-repo`, asAdmin({
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyText,
+      }));
+      expect(res.status).toBe(400);
+
+      const getRes = await fetch(`${base}/api/admin/repos/admintest-proto-repo`, asAdmin());
+      expect(getRes.status).toBe(404); // no row was ever created
+      expect(await auditRowsFor('admintest-proto-repo')).toEqual([]);
+      expect(Object.getPrototypeOf({})).toBe(protoBefore); // nothing in this process was polluted
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -373,11 +443,21 @@ describe.skipIf(!url)('admin API (real server + real Postgres)', () => {
     });
 
     // companion_registry legitimately holds 6 seeded rows this task must not touch.
+    // Compared against a count taken by direct query in beforeAll, before this
+    // suite created anything — see that comment for why the in-memory
+    // `companionRegistry` singleton is the wrong baseline for this specific check.
     test('the seeded companion rows are untouched by this suite', async () => {
       const rows = await sql`SELECT companion_key FROM companion_registry WHERE companion_key NOT LIKE 'admintest-%'`;
-      // Not asserting an exact count (another process could be mid-registration) —
-      // only that this suite never deletes or renames anything outside its prefix.
-      expect(rows.length).toBeGreaterThanOrEqual(0);
+      expect(rows.length).toBe(seededCompanionCount);
+    });
+
+    test('__proto__, constructor, and prototype are rejected as keys, with no row created', async () => {
+      for (const dangerous of ['__proto__', 'constructor', 'prototype']) {
+        const res = await fetch(`${base}/api/admin/companions/${dangerous}`, asAdmin(putJson(mkCompanion())));
+        expect(res.status).toBe(400);
+      }
+      const rows = await sql`SELECT companion_key FROM companion_registry WHERE companion_key IN ('__proto__', 'constructor', 'prototype')`;
+      expect(rows.length).toBe(0);
     });
   });
 
@@ -424,6 +504,48 @@ describe.skipIf(!url)('admin API (real server + real Postgres)', () => {
     test('DELETE on an absent setting is 404', async () => {
       const res = await fetch(`${base}/api/admin/settings/agents.admintest-never-set.maxTurns`, asAdmin({ method: 'DELETE' }));
       expect(res.status).toBe(404);
+    });
+
+    test('__proto__, constructor, and prototype are rejected as keys, with no row created', async () => {
+      for (const dangerous of ['__proto__', 'constructor', 'prototype']) {
+        const res = await fetch(`${base}/api/admin/settings/${dangerous}`, asAdmin(putJson({ value: 1 })));
+        expect(res.status).toBe(400);
+      }
+      const rows = await sql`SELECT key FROM settings WHERE key IN ('__proto__', 'constructor', 'prototype')`;
+      expect(rows.length).toBe(0);
+    });
+
+    // Regression test for the Important review finding, settings side: a
+    // real record-valued settings key (e.g. `models.perAgent`) is a live,
+    // consequential key the running watcher reads, so this deliberately does
+    // NOT target one — if the guard under test ever regressed, a test using
+    // a real key could actually corrupt live settings before the assertion
+    // even ran. `containsDangerousKey` runs on the whole body BEFORE
+    // `validateSetting`, so a fake, safe key still exercises the exact same
+    // guard call, on the exact same code path, with zero risk to any real
+    // setting. Uses its OWN key (not `key` above), which already carries
+    // real audit rows from the CRUD test earlier in this block — reusing it
+    // here would make the "no audit row" assertion below compare against
+    // that pre-existing history instead of this test's own effect. Same
+    // JSON-string construction as the repos test above, for the same reason
+    // (a `{ __proto__: ... }` object literal would not create the real,
+    // exploitable shape).
+    test('a dangerous key nested inside a settings value is rejected, and nothing is polluted', async () => {
+      const protoKey = 'agents.admintest-fake-agent-proto.maxTurns';
+      const protoBefore = Object.getPrototypeOf({});
+      const bodyText = '{"value":{"__proto__":"evil"}}';
+
+      const res = await fetch(`${base}/api/admin/settings/${encodeURIComponent(protoKey)}`, asAdmin({
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyText,
+      }));
+      expect(res.status).toBe(400);
+
+      const getAllRes = await fetch(`${base}/api/admin/settings`, asAdmin());
+      expect(protoKey in ((await getAllRes.json()) as Record<string, unknown>)).toBe(false);
+      expect(await auditRowsFor(protoKey)).toEqual([]);
+      expect(Object.getPrototypeOf({})).toBe(protoBefore);
     });
   });
 

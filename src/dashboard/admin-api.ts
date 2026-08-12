@@ -61,6 +61,42 @@ function dangerousKeyResponse(key: string): Response {
   return Response.json({ error: `"${key}" cannot be used as a key` }, { status: 400 });
 }
 
+/**
+ * The body half of the same guard. The brief's threat model is "a key
+ * arrives from an HTTP body OR path" — `isDangerousKey` above only ever sees
+ * the URL `:key` segment. `RepoConfig.companions` is `z.record(...)` (an
+ * open key set — it cannot be `.strict()`, there is no fixed list of
+ * companion names to enumerate) and a settings value such as
+ * `models.perAgent` is a record too, so a `__proto__`-named key can arrive
+ * nested anywhere inside an otherwise well-formed body.
+ *
+ * Today, feeding such a body through `z.record(...).safeParse(...)` happens
+ * to drop the `__proto__`-named entry silently rather than assigning it — but
+ * that is an accident of zod's internals, not something this codebase
+ * asserts, and it is exactly the kind of behaviour a dependency bump can
+ * change without warning. `replaceRepos`/`replaceCompanions` (hydrate.ts) do
+ * a real `Object.assign` one hop downstream of whatever a schema lets
+ * through, so this walks the RAW parsed body — before it ever reaches
+ * `safeParse` — and rejects outright rather than trusting zod to keep
+ * dropping it.
+ */
+export function containsDangerousKey(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some((item) => containsDangerousKey(item));
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const key of Object.keys(value)) {
+      if (isDangerousKey(key)) return true;
+      if (containsDangerousKey((value as Record<string, unknown>)[key])) return true;
+    }
+  }
+  return false;
+}
+
+function dangerousBodyKeyResponse(): Response {
+  return Response.json({ error: 'The request body contains a disallowed key ("__proto__", "constructor", or "prototype")' }, { status: 400 });
+}
+
 // ---------------------------------------------------------------------------
 // Small shared helpers
 // ---------------------------------------------------------------------------
@@ -113,6 +149,7 @@ async function getRepo(deps: AdminApiDeps, key: string): Promise<Response> {
 async function putRepo(req: Request, user: AuthUser, deps: AdminApiDeps, key: string): Promise<Response> {
   const parsed = await readJsonBody(req);
   if (!parsed.ok) return parsed.response;
+  if (containsDangerousKey(parsed.body)) return dangerousBodyKeyResponse();
 
   const result = repoConfigSchema.safeParse(parsed.body);
   if (!result.success) {
@@ -189,6 +226,7 @@ async function getCompanion(deps: AdminApiDeps, key: string): Promise<Response> 
 async function putCompanion(req: Request, user: AuthUser, deps: AdminApiDeps, key: string): Promise<Response> {
   const parsed = await readJsonBody(req);
   if (!parsed.ok) return parsed.response;
+  if (containsDangerousKey(parsed.body)) return dangerousBodyKeyResponse();
 
   const result = companionConfigSchema.safeParse(parsed.body);
   if (!result.success) {
@@ -260,9 +298,16 @@ async function listSettings(deps: AdminApiDeps): Promise<Response> {
   return Response.json(await deps.settingsStore.getAll());
 }
 
+/** Wire shape: `PUT` body is `{ "value": <the setting's own value shape> }` —
+ *  e.g. `{ "value": 40 }` for `agents.coder.maxTurns`, or
+ *  `{ "value": { "coder": "claude-sonnet-5" } }` for `models.perAgent`. The
+ *  route is generic (`/api/admin/settings/:key`), so there is no per-key
+ *  field name to hang the value off; `value` wraps whatever
+ *  `validateSetting(key, ...)` expects for that key. */
 async function putSetting(req: Request, user: AuthUser, deps: AdminApiDeps, key: string): Promise<Response> {
   const parsed = await readJsonBody(req);
   if (!parsed.ok) return parsed.response;
+  if (containsDangerousKey(parsed.body)) return dangerousBodyKeyResponse();
 
   const value = (parsed.body as { value?: unknown } | null)?.value;
   const result = validateSetting(key, value);
