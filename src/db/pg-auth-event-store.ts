@@ -1,10 +1,10 @@
 import type postgres from 'postgres';
-import type { IAuthEventStore, AuthEventRow } from '../auth/auth-event-store.interface.ts';
+import type { IAuthEventStore, AuthEventRow, AuthEventKind } from '../auth/auth-event-store.interface.ts';
 
 export class PgAuthEventStore implements IAuthEventStore {
   constructor(private readonly sql: postgres.Sql) {}
 
-  async write(event: { kind: string; email: string; ip: string | null; userId?: number | null }): Promise<void> {
+  async write(event: { kind: AuthEventKind; email: string; ip: string | null; userId?: number | null }): Promise<void> {
     await this.sql`
       INSERT INTO auth_events (kind, email, ip, user_id)
       VALUES (${event.kind}, ${event.email}, ${event.ip}, ${event.userId ?? null})

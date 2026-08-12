@@ -3,6 +3,7 @@ import postgres from 'postgres';
 import { SCHEMA } from '../../src/db/postgres.ts';
 import { PgAuthEventStore } from '../../src/db/pg-auth-event-store.ts';
 import { PgUserStore } from '../../src/db/pg-user-store.ts';
+import type { IAuthEventStore } from '../../src/auth/auth-event-store.interface.ts';
 
 // Deliberately TEST_DATABASE_URL, never DATABASE_URL: these tests write and
 // delete rows, and must not run against the production pipeline database.
@@ -172,7 +173,7 @@ describe.skipIf(!url)('auth events (integration)', () => {
       passwordHash: 'fakehash',
     });
 
-    // Write multiple events
+    // Write exactly 5 events from this user
     for (let i = 0; i < 5; i++) {
       await authEvents.write({
         kind: 'login-success',
@@ -182,8 +183,12 @@ describe.skipIf(!url)('auth events (integration)', () => {
       });
     }
 
+    // Query with limit 3 will return up to 3 rows. Since we just wrote 5,
+    // and list() returns newest first, we should get exactly the 3 most recent.
     const events = await authEvents.list(3);
-    expect(events.length).toBeLessThanOrEqual(3);
+    expect(events.length).toBe(3);
+    // All three should be from this test's user
+    expect(events.every(e => e.email === user.email)).toBe(true);
   });
 
   test('failed login against unknown email stores attempted email with null user_id', async () => {
@@ -235,4 +240,20 @@ describe.skipIf(!url)('auth events (integration)', () => {
     expect(eventAfter!.email).toBe(user.email);
     expect(eventAfter!.userId).toBeNull();
   });
+
 });
+
+// Type-level check: bad kind should be rejected at compile time.
+// If this @ts-expect-error line becomes an error itself, it means the union
+// type enforcement has regressed. This code is never executed — it only
+// exists for TypeScript to type-check.
+if (false as unknown as true) {
+  const _typeCheckBadKind = null as any as IAuthEventStore;
+  void _typeCheckBadKind.write({
+    // @ts-expect-error 'login-succes' (typo) is not a valid AuthEventKind
+    kind: 'login-succes',
+    email: 'test@example.com',
+    ip: '127.0.0.1',
+    userId: null,
+  });
+}
