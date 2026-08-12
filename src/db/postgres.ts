@@ -304,6 +304,20 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user    ON sessions (user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expires_at);
+
+-- Who authenticated, and who tried. Deliberately separate from the configuration
+-- audit log: different volume, different retention, and this must exist before
+-- the configuration tables do. Never holds a password, a token, or a token hash.
+CREATE TABLE IF NOT EXISTS auth_events (
+  id            SERIAL PRIMARY KEY,
+  at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  kind          TEXT NOT NULL CHECK (kind IN ('login-success','login-failed','login-locked-out','logout')),
+  email         TEXT NOT NULL,
+  ip            TEXT,
+  user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_events_at ON auth_events (at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_events_email_at ON auth_events (email, at DESC);
 `;
 
 /**
