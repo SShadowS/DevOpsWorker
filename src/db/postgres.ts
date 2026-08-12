@@ -318,6 +318,54 @@ CREATE TABLE IF NOT EXISTS auth_events (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_events_at ON auth_events (at DESC);
 CREATE INDEX IF NOT EXISTS idx_auth_events_email_at ON auth_events (email, at DESC);
+
+-- Registered repositories with their configuration. Replaces a static list that
+-- required a code edit and restart to change; moved to a per-row store so
+-- configuration can be updated live at runtime. updated_by is the email of the
+-- operator who last changed the row; updated_at is when.
+CREATE TABLE IF NOT EXISTS repo_registry (
+  repo_key      TEXT PRIMARY KEY,
+  config        JSONB NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by    TEXT
+);
+
+-- Companion apps (sidecar repositories) with their configuration. Same pattern
+-- as repo_registry: moved from static code to a per-row runtime-mutable store.
+CREATE TABLE IF NOT EXISTS companion_registry (
+  companion_key TEXT PRIMARY KEY,
+  config        JSONB NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by    TEXT
+);
+
+-- Deployment policy an operator can change without a code edit: default model,
+-- per-agent model/maxTurns, budgets, runner concurrency. One row per setting key.
+-- updated_by is the email of the operator who last changed the row; updated_at
+-- is when.
+CREATE TABLE IF NOT EXISTS settings (
+  key           TEXT PRIMARY KEY,
+  value         JSONB NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by    TEXT
+);
+
+-- Every admin change, written in the same transaction as the change itself.
+-- before_value is null for a create; after_value is null for a delete.
+-- This audit trail exists at the same transaction boundary as the change,
+-- so a change can never be recorded as having happened when it did not.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id            SERIAL PRIMARY KEY,
+  at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actor_email   TEXT NOT NULL,
+  action        TEXT NOT NULL,
+  entity_type   TEXT NOT NULL,
+  entity_key    TEXT NOT NULL,
+  before_value  JSONB,
+  after_value   JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log (at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log (entity_type, entity_key);
 `;
 
 /**
