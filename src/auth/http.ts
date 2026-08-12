@@ -1,5 +1,6 @@
 import type { IUserStore } from './user-store.interface.ts';
 import type { ISessionStore } from './session-store.interface.ts';
+import type { IAuthEventStore, AuthEventKind } from './auth-event-store.interface.ts';
 import type { AuthUser } from './types.ts';
 import type { LoginRateLimiter } from './rate-limit.ts';
 import { createSession, resolveSession, hashToken } from './sessions.ts';
@@ -11,6 +12,18 @@ export interface AuthDeps {
   sessionStore: ISessionStore;
   rateLimiter: LoginRateLimiter;
   secureCookies: boolean;
+  authEventStore: IAuthEventStore;
+}
+
+/** Best-effort: a logging failure must never stop someone logging in or out,
+ *  so a rejection is swallowed here (after logging) rather than propagated. */
+function recordAuthEvent(
+  store: IAuthEventStore,
+  event: { kind: AuthEventKind; email: string; ip: string | null; userId?: number | null },
+): void {
+  void store.write(event).catch((err) => {
+    console.error('[auth] failed to record auth event:', err);
+  });
 }
 
 function userJson(user: AuthUser): { email: string; displayName: string; role: string } {
@@ -43,18 +56,25 @@ export async function handleLogin(req: Request, deps: AuthDeps, ip: string): Pro
 
   const key = `${email}|${ip}`;
   if (!deps.rateLimiter.check(key)) {
+    recordAuthEvent(deps.authEventStore, { kind: 'login-locked-out', email, ip });
     return Response.json({ error: 'Too many failed attempts. Wait a minute and try again.' }, { status: 429 });
   }
 
   const user = await verifyLocalLogin(deps.userStore, email, password);
   if (!user) {
     deps.rateLimiter.recordFailure(key);
+    // One outcome for every failure cause (unknown email, wrong password, disabled
+    // user, password-less user) — do not split this by cause, in the event log or
+    // anywhere else. That split is exactly the account-existence leak the uniform
+    // 401 response exists to prevent.
+    recordAuthEvent(deps.authEventStore, { kind: 'login-failed', email, ip });
     return Response.json({ error: 'Wrong email or password' }, { status: 401 });
   }
 
   deps.rateLimiter.recordSuccess(key);
   void Promise.resolve(deps.sessionStore.deleteExpired()).catch(() => {}); // opportunistic cleanup
   const { token, expiresAt } = await createSession(deps.sessionStore, user.id);
+  recordAuthEvent(deps.authEventStore, { kind: 'login-success', email, ip, userId: user.id });
   return Response.json(userJson(user), {
     status: 200,
     headers: { 'Set-Cookie': sessionCookie(token, expiresAt, deps.secureCookies) },
@@ -64,12 +84,16 @@ export async function handleLogin(req: Request, deps: AuthDeps, ip: string): Pro
 /** Sign-out is best-effort on the server-side cleanup: a database hiccup must
  *  never turn "log me out" into a 500 that leaves the browser still holding a
  *  cookie it believes is valid. Always clear the cookie and return 200. */
-export async function handleLogout(req: Request, deps: AuthDeps): Promise<Response> {
+export async function handleLogout(req: Request, deps: AuthDeps, ip: string | null = null): Promise<Response> {
   const token = parseCookies(req.headers.get('cookie'))[SESSION_COOKIE];
   if (token) {
+    // Resolve who this is before the session is gone, so the event can carry
+    // an email. A bogus/expired token resolves to null — nothing to log.
+    const user = await authenticate(req, deps);
     await deps.sessionStore.delete(hashToken(token)).catch((err) => {
       console.error('[auth] failed to delete session on logout; cookie is cleared anyway:', err);
     });
+    if (user) recordAuthEvent(deps.authEventStore, { kind: 'logout', email: user.email, ip, userId: user.id });
   }
   return Response.json({ ok: true }, { headers: { 'Set-Cookie': clearSessionCookie(deps.secureCookies) } });
 }

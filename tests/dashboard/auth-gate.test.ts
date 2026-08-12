@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { startDashboard, type DashboardHandle } from '../../src/dashboard/server.ts';
 import { hashPassword } from '../../src/auth/local-provider.ts';
 import { SESSION_COOKIE } from '../../src/auth/cookies.ts';
-import { FakeUserStore, FakeSessionStore } from '../auth/fakes.ts';
+import { FakeUserStore, FakeSessionStore, FakeAuthEventStore } from '../auth/fakes.ts';
 import type { IStateStore } from '../../src/pipeline/state-store.interface.ts';
 import type { IActionStore, ActionRecord } from '../../src/pipeline/action-store.interface.ts';
 import type { IRunnerStatus } from '../../src/pipeline/runner-status.interface.ts';
@@ -92,6 +92,7 @@ describe('dashboard auth gate (real HTTP round trip)', () => {
       sql: {} as postgres.Sql,
       userStore,
       sessionStore,
+      authEventStore: new FakeAuthEventStore(),
     });
     base = `http://localhost:${handle.server.port}`;
 

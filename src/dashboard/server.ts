@@ -16,6 +16,7 @@ import { parseWindow, parsePopulation, getCostStats, getQualityStats, getIntegri
 import { buildConfigReport } from './config-report.ts';
 import type { IUserStore } from '../auth/user-store.interface.ts';
 import type { ISessionStore } from '../auth/session-store.interface.ts';
+import type { IAuthEventStore } from '../auth/auth-event-store.interface.ts';
 import type { AuthUser } from '../auth/types.ts';
 import { authenticate, handleLogin, handleLogout, handleMe, handleAuthStatus, originAllowed, type AuthDeps } from '../auth/http.ts';
 import { requiredAccess } from '../auth/route-access.ts';
@@ -65,6 +66,7 @@ export interface DashboardOptions {
   sql: postgres.Sql;
   userStore: IUserStore;
   sessionStore: ISessionStore;
+  authEventStore: IAuthEventStore;
 }
 
 /** What `startDashboard` hands back: the underlying Bun server (its `.port` is
@@ -86,6 +88,7 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
     sessionStore: options.sessionStore,
     rateLimiter: new LoginRateLimiter(),
     secureCookies: process.env['DASHBOARD_SECURE_COOKIES'] === '1',
+    authEventStore: options.authEventStore,
   };
 
   const logPoller = new LogPoller(logSink, stateStore, broadcastSSE);
@@ -175,7 +178,9 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
       }
 
       if (path === '/api/auth/me' && req.method === 'GET') return handleMe(user!);
-      if (path === '/api/auth/logout' && req.method === 'POST') return handleLogout(req, authDeps);
+      if (path === '/api/auth/logout' && req.method === 'POST') {
+        return handleLogout(req, authDeps, server.requestIP(req)?.address ?? 'unknown');
+      }
 
       // Action submission endpoint
       if (path === '/api/actions' && req.method === 'POST') {

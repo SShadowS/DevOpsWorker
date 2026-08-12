@@ -3,7 +3,7 @@ import { handleLogin, handleLogout, handleMe, handleAuthStatus, authenticate, or
 import { hashPassword } from '../../src/auth/local-provider.ts';
 import { LoginRateLimiter } from '../../src/auth/rate-limit.ts';
 import { SESSION_COOKIE } from '../../src/auth/cookies.ts';
-import { FakeUserStore, FakeSessionStore } from './fakes.ts';
+import { FakeUserStore, FakeSessionStore, FakeAuthEventStore } from './fakes.ts';
 
 function loginReq(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request('http://dash.local/api/auth/login', {
@@ -18,7 +18,7 @@ let deps: AuthDeps;
 beforeEach(async () => {
   const userStore = new FakeUserStore();
   await userStore.create({ email: 'op@x.y', displayName: 'Op', role: 'operator', passwordHash: await hashPassword('correct-horse-battery') });
-  deps = { userStore, sessionStore: new FakeSessionStore(), rateLimiter: new LoginRateLimiter(), secureCookies: false };
+  deps = { userStore, sessionStore: new FakeSessionStore(), rateLimiter: new LoginRateLimiter(), secureCookies: false, authEventStore: new FakeAuthEventStore() };
 });
 
 describe('handleLogin', () => {

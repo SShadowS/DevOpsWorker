@@ -1,5 +1,6 @@
 import type { IUserStore } from '../../src/auth/user-store.interface.ts';
 import type { ISessionStore } from '../../src/auth/session-store.interface.ts';
+import type { IAuthEventStore, AuthEventRow, AuthEventKind } from '../../src/auth/auth-event-store.interface.ts';
 import type { AuthUser, Role } from '../../src/auth/types.ts';
 
 export class FakeUserStore implements IUserStore {
@@ -74,5 +75,25 @@ export class FakeSessionStore implements ISessionStore {
     for (const [hash, row] of this.rows) {
       if (row.expiresAt.getTime() <= Date.now()) this.rows.delete(hash);
     }
+  }
+}
+
+export class FakeAuthEventStore implements IAuthEventStore {
+  rows: AuthEventRow[] = [];
+  private nextId = 1;
+
+  async write(event: { kind: AuthEventKind; email: string; ip: string | null; userId?: number | null }): Promise<void> {
+    this.rows.push({
+      id: this.nextId++,
+      at: new Date().toISOString(),
+      kind: event.kind,
+      email: event.email,
+      ip: event.ip,
+      userId: event.userId ?? null,
+    });
+  }
+
+  async list(limit: number): Promise<AuthEventRow[]> {
+    return this.rows.slice(-limit).reverse();
   }
 }
