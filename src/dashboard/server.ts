@@ -11,6 +11,8 @@ import type { IActionStore } from '../pipeline/action-store.interface.ts';
 import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
 import type { ILogSink } from '../pipeline/log-sink.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
+import type { IRegistryStore } from '../config/registry-store.interface.ts';
+import { refreshRegistryIfStale } from '../config/hydrate.ts';
 import { LogPoller } from './log-poller.ts';
 import { parseWindow, parsePopulation, getCostStats, getQualityStats, getIntegrityStats, getOperationalStats, getReviewValueStats, getDriftStats } from './stats.ts';
 import { buildConfigReport } from './config-report.ts';
@@ -67,7 +69,16 @@ export interface DashboardOptions {
   userStore: IUserStore;
   sessionStore: ISessionStore;
   authEventStore: IAuthEventStore;
+  registryStore: IRegistryStore;
 }
+
+/** How stale the repo/companion registry may be before a request or the
+ *  background PR-review poller refreshes it from the database — see
+ *  `readPRReviews`'s `buildPrWebUrl`, the one consumer of repo config on
+ *  this path. Same TTL as the webhook server, for the same reason: repo
+ *  registrations change rarely, so a per-request check (near-free once warm)
+ *  is enough to keep this current without a query on every call. */
+const REGISTRY_TTL_MS = 30_000;
 
 /** What `startDashboard` hands back: the underlying Bun server (its `.port` is
  *  the actually-bound port, useful with an ephemeral `port: 0` in tests) and a
@@ -81,7 +92,13 @@ export interface DashboardHandle {
 }
 
 export function startDashboard(options: DashboardOptions): DashboardHandle {
-  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql } = options;
+  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, registryStore } = options;
+
+  /** Best-effort registry refresh — a database blip must never fail the
+   *  caller (a request, or the background poller below). */
+  const refreshRegistry = () => refreshRegistryIfStale(registryStore, REGISTRY_TTL_MS).catch((err) => {
+    console.warn(`[dashboard] Warning: failed to refresh repo/companion registry from database: ${err instanceof Error ? err.message : err}`);
+  });
 
   const authDeps: AuthDeps = {
     userStore: options.userStore,
@@ -114,6 +131,7 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
   let lastPRReviewHash = '';
   const prReviewPollInterval = setInterval(async () => {
     try {
+      await refreshRegistry();
       const reviews = await readPRReviews(prReviewStore, actionStore);
       const hash = JSON.stringify(reviews.map(r => `${r.id}:${r.recommendation}:${r.pendingStatus}`));
       if (hash !== lastPRReviewHash) {
@@ -150,6 +168,12 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
     development: false, // never render a dev error page (stack trace, container paths) to an unauthenticated client
     idleTimeout: 255, // Max value — SSE connections are long-lived
     async fetch(req, server) {
+      // Keep the repo registry current so a repo registered, edited, or
+      // removed through the admin API is visible without restarting the
+      // dashboard (used by readPRReviews/readPRReviewDetail's PR web-URL
+      // building below).
+      await refreshRegistry();
+
       const url = new URL(req.url);
       const path = url.pathname;
 

@@ -1,9 +1,16 @@
 import { connectStores } from '../db/connect-stores.ts';
 import { findRepoByRepositoryId } from '../config/repos.ts';
+import { refreshRegistryIfStale } from '../config/hydrate.ts';
 import { validateSignature } from './validate.ts';
 import { parseWebhookPayload, type PRWebhookEvent } from './parse.ts';
 import type { IStateStore } from '../pipeline/state-store.interface.ts';
 import type { IWebhookEventStore } from '../pipeline/webhook-event-store.interface.ts';
+
+/** How stale the repo/companion registry may be before a request refreshes
+ *  it from the database. PR events are rare, so a per-request TTL check
+ *  (near-free once warm) keeps the webhook server current without a query
+ *  on every request. */
+const REGISTRY_TTL_MS = 30_000;
 
 export interface WebhookServerOptions {
   port: number;
@@ -60,7 +67,7 @@ export function buildReviewPrActionFeedback(event: PRWebhookEvent, repoKey: stri
 export async function startWebhookServer(options: WebhookServerOptions): Promise<void> {
   const { port, webhookSecret } = options;
 
-  const { stateStore, actionStore, runnerStatus, webhookEventStore } = await connectStores();
+  const { stateStore, actionStore, runnerStatus, webhookEventStore, registryStore } = await connectStores();
 
   // Cleanup old events on startup and every hour
   webhookEventStore.cleanupOldEvents().catch?.(() => {});
@@ -73,6 +80,16 @@ export async function startWebhookServer(options: WebhookServerOptions): Promise
   const server = Bun.serve({
     port,
     async fetch(req) {
+      // Keep the repo registry current so a repo registered, edited, or
+      // removed through the admin API takes effect without restarting this
+      // process. A database blip must not fail the request — fall back to
+      // the last-known registry and log.
+      try {
+        await refreshRegistryIfStale(registryStore, REGISTRY_TTL_MS);
+      } catch (err) {
+        log(`Warning: failed to refresh repo/companion registry from database: ${err instanceof Error ? err.message : err}`);
+      }
+
       const url = new URL(req.url);
 
       // Health check

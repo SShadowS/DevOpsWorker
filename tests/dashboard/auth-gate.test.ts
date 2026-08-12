@@ -8,6 +8,7 @@ import type { IActionStore, ActionRecord } from '../../src/pipeline/action-store
 import type { IRunnerStatus } from '../../src/pipeline/runner-status.interface.ts';
 import type { ILogSink } from '../../src/pipeline/log-sink.interface.ts';
 import type { IPRReviewStore, PRReviewRow } from '../../src/pipeline/pr-review-store.interface.ts';
+import { FakeRegistryStore } from '../config/fixtures/fake-registry-store.ts';
 import type postgres from 'postgres';
 
 // ---------------------------------------------------------------------------
@@ -93,6 +94,7 @@ describe('dashboard auth gate (real HTTP round trip)', () => {
       userStore,
       sessionStore,
       authEventStore: new FakeAuthEventStore(),
+      registryStore: new FakeRegistryStore(),
     });
     base = `http://localhost:${handle.server.port}`;
 

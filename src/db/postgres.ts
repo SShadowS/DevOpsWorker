@@ -368,17 +368,32 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log (at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log (entity_type, entity_key);
 `;
 
+export interface ConnectDatabaseOptions {
+  /** Max connection attempts before giving up. Default 10 — generous enough
+   *  for a pipeline container or compose service racing Postgres's own
+   *  startup. A caller for whom the database is optional (e.g. the CLI's
+   *  startup registry hydration) should pass a small number instead: each
+   *  failed attempt beyond the first sleeps `retryDelayMs` via `setTimeout`
+   *  before retrying, and once the caller stops awaiting this promise (a
+   *  timeout, say) that pending timer keeps the process alive regardless —
+   *  there is no cancellation, so the only way to bound the wait is to bound
+   *  the retry count itself. */
+  maxRetries?: number;
+  /** Delay between attempts, in ms. Default 2000. */
+  retryDelayMs?: number;
+}
+
 /**
  * Connect to PostgreSQL and initialize the schema.
  * Returns a singleton — multiple calls return the same connection.
- * Retries connection up to 10 times with 2s backoff (for pipeline containers
- * that start before PostgreSQL is ready).
+ * Retries connection up to `maxRetries` times with `retryDelayMs` backoff
+ * (for pipeline containers that start before PostgreSQL is ready).
  */
-export async function connectDatabase(url: string): Promise<postgres.Sql> {
+export async function connectDatabase(url: string, options: ConnectDatabaseOptions = {}): Promise<postgres.Sql> {
   if (_sql) return _sql;
 
-  const maxRetries = 10;
-  const retryDelayMs = 2000;
+  const maxRetries = options.maxRetries ?? 10;
+  const retryDelayMs = options.retryDelayMs ?? 2000;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let sql: postgres.Sql | undefined;

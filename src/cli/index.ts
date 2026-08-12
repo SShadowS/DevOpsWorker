@@ -20,11 +20,30 @@ async function main() {
   // Load the private overlay (if any) and populate the repo/companion registries
   // before any command runs. Public core ships empty registries; the overlay
   // supplies the real ones. Idempotent + cheap (manifest load is memoised).
-  const { loadManifest, applyOverlayRegistries } = await import('../overlay/index.ts');
+  const { loadManifest } = await import('../overlay/index.ts');
   const overlay = await loadManifest();
-  applyOverlayRegistries(overlay);
   const repoCount = Object.keys(overlay.repos ?? {}).length;
   if (repoCount > 0) console.log(`[overlay] registered ${repoCount} repo(s) from private overlay`);
+
+  // Then let the database win over the manifest wherever it has its own
+  // data — every process (watcher, dashboard, webhook-server, and every
+  // spawned container, which re-enters this same main()) reads the registry
+  // this populates. Never throws: a database problem here must not block a
+  // command that doesn't even need the database (--help, diagnose).
+  //
+  // Deliberately a SMALL retry budget, unlike the 10-attempt/2s-backoff
+  // default connectStores() otherwise gives every real DB-dependent command:
+  // this connection is optional (a missing/unreachable database just means
+  // "run on the manifest alone"), so a command with DATABASE_URL pointing at
+  // nothing running should fail this fast, not spend ~20s finding that out
+  // before it even gets to work that doesn't need the database at all. Any
+  // command that DOES need the database still gets the full retry budget —
+  // this only bounds the extra, optional hydration step added here.
+  const { hydrateStartupRegistry } = await import('../config/hydrate-startup.ts');
+  const { connectStores } = await import('../db/connect-stores.ts');
+  await hydrateStartupRegistry(overlay, {
+    connectStores: () => connectStores({ maxRetries: 2, retryDelayMs: 500 }),
+  });
 
   switch (command) {
     case 'run': {

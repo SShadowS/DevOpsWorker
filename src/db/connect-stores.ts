@@ -1,4 +1,4 @@
-import { connectDatabase } from './postgres.ts';
+import { connectDatabase, type ConnectDatabaseOptions } from './postgres.ts';
 import { PgStateStore } from './pg-state-store.ts';
 import { PgLogSink } from './pg-log-sink.ts';
 import { PgActionStore } from './pg-action-store.ts';
@@ -13,10 +13,10 @@ import { PgRegistryStore } from './pg-registry-store.ts';
 import { PgSettingsStore } from './pg-settings-store.ts';
 import { PgAuditStore } from './pg-audit-store.ts';
 
-export async function connectStores() {
+export async function connectStores(options: ConnectDatabaseOptions = {}) {
   const url = process.env['DATABASE_URL'];
   if (!url) throw new Error('DATABASE_URL environment variable is required');
-  const sql = await connectDatabase(url);
+  const sql = await connectDatabase(url, options);
   return {
     sql,
     stateStore: new PgStateStore(sql),

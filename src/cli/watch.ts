@@ -546,12 +546,12 @@ export async function watch(args: string[]): Promise<void> {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  // Snapshot only — this runs before connectStores() below, so it reflects
-  // whatever the overlay manifest registered at process start, not the
-  // database. The per-tick refresh in the poll loop (hydrateRegistryFromDb)
-  // keeps the live registry current from the first tick onward; making this
-  // one-time startup log itself DB-accurate is deferred to the task that adds
-  // startup hydration for every process, not just the watcher's poll loop.
+  // This already reflects the database, not just the manifest: every CLI
+  // command — watch included — dispatches through src/cli/index.ts's main(),
+  // which hydrates the live registry from the database (falling back to the
+  // manifest alone, with a warning, if the database is unreachable) before
+  // any command-specific code runs. The per-tick refresh below
+  // (hydrateRegistryFromDb) then keeps it current for the rest of the run.
   const activeAreas = getActiveAreaPaths();
   log(`Watch started (polling every ${intervalMinutes} min, concurrency: ${maxConcurrency})`);
   log(`Active repos: ${activeAreas.length > 0 ? activeAreas.join(', ') : 'NONE — no repos are active!'}`);
