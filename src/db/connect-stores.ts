@@ -9,6 +9,9 @@ import { PgPrReviewLogSink } from './pg-pr-review-log-sink.ts';
 import { PgUserStore } from './pg-user-store.ts';
 import { PgSessionStore } from './pg-session-store.ts';
 import { PgAuthEventStore } from './pg-auth-event-store.ts';
+import { PgRegistryStore } from './pg-registry-store.ts';
+import { PgSettingsStore } from './pg-settings-store.ts';
+import { PgAuditStore } from './pg-audit-store.ts';
 
 export async function connectStores() {
   const url = process.env['DATABASE_URL'];
@@ -24,6 +27,9 @@ export async function connectStores() {
     userStore: new PgUserStore(sql),
     sessionStore: new PgSessionStore(sql),
     authEventStore: new PgAuthEventStore(sql),
+    registryStore: new PgRegistryStore(sql),
+    settingsStore: new PgSettingsStore(sql),
+    auditStore: new PgAuditStore(sql),
     logSink: (workItemId: number) => new PgLogSink(sql, workItemId),
     prReviewLogSink: (prId: number, reviewRunId: string) => new PgPrReviewLogSink(sql, prId, reviewRunId),
   };
