@@ -7,6 +7,7 @@ import { loadConfig } from './config.ts';
 import { assertRealAdoConfig } from '../sdk/config-sanity.ts';
 import { queryWorkItems, addWorkItemTags, removeWorkItemTags, findRerunCommandInComments, findRerunCommandInPRComments, getPullRequestStatus, fetchTestCaseFailures } from '../sdk/azure-devops-client.ts';
 import { buildAreaPathFilter, getActiveAreaPaths } from '../config/repos.ts';
+import { hydrateRegistryFromDb } from '../config/hydrate.ts';
 import { removeWorkspaceVolume } from '../sdk/docker.ts';
 import type { PipelineConfig, PipelineState, TestCaseFailure } from '../types/pipeline.types.ts';
 import { notifyDiscord } from '../sdk/discord-notify.ts';
@@ -59,45 +60,57 @@ const DEFAULT_IMAGE_NAME = process.env['DO_PIPELINE_IMAGE'] ?? 'devopsworker:lat
 
 // ---------------------------------------------------------------------------
 // WIQL queries — area path filter restricts to active repos only
+//
+// Built as functions, not module-load constants: the registry can change
+// mid-run (a repo added, edited, or removed via the database — see
+// hydrateRegistryFromDb below), so the filter must be read from the live
+// registry on every call. Exported for tests; every other consumer should
+// call these rather than caching the result.
 // ---------------------------------------------------------------------------
 
-const AREA_FILTER = buildAreaPathFilter();
-
-const WIQL_ANALYSE = `
+export function wiqlAnalyse(): string {
+  return `
 SELECT [System.Id] FROM WorkItems
 WHERE [System.Tags] CONTAINS 'analyse'
   AND [System.State] <> 'Closed'
   AND [System.State] <> 'Removed'
-  AND (${AREA_FILTER})
+  AND (${buildAreaPathFilter()})
 `.trim();
+}
 
-const WIQL_PLAN_APPROVED = `
+export function wiqlPlanApproved(): string {
+  return `
 SELECT [System.Id] FROM WorkItems
 WHERE [System.Tags] CONTAINS 'plan-approved'
   AND [System.State] <> 'Closed'
   AND [System.State] <> 'Removed'
-  AND (${AREA_FILTER})
+  AND (${buildAreaPathFilter()})
 `.trim();
+}
 
 // The explicit "resume this run" signal. Named `continue` to match the vocabulary
 // that already exists everywhere else — the dashboard button, the `continue`
 // action type, and `pipeline -- continue`. Unlike plan-approved's error-resume,
 // this one overrides `need-input` (see continueTagged in work-detector.ts).
-const WIQL_CONTINUE = `
+export function wiqlContinue(): string {
+  return `
 SELECT [System.Id] FROM WorkItems
 WHERE [System.Tags] CONTAINS 'continue'
   AND [System.State] <> 'Closed'
   AND [System.State] <> 'Removed'
-  AND (${AREA_FILTER})
+  AND (${buildAreaPathFilter()})
 `.trim();
+}
 
-const WIQL_NEED_INPUT = `
+export function wiqlNeedInput(): string {
+  return `
 SELECT [System.Id] FROM WorkItems
 WHERE [System.Tags] CONTAINS 'need-input'
   AND [System.State] <> 'Closed'
   AND [System.State] <> 'Removed'
-  AND (${AREA_FILTER})
+  AND (${buildAreaPathFilter()})
 `.trim();
+}
 
 // ---------------------------------------------------------------------------
 // Logging — log/logError/logWI/logWIError/workItemUrl/colorForWI/releaseColor
@@ -167,13 +180,13 @@ async function gatherWorkDetectionInputs(
 ): Promise<{ detection: WorkDetectionInputs; reprovisionCtx: ReprovisionContext }> {
   // Pre-fetch need-input tagged items — used to prevent auto-retry loops.
   const needInputIds = new Set(
-    await queryWorkItems(WIQL_NEED_INPUT, config).catch(() => [] as number[]),
+    await queryWorkItems(wiqlNeedInput(), config).catch(() => [] as number[]),
   );
   // WIQL order is load-bearing for the fetch-ordinal tests: need-input, analyse,
   // plan-approved, continue.
-  const analyseIds = await queryWorkItems(WIQL_ANALYSE, config);
-  const planApprovedIds = await queryWorkItems(WIQL_PLAN_APPROVED, config);
-  const continueIds = await queryWorkItems(WIQL_CONTINUE, config).catch(() => [] as number[]);
+  const analyseIds = await queryWorkItems(wiqlAnalyse(), config);
+  const planApprovedIds = await queryWorkItems(wiqlPlanApproved(), config);
+  const continueIds = await queryWorkItems(wiqlContinue(), config).catch(() => [] as number[]);
 
   const planApproved: PlanApprovedItem[] = [];
   for (const id of planApprovedIds) {
@@ -350,7 +363,7 @@ async function findOrphanedSessions(
 ): Promise<number[]> {
   // Find items tagged need-input — these should NOT be auto-resumed
   const needInputIds = new Set(
-    await queryWorkItems(WIQL_NEED_INPUT, config).catch(() => [] as number[]),
+    await queryWorkItems(wiqlNeedInput(), config).catch(() => [] as number[]),
   );
 
   const allIds = await stateStore.listAll();
@@ -533,6 +546,12 @@ export async function watch(args: string[]): Promise<void> {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
+  // Snapshot only — this runs before connectStores() below, so it reflects
+  // whatever the overlay manifest registered at process start, not the
+  // database. The per-tick refresh in the poll loop (hydrateRegistryFromDb)
+  // keeps the live registry current from the first tick onward; making this
+  // one-time startup log itself DB-accurate is deferred to the task that adds
+  // startup hydration for every process, not just the watcher's poll loop.
   const activeAreas = getActiveAreaPaths();
   log(`Watch started (polling every ${intervalMinutes} min, concurrency: ${maxConcurrency})`);
   log(`Active repos: ${activeAreas.length > 0 ? activeAreas.join(', ') : 'NONE — no repos are active!'}`);
@@ -563,7 +582,7 @@ export async function watch(args: string[]): Promise<void> {
   // Fail loud if AZURE_DEVOPS_* env vars weren't supplied — otherwise the watcher
   // polls 'your-org'/'Your Project' and every WIQL query 404s silently.
   assertRealAdoConfig(pollingConfig, 'watcher');
-  const { stateStore, actionStore, runnerStatus, prReviewStore } = await connectStores();
+  const { stateStore, actionStore, runnerStatus, prReviewStore, registryStore } = await connectStores();
 
   // Independent heartbeat — runs every 30s regardless of poll loop or container blocking
   const heartbeatInterval = setInterval(async () => {
@@ -610,7 +629,26 @@ export async function watch(args: string[]): Promise<void> {
     }
   }
 
+  let lastLoggedActiveAreas: string | undefined;
+
   while (!signal.aborted) {
+    // Refresh the repo/companion registry from the database every tick, so a
+    // repo added, edited, or removed through the admin API is visible to the
+    // very next poll without restarting the watcher. A database blip here must
+    // not kill the loop — log and keep polling with the last-known registry.
+    try {
+      await hydrateRegistryFromDb(registryStore);
+    } catch (err) {
+      logError('Warning: failed to refresh repo/companion registry from database', err);
+    }
+    // Only log when the active-repo set actually changed since the last tick,
+    // so a healthy database doesn't repeat this line on every poll.
+    const activeAreasNow = getActiveAreaPaths().join(', ') || 'NONE — no repos are active!';
+    if (activeAreasNow !== lastLoggedActiveAreas) {
+      log(`Active repos: ${activeAreasNow}`);
+      lastLoggedActiveAreas = activeAreasNow;
+    }
+
     // Reap settled promises
     await reapSettled(running);
 
