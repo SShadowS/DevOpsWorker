@@ -66,6 +66,29 @@ describe('containsDangerousKey', () => {
     expect(containsDangerousKey('a string')).toBe(false);
     expect(containsDangerousKey(42)).toBe(false);
   });
+
+  // The deepest a legitimate body ever nests is ~3-4 levels (repo config's
+  // `envProvision.wizard.instructions`, or `companions.<key>.branch`; a
+  // settings PUT's `{ value: ... }` wrapper adds one more). This is well
+  // under the 20-level bound with room to spare, proving the bound doesn't
+  // false-positive on real, legitimately-shaped configuration.
+  test('accepts a moderately nested object well under the depth limit', () => {
+    const nested = { a: { b: { c: { d: { e: 1 } } } } }; // 5 levels
+    expect(containsDangerousKey(nested)).toBe(false);
+  });
+
+  // Regression for the depth-bound fix: pre-fix, this walk was unbounded and
+  // recursed once per nesting level — a body nested tens of thousands of
+  // levels deep threw a real RangeError from stack exhaustion (demonstrated
+  // by the reviewer at ~50,000). Built via an iterative loop, not recursion,
+  // so constructing the fixture itself never risks the stack; only walking
+  // it with the (bounded) function under test does.
+  test('a body nested far past the limit is rejected rather than exhausting the stack', () => {
+    let deep: unknown = { leaf: true };
+    for (let i = 0; i < 100_000; i++) deep = { child: deep };
+    expect(() => containsDangerousKey(deep)).not.toThrow();
+    expect(containsDangerousKey(deep)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -405,6 +428,42 @@ describe.skipIf(!url)('admin API (real server + real Postgres)', () => {
       expect(getRes.status).toBe(404); // no row was ever created
       expect(await auditRowsFor('admintest-proto-repo')).toEqual([]);
       expect(Object.getPrototypeOf({})).toBe(protoBefore); // nothing in this process was polluted
+    });
+
+    // Regression for the depth-bound fix: a body nested well past
+    // MAX_BODY_DEPTH must still get a clean 400 through the real HTTP path
+    // — not a 500, and not a thrown error the server has to catch as one.
+    // 200 levels is comfortably past the 20-level bound without stressing
+    // JSON.stringify/parse's own limits (unlike the pure test above, this
+    // body is serialized to text and re-parsed by the real server).
+    test('a body nested past the depth limit is rejected with 400, not 500', async () => {
+      let deep: unknown = { branch: 'x' };
+      for (let i = 0; i < 200; i++) deep = { nested: deep };
+      const body = { ...mkRepo({ repoKey: 'admintest-deep-repo' }), companions: { overDepth: deep } };
+
+      const res = await fetch(`${base}/api/admin/repos/admintest-deep-repo`, asAdmin(putJson(body)));
+      expect(res.status).toBe(400);
+
+      const getRes = await fetch(`${base}/api/admin/repos/admintest-deep-repo`, asAdmin());
+      expect(getRes.status).toBe(404); // no row was created
+    });
+
+    // Regression for the depth-bound fix, the other direction: a real,
+    // legitimately-shaped repo config with an actual companions map must
+    // NOT be mistaken for exceeding the depth limit.
+    test('a legitimately nested companions map still succeeds', async () => {
+      const nestedKey = 'admintest-nested-companions-repo';
+      const body = mkRepo({ repoKey: nestedKey });
+      body.companions = { BC: { branch: 'w1-28', readOnly: true }, Other: { readOnly: false } };
+
+      const res = await fetch(`${base}/api/admin/repos/${nestedKey}`, asAdmin(putJson(body)));
+      expect(res.status).toBe(200);
+
+      const getRes = await fetch(`${base}/api/admin/repos/${nestedKey}`, asAdmin());
+      expect(getRes.status).toBe(200);
+      expect(await getRes.json()).toEqual(body);
+
+      await fetch(`${base}/api/admin/repos/${nestedKey}`, asAdmin({ method: 'DELETE' }));
     });
   });
 

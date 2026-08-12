@@ -79,15 +79,26 @@ function dangerousKeyResponse(key: string): Response {
  * through, so this walks the RAW parsed body — before it ever reaches
  * `safeParse` — and rejects outright rather than trusting zod to keep
  * dropping it.
+ *
+ * Bounded by `MAX_BODY_DEPTH`: this now runs unconditionally on every
+ * admin PUT body before any schema check, so an attacker-controlled body
+ * nested far deeper than any real config could exhaust the call stack here
+ * — turning what `safeParse`/`validateSetting` would otherwise reject
+ * cheaply (most schema mismatches don't recurse into the value at all) into
+ * a `RangeError`. Treating "too deep to be legitimate" as itself a rejection
+ * is simpler and cheaper than making the walk iterative.
  */
-export function containsDangerousKey(value: unknown): boolean {
+const MAX_BODY_DEPTH = 20;
+
+export function containsDangerousKey(value: unknown, depth = 0): boolean {
+  if (depth > MAX_BODY_DEPTH) return true; // too deep to be legitimate config — reject rather than recurse further
   if (Array.isArray(value)) {
-    return value.some((item) => containsDangerousKey(item));
+    return value.some((item) => containsDangerousKey(item, depth + 1));
   }
   if (value !== null && typeof value === 'object') {
     for (const key of Object.keys(value)) {
       if (isDangerousKey(key)) return true;
-      if (containsDangerousKey((value as Record<string, unknown>)[key])) return true;
+      if (containsDangerousKey((value as Record<string, unknown>)[key], depth + 1)) return true;
     }
   }
   return false;
