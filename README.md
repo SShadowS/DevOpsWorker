@@ -41,10 +41,13 @@ CLAUDE_CODE_OAUTH_TOKEN=your-token
 DATABASE_URL=postgres://pipeline:pipeline@postgres:5432/pipeline
 EOF
 
-# Start the full stack (PostgreSQL + watcher + dashboard + webhook server)
+# Start the full stack (PostgreSQL + watcher + dashboard + webhook server + Caddy)
 docker compose up -d
 
-# Dashboard: http://localhost:3000
+# Dashboard: https://dashboard.localhost (or your DASHBOARD_HOSTNAME — see .env)
+#   Caddy terminates TLS with its own internal certificate authority, so the
+#   first visit from any browser shows a certificate warning until that root
+#   is trusted once — see "Docker Compose" below.
 # Webhook server: http://localhost:3001
 ```
 
@@ -278,14 +281,15 @@ private/           # Gitignored overlay (your repos, prompts, env backend); abse
 
 ## Docker Compose
 
-The full stack runs as four services on a shared `pipeline-net` Docker network:
+The full stack runs as five services on a shared `pipeline-net` Docker network:
 
 | Service | Port | Description |
 |---------|------|-------------|
 | `postgres` | 5432 | PostgreSQL 17 — shared state store |
 | `watcher` | — | Polls Azure DevOps, spawns pipeline containers |
-| `dashboard` | 3000 | Web UI for monitoring and actions; mounts the repo's `.git` read-only to resolve `HEAD` for the drift panel |
+| `dashboard` | — | Web UI for monitoring and actions; mounts the repo's `.git` read-only to resolve `HEAD` for the drift panel. No port is published — only `caddy` can reach it |
 | `webhook-server` | 3001 | Receives Azure DevOps PR webhook events (host 3001 → container `WEBHOOK_PORT` 3002) |
+| `caddy` | 443 | Reverse proxy — terminates HTTPS for the dashboard using its own internal certificate authority (see below) |
 
 ```bash
 docker compose up -d              # Start everything
@@ -298,13 +302,22 @@ Pipeline containers are spawned by the watcher onto `pipeline-net`, giving them 
 
 ## Dashboard
 
-Three tabs at `http://localhost:3000`:
+Reachable at `https://dashboard.localhost` (or your `DASHBOARD_HOSTNAME` — see `.env`), behind
+Caddy's TLS termination. Caddy signs its certificate with its own internal certificate
+authority rather than one browsers already trust, so the first visit from any machine shows a
+warning until that root is trusted once — extract it with
+`docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt` and import it into
+your OS or browser's trusted root store. That root lives in the `caddy_data` volume; losing the
+volume mints a new one and every client has to re-trust it.
+
+Every operator gets three tabs; admins get a fourth:
 
 | Tab | Shows |
 |-----|-------|
 | **Sessions** | Live pipeline runs — stage progression, logs, queued actions, telemetry |
 | **PR Reviews** | Automated review history, findings, and per-review detail |
 | **Stats & Config** | Is anything broken right now, what settings are actually in effect, what the numbers say |
+| **Admin** (admins only) | Register, edit, or remove repos; create users, change roles, disable accounts, reset passwords. Companions, settings, and the audit log aren't in the UI yet — those still need the CLI or direct database access |
 
 ### Stats & Config
 

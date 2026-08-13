@@ -5,7 +5,10 @@ Real-time web UI for monitoring pipeline sessions. Watches `.pipeline/state/` fo
 ## Usage
 
 ```bash
-bun run dashboard                          # http://localhost:3000
+bun run dashboard                          # http://localhost:3000 — bare local run, no TLS.
+                                            #   The Docker Compose stack instead fronts this
+                                            #   with Caddy and is HTTPS-only; see the root
+                                            #   README's "Dashboard" section.
 bun run dashboard -- --port 8080           # custom port
 bun run dashboard -- --state-dir /abs/path # custom state directory
 ```
