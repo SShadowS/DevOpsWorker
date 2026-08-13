@@ -202,11 +202,18 @@ export function App() {
           <div id="panel-stats" role="tabpanel" aria-labelledby="tab-stats">
             <StatsView />
           </div>
-        ) : (
+        ) : activeView.value === 'admin' && currentUser.value?.role === 'admin' ? (
+          // Defence in depth, not the control: the server rejects every
+          // /api/admin/* request from a non-admin regardless (see the tab
+          // button's own comment above). This just stops the panel from
+          // rendering admin content at all if activeView is ever 'admin'
+          // for a non-admin session — e.g. a role change mid-session, or a
+          // future caller that sets activeView without going through the
+          // (already role-gated) tab button.
           <div id="panel-admin" role="tabpanel" aria-labelledby="tab-admin">
             <AdminView />
           </div>
-        )}
+        ) : null}
       </main>
       <LogViewer />
     </div>

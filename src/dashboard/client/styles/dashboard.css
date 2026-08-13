@@ -2852,3 +2852,132 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   cursor: pointer;
 }
 .user-chip__logout:hover { color: var(--color-text-primary); border-color: var(--color-text-muted); }
+
+/* ============================================================
+   Repos admin screen (Task 5) — reuses .stats-slot (its loading/error/
+   empty/ready coloured left edge) for the list wrapper and .config-table
+   for the listing itself, so only the editor form and the delete
+   confirmation are genuinely new rules here.
+   ============================================================ */
+
+.admin-repos__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-sm);
+}
+
+.config-table__actions { display: flex; gap: var(--space-sm); }
+
+/* Delete confirmation — same red-tinted look as .env-panel__error (exact
+   same rgba values), because this is the same "something destructive"
+   register, just asked ahead of the action instead of reported after it. */
+.repo-delete-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-md);
+}
+.repo-delete-confirm p { margin: 0; color: var(--color-text-primary); font-size: 0.85rem; }
+.repo-delete-confirm__actions { display: flex; gap: var(--space-sm); align-items: center; }
+
+/* The create/edit form. */
+.repo-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: var(--space-md);
+}
+.repo-form h3 { margin: 0; font-size: 1rem; color: var(--color-text-primary); }
+
+.repo-form__section {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  border: 1px solid var(--color-border-muted);
+  border-radius: 4px;
+  padding: var(--space-md);
+}
+.repo-form__section legend {
+  padding: 0 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.repo-form__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-md);
+}
+
+.repo-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.repo-form__field-label { font-size: 0.8rem; color: var(--color-text-secondary); }
+.repo-form__hint { font-size: 0.75rem; color: var(--color-text-secondary); }
+
+.repo-form__checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+.repo-form__checkbox {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+}
+
+.repo-form__textarea {
+  padding: var(--space-sm);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  resize: vertical;
+}
+.repo-form__textarea:focus { border-color: var(--color-info); outline: none; }
+
+.repo-form__banner {
+  margin: 0;
+  color: var(--color-error-text);
+  font-size: 0.85rem;
+}
+/* Convention decided for this plan (Task 3): the admin API reports
+   validation failures as a flat, unkeyed list, so this renders as a LIST of
+   "path — message" lines under the submit button rather than per-field
+   annotations, which would be guesswork the moment a schema nests
+   differently. `display:flex` on a <ul> suppresses list markers per spec
+   (a flex item's used display is never list-item) — `list-style:none` is
+   written anyway so that's a deliberate choice here, not an accident. */
+.repo-form__errors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-error-text);
+  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.repo-form__actions { display: flex; gap: var(--space-sm); }
+
+@media (max-width: 767px) {
+  .repo-form__grid { grid-template-columns: 1fr; }
+}

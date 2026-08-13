@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals';
+import { AdminRepos } from './admin-repos.tsx';
 
 type AdminSection = 'repos' | 'users';
 
@@ -43,7 +44,7 @@ export function AdminView() {
       </div>
       {section === 'repos' ? (
         <div id="admin-panel-repos" role="tabpanel" aria-labelledby="admin-tab-repos">
-          <p class="empty-state">Repo management isn't built yet. It's coming in a later update.</p>
+          <AdminRepos />
         </div>
       ) : (
         <div id="admin-panel-users" role="tabpanel" aria-labelledby="admin-tab-users">
