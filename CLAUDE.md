@@ -84,7 +84,7 @@ All pipeline state, actions, logs, and webhook events are stored in PostgreSQL. 
 
 **Starting the stack:**
 ```bash
-docker compose up -d          # Starts PostgreSQL + watcher + dashboard + webhook-server
+docker compose up -d          # Starts PostgreSQL + watcher + dashboard + webhook-server + caddy
 docker compose up -d postgres # PostgreSQL only (for local development)
 ```
 
