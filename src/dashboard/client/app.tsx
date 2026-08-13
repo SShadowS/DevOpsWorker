@@ -7,6 +7,7 @@ import { MobileSessionDetail } from './components/mobile-session-detail.tsx';
 import { LogViewer } from './components/log-viewer.tsx';
 import { PRReviewList } from './components/pr-review-list.tsx';
 import { StatsView } from './components/stats-view.tsx';
+import { AdminView } from './components/admin-view.tsx';
 import { forcePull } from './sse.ts';
 import { logout } from './auth-client.ts';
 
@@ -22,7 +23,7 @@ async function handleForcePull() {
     pulling.value = false;
   }
 }
-const activeView = signal<'sessions' | 'pr-reviews' | 'stats'>('sessions');
+const activeView = signal<'sessions' | 'pr-reviews' | 'stats' | 'admin'>('sessions');
 
 async function updateConcurrency() {
   const val = parseInt(concurrencyInput.value, 10);
@@ -149,6 +150,24 @@ export function App() {
           >
             Stats & Config
           </button>
+          {/* Hiding this tab for non-admins is cosmetic, not the control: the
+              server rejects every /api/admin/* request from a non-admin
+              (server.ts's requiredAccess() gate) regardless of what this
+              button does. This just keeps an operator from opening a screen
+              every request from which would come back 403. */}
+          {currentUser.value?.role === 'admin' && (
+            <button
+              type="button"
+              role="tab"
+              id="tab-admin"
+              aria-selected={activeView.value === 'admin'}
+              aria-controls="panel-admin"
+              class={`view-tabs__tab ${activeView.value === 'admin' ? 'view-tabs__tab--active' : ''}`}
+              onClick={() => { activeView.value = 'admin'; }}
+            >
+              Admin
+            </button>
+          )}
         </div>
         {activeView.value === 'sessions' ? (
           <div id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions">
@@ -179,9 +198,13 @@ export function App() {
           <div id="panel-pr-reviews" role="tabpanel" aria-labelledby="tab-pr-reviews">
             <PRReviewList />
           </div>
-        ) : (
+        ) : activeView.value === 'stats' ? (
           <div id="panel-stats" role="tabpanel" aria-labelledby="tab-stats">
             <StatsView />
+          </div>
+        ) : (
+          <div id="panel-admin" role="tabpanel" aria-labelledby="tab-admin">
+            <AdminView />
           </div>
         )}
       </main>
