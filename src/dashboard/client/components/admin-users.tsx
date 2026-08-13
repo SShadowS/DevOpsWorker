@@ -91,7 +91,40 @@ export function buildCreateUserPayload(form: CreateUserFormState): { ok: true; p
   };
 }
 
-const showCreateForm = signal(false);
+// ---------------------------------------------------------------------------
+// Panel state — which secondary panel (the create-user form, or a row's
+// password-reset form) is open right now. Mirrors admin-repos.tsx's `panel`
+// signal, and for the same reason: exactly one of these is ever open at a
+// time, and routing every opener through `reduceUserPanel` means "open B"
+// also closes A — there is no separate clear-call to remember at each call
+// site, and nothing for a third panel added later to forget.
+// ---------------------------------------------------------------------------
+
+export type UserPanel =
+  | { kind: 'closed' }
+  | { kind: 'create' }
+  | { kind: 'passwordReset'; email: string };
+
+export type UserPanelAction =
+  | { type: 'openCreate' }
+  | { type: 'openPasswordReset'; email: string }
+  | { type: 'close' };
+
+/** Pure transition — same shape and reasoning as `reduceRepoPanel` in
+ *  admin-repos.tsx: every branch fully replaces the panel, so there is no
+ *  field left over for a previous panel to linger in. */
+export function reduceUserPanel(_current: UserPanel, action: UserPanelAction): UserPanel {
+  switch (action.type) {
+    case 'openCreate':
+      return { kind: 'create' };
+    case 'openPasswordReset':
+      return { kind: 'passwordReset', email: action.email };
+    case 'close':
+      return { kind: 'closed' };
+  }
+}
+
+const panel = signal<UserPanel>({ kind: 'closed' });
 const createForm = signal<CreateUserFormState>(emptyCreateUserFormState());
 const createFormErrors = signal<AdminFieldError[]>([]);
 const createFormMessage = signal<string | null>(null);
@@ -99,13 +132,13 @@ const creating = signal(false);
 
 // ---------------------------------------------------------------------------
 // Row-level action state — role toggle, disable toggle, password reset. One
-// busy/error slot each is enough: an admin acts on one row at a time.
+// busy/error slot each is enough: an admin acts on one row at a time. Which
+// row's password-reset form is open lives in `panel` above.
 // ---------------------------------------------------------------------------
 
 const busyEmail = signal<string | null>(null);
 const rowActionError = signal<{ email: string; message: string } | null>(null);
 
-const passwordResetTarget = signal<string | null>(null); // email of the row with its reset panel open
 const passwordResetValue = signal('');
 const passwordResetError = signal<string | null>(null);
 const resettingPassword = signal(false);
@@ -182,14 +215,14 @@ async function loadUsers(): Promise<void> {
 }
 
 function openCreateForm(): void {
-  showCreateForm.value = true;
+  panel.value = reduceUserPanel(panel.value, { type: 'openCreate' });
   createForm.value = emptyCreateUserFormState();
   createFormErrors.value = [];
   createFormMessage.value = null;
 }
 
 function closeCreateForm(): void {
-  showCreateForm.value = false;
+  panel.value = reduceUserPanel(panel.value, { type: 'close' });
 }
 
 async function submitCreate(): Promise<void> {
@@ -215,7 +248,7 @@ async function submitCreate(): Promise<void> {
       createFormErrors.value = result.errors;
       return;
     }
-    showCreateForm.value = false;
+    panel.value = reduceUserPanel(panel.value, { type: 'close' });
     await loadUsers();
   } finally {
     creating.value = false;
@@ -263,13 +296,13 @@ async function toggleDisabled(target: AuthUser): Promise<void> {
 }
 
 function openPasswordReset(email: string): void {
-  passwordResetTarget.value = email;
+  panel.value = reduceUserPanel(panel.value, { type: 'openPasswordReset', email });
   passwordResetValue.value = '';
   passwordResetError.value = null;
 }
 
 function cancelPasswordReset(): void {
-  passwordResetTarget.value = null;
+  panel.value = reduceUserPanel(panel.value, { type: 'close' });
   passwordResetValue.value = '';
   passwordResetError.value = null;
 }
@@ -473,8 +506,10 @@ function UserListPanel() {
         <span class="stats-slot__title">Users</span>
       </div>
 
-      {passwordResetTarget.value && state.status === 'ready' && (() => {
-        const target = state.users.find((u) => u.email === passwordResetTarget.value);
+      {(() => {
+        const p = panel.value;
+        if (p.kind !== 'passwordReset' || state.status !== 'ready') return null;
+        const target = state.users.find((u) => u.email === p.email);
         return target ? <PasswordResetPanel target={target} /> : null;
       })()}
 
@@ -527,7 +562,7 @@ export function AdminUsers() {
 
   return (
     <div class="admin-users">
-      {showCreateForm.value ? (
+      {panel.value.kind === 'create' ? (
         <CreateUserForm />
       ) : (
         <>

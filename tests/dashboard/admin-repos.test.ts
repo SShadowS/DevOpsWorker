@@ -8,8 +8,9 @@ import {
   describeRepoRow,
   listRepoRows,
   buildDeleteConfirmationText,
+  reduceRepoPanel,
 } from '../../src/dashboard/client/components/admin-repos.tsx';
-import type { RepoFormState } from '../../src/dashboard/client/components/admin-repos.tsx';
+import type { RepoFormState, RepoPanel } from '../../src/dashboard/client/components/admin-repos.tsx';
 import type { RepoConfig } from '../../src/config/repo-config.ts';
 import type { AdminFieldError } from '../../src/dashboard/client/admin-fetch.ts';
 import { mkRepo } from '../config/fixtures/fake-registry-store.ts';
@@ -310,5 +311,53 @@ describe('buildDeleteConfirmationText', () => {
     expect(text).toContain('fake-repo'); // the key
     expect(text).toContain('watcher');
     expect(text).toContain('next poll');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reduceRepoPanel — the single source of truth for which secondary panel
+// (the create/edit form, or a row's delete confirmation) is open.
+//
+// This closes a real gap: before this reducer existed, "editor open" and
+// "delete confirmation open" were two independent signals, and opening one
+// never cleared the other. Confirmed directly against the shipped code
+// before this fix: calling requestDelete('repo-a') then openEdit('repo-b',
+// ...) left confirmingDeleteKey.value at 'repo-a', so closing the editor
+// afterwards surfaced repo-a's stale delete confirmation again. Every test
+// below asserts the fix's actual guarantee — that opening any panel leaves
+// no trace of whatever was open before — regardless of what that prior
+// panel was.
+// ---------------------------------------------------------------------------
+
+describe('reduceRepoPanel', () => {
+  const priorPanels: RepoPanel[] = [
+    { kind: 'closed' },
+    { kind: 'create' },
+    { kind: 'edit', key: 'repo-a' },
+    { kind: 'confirmDelete', key: 'repo-a' },
+  ];
+
+  test('opening the create panel closes whatever was open before, regardless of what it was', () => {
+    for (const prior of priorPanels) {
+      expect(reduceRepoPanel(prior, { type: 'openCreate' })).toEqual({ kind: 'create' });
+    }
+  });
+
+  test('opening the edit panel for a row closes a pending delete confirmation for a different row', () => {
+    const confirmingDeleteForRepoA: RepoPanel = { kind: 'confirmDelete', key: 'repo-a' };
+    const next = reduceRepoPanel(confirmingDeleteForRepoA, { type: 'openEdit', key: 'repo-b' });
+    expect(next).toEqual({ kind: 'edit', key: 'repo-b' });
+  });
+
+  test('requesting delete on a row closes an editor that was open for a different row', () => {
+    const editingRepoA: RepoPanel = { kind: 'edit', key: 'repo-a' };
+    const next = reduceRepoPanel(editingRepoA, { type: 'requestDelete', key: 'repo-b' });
+    expect(next).toEqual({ kind: 'confirmDelete', key: 'repo-b' });
+  });
+
+  test('close always returns to closed, regardless of what was open', () => {
+    for (const prior of priorPanels) {
+      expect(reduceRepoPanel(prior, { type: 'close' })).toEqual({ kind: 'closed' });
+    }
   });
 });

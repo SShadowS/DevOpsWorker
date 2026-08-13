@@ -30,15 +30,48 @@ type ListState =
 const listState = signal<ListState>({ status: 'loading' });
 
 // ---------------------------------------------------------------------------
-// Editor state
+// Panel state — which secondary panel (the create/edit form, or a row's
+// delete confirmation) is open right now. Exactly one of these is ever open
+// at a time: the editor takes over the whole screen and the delete
+// confirmation sits above the table, so they already render mutually
+// exclusively. This signal is the only place that decides which one that
+// is, and every opener goes through `reduceRepoPanel` below rather than
+// setting its own flag directly — "open B" then also closes A for free,
+// with no separate clear-call to remember at each call site, and nothing
+// for a third panel added later to forget.
 // ---------------------------------------------------------------------------
 
-type EditorState =
-  | { mode: 'closed' }
-  | { mode: 'create' }
-  | { mode: 'edit'; key: string };
+export type RepoPanel =
+  | { kind: 'closed' }
+  | { kind: 'create' }
+  | { kind: 'edit'; key: string }
+  | { kind: 'confirmDelete'; key: string };
 
-const editor = signal<EditorState>({ mode: 'closed' });
+export type RepoPanelAction =
+  | { type: 'openCreate' }
+  | { type: 'openEdit'; key: string }
+  | { type: 'requestDelete'; key: string }
+  | { type: 'close' };
+
+/** Pure transition: given whatever panel is currently open, decides the
+ *  next one. Every branch fully replaces the panel rather than patching a
+ *  field on it — that is what makes the result mutually exclusive. There is
+ *  no way to "open edit" and leave a stale delete confirmation behind,
+ *  because the value this returns has no field left to hold one. */
+export function reduceRepoPanel(_current: RepoPanel, action: RepoPanelAction): RepoPanel {
+  switch (action.type) {
+    case 'openCreate':
+      return { kind: 'create' };
+    case 'openEdit':
+      return { kind: 'edit', key: action.key };
+    case 'requestDelete':
+      return { kind: 'confirmDelete', key: action.key };
+    case 'close':
+      return { kind: 'closed' };
+  }
+}
+
+const panel = signal<RepoPanel>({ kind: 'closed' });
 
 /**
  * Every input in the form, as strings/booleans a `<input>` can bind to
@@ -82,10 +115,10 @@ const formMessage = signal<string | null>(null);
 const saving = signal(false);
 
 // ---------------------------------------------------------------------------
-// Delete-confirmation state
+// Delete-confirmation state — busy/error only; which row it's for lives in
+// `panel` above.
 // ---------------------------------------------------------------------------
 
-const confirmingDeleteKey = signal<string | null>(null);
 const deleteError = signal<string | null>(null);
 const deleting = signal(false);
 
@@ -320,7 +353,7 @@ async function loadRepos(): Promise<void> {
 }
 
 function openCreate(): void {
-  editor.value = { mode: 'create' };
+  panel.value = reduceRepoPanel(panel.value, { type: 'openCreate' });
   keyInput.value = '';
   form.value = emptyFormState();
   formErrors.value = [];
@@ -328,25 +361,25 @@ function openCreate(): void {
 }
 
 function openEdit(key: string, config: RepoConfig): void {
-  editor.value = { mode: 'edit', key };
+  panel.value = reduceRepoPanel(panel.value, { type: 'openEdit', key });
   form.value = repoConfigToFormState(config);
   formErrors.value = [];
   formMessage.value = null;
 }
 
 function closeEditor(): void {
-  editor.value = { mode: 'closed' };
+  panel.value = reduceRepoPanel(panel.value, { type: 'close' });
 }
 
 async function submitForm(): Promise<void> {
-  const ed = editor.value;
-  if (ed.mode === 'closed') return;
+  const p = panel.value;
+  if (p.kind !== 'create' && p.kind !== 'edit') return;
 
   formMessage.value = null;
   formErrors.value = [];
 
   let key: string;
-  if (ed.mode === 'create') {
+  if (p.kind === 'create') {
     key = keyInput.value.trim();
     if (key === '') {
       formErrors.value = [{ path: 'key', message: 'A key is required.' }];
@@ -357,7 +390,7 @@ async function submitForm(): Promise<void> {
       return;
     }
   } else {
-    key = ed.key;
+    key = p.key;
   }
 
   const built = buildRepoConfigFromForm(form.value);
@@ -379,7 +412,7 @@ async function submitForm(): Promise<void> {
       formErrors.value = result.errors;
       return;
     }
-    editor.value = { mode: 'closed' };
+    panel.value = reduceRepoPanel(panel.value, { type: 'close' });
     await loadRepos();
   } finally {
     saving.value = false;
@@ -387,12 +420,12 @@ async function submitForm(): Promise<void> {
 }
 
 function requestDelete(key: string): void {
-  confirmingDeleteKey.value = key;
+  panel.value = reduceRepoPanel(panel.value, { type: 'requestDelete', key });
   deleteError.value = null;
 }
 
 function cancelDelete(): void {
-  confirmingDeleteKey.value = null;
+  panel.value = reduceRepoPanel(panel.value, { type: 'close' });
 }
 
 async function confirmDelete(key: string): Promise<void> {
@@ -403,7 +436,7 @@ async function confirmDelete(key: string): Promise<void> {
       deleteError.value = result.message;
       return;
     }
-    confirmingDeleteKey.value = null;
+    panel.value = reduceRepoPanel(panel.value, { type: 'close' });
     await loadRepos();
   } finally {
     deleting.value = false;
@@ -462,10 +495,11 @@ function CheckboxField({ label, checked, onChange, hint }: CheckboxFieldProps) {
 // ---------------------------------------------------------------------------
 
 function RepoEditorPanel() {
-  const ed = editor.value;
-  if (ed.mode === 'closed') return null;
+  const p = panel.value;
+  if (p.kind !== 'create' && p.kind !== 'edit') return null;
   const f = form.value;
-  const isCreate = ed.mode === 'create';
+  const isCreate = p.kind === 'create';
+  const editKey = p.kind === 'edit' ? p.key : null;
 
   function set<K extends keyof RepoFormState>(key: K, value: RepoFormState[K]): void {
     form.value = { ...form.value, [key]: value };
@@ -473,7 +507,7 @@ function RepoEditorPanel() {
 
   return (
     <div class="repo-form">
-      <h3>{isCreate ? 'Register a new repo' : `Edit "${ed.key}"`}</h3>
+      <h3>{isCreate ? 'Register a new repo' : `Edit "${editKey}"`}</h3>
 
       <fieldset class="repo-form__section">
         <legend>Registration</legend>
@@ -489,7 +523,7 @@ function RepoEditorPanel() {
           ) : (
             <div class="repo-form__field">
               <span class="repo-form__field-label">Key</span>
-              <code class="config-mono">{ed.key}</code>
+              <code class="config-mono">{editKey}</code>
             </div>
           )}
         </div>
@@ -616,8 +650,10 @@ function RepoListPanel() {
         <span class="stats-slot__title">Registered repos</span>
       </div>
 
-      {confirmingDeleteKey.value && state.status === 'ready' && (() => {
-        const key = confirmingDeleteKey.value!;
+      {(() => {
+        const p = panel.value;
+        if (p.kind !== 'confirmDelete' || state.status !== 'ready') return null;
+        const key = p.key;
         const config = state.repos[key];
         if (!config) return null;
         return (
@@ -683,7 +719,7 @@ export function AdminRepos() {
 
   return (
     <div class="admin-repos">
-      {editor.value.mode !== 'closed' ? (
+      {panel.value.kind === 'create' || panel.value.kind === 'edit' ? (
         <RepoEditorPanel />
       ) : (
         <>

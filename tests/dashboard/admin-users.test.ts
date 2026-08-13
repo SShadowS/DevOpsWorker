@@ -8,8 +8,9 @@ import {
   getDisableGuardReason,
   buildPasswordResetWarning,
   MIN_PASSWORD_LENGTH,
+  reduceUserPanel,
 } from '../../src/dashboard/client/components/admin-users.tsx';
-import type { CreateUserFormState } from '../../src/dashboard/client/components/admin-users.tsx';
+import type { CreateUserFormState, UserPanel } from '../../src/dashboard/client/components/admin-users.tsx';
 import type { AuthUser } from '../../src/auth/types.ts';
 
 // No test in this file opens a database connection or renders a component
@@ -212,5 +213,46 @@ describe('buildPasswordResetWarning', () => {
     expect(text).toContain('Fake Person');
     expect(text).toContain('signs');
     expect(text.toLowerCase()).toContain('every device');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reduceUserPanel — the single source of truth for which secondary panel
+// (the create-user form, or a row's password-reset form) is open. Mirrors
+// admin-repos.test.ts's reduceRepoPanel coverage for the same reason: this
+// screen was modelled on that one and inherited the same gap — opening the
+// create form never cleared a pending password-reset panel for a different
+// user, and vice versa. Each test asserts the fix's actual guarantee, that
+// opening any panel leaves no trace of whichever one was open before.
+// ---------------------------------------------------------------------------
+
+describe('reduceUserPanel', () => {
+  const priorPanels: UserPanel[] = [
+    { kind: 'closed' },
+    { kind: 'create' },
+    { kind: 'passwordReset', email: 'a@example.invalid' },
+  ];
+
+  test('opening the create form closes whatever was open before, regardless of what it was', () => {
+    for (const prior of priorPanels) {
+      expect(reduceUserPanel(prior, { type: 'openCreate' })).toEqual({ kind: 'create' });
+    }
+  });
+
+  test('opening a password-reset panel for one user closes a password-reset panel open for another', () => {
+    const resettingA: UserPanel = { kind: 'passwordReset', email: 'a@example.invalid' };
+    const next = reduceUserPanel(resettingA, { type: 'openPasswordReset', email: 'b@example.invalid' });
+    expect(next).toEqual({ kind: 'passwordReset', email: 'b@example.invalid' });
+  });
+
+  test('opening a password-reset panel closes the create-user form', () => {
+    const next = reduceUserPanel({ kind: 'create' }, { type: 'openPasswordReset', email: 'a@example.invalid' });
+    expect(next).toEqual({ kind: 'passwordReset', email: 'a@example.invalid' });
+  });
+
+  test('close always returns to closed, regardless of what was open', () => {
+    for (const prior of priorPanels) {
+      expect(reduceUserPanel(prior, { type: 'close' })).toEqual({ kind: 'closed' });
+    }
   });
 });
