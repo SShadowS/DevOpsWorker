@@ -2981,3 +2981,31 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 @media (max-width: 767px) {
   .repo-form__grid { grid-template-columns: 1fr; }
 }
+
+/* ============================================================
+   Users admin screen (Task 7) — reuses .stats-slot for the list wrapper,
+   .config-table for the listing, .repo-form* for the add-user and
+   password-reset forms, and .badge--success/--error for account status,
+   the same tokens and classes the repos screen above already established.
+   Only the per-row action stack (role/disable/reset buttons stacked with
+   their guard reason underneath) is genuinely new.
+   ============================================================ */
+
+.admin-users__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-sm);
+}
+
+.admin-users__row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  align-items: flex-start;
+}
+
+.admin-users__action {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals';
 import { AdminRepos } from './admin-repos.tsx';
+import { AdminUsers } from './admin-users.tsx';
 
 type AdminSection = 'repos' | 'users';
 
@@ -8,9 +9,8 @@ const activeSection = signal<AdminSection>('repos');
 // ---------------------------------------------------------------------------
 // The Admin tab's own content: a Repos/Users sub-navigation reusing the
 // top-level `.view-tabs` styling (app.tsx's Sessions/PR Reviews/Stats bar) so
-// the dashboard has one tab idiom, not two. Both sections are placeholders —
-// the repo table and the user table land in later tasks; this shell just
-// gives them somewhere to go.
+// the dashboard has one tab idiom, not two. This shell only decides which
+// section is showing; AdminRepos and AdminUsers own everything below it.
 // ---------------------------------------------------------------------------
 
 export function AdminView() {
@@ -48,7 +48,7 @@ export function AdminView() {
         </div>
       ) : (
         <div id="admin-panel-users" role="tabpanel" aria-labelledby="admin-tab-users">
-          <p class="empty-state">User management isn't built yet. It's coming in a later update.</p>
+          <AdminUsers />
         </div>
       )}
     </div>
