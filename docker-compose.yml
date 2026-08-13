@@ -78,8 +78,19 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://pipeline:${PG_PASSWORD:-pipeline}@postgres:5432/pipeline
-    ports:
-      - "3000:3000"
+      # Mark the session cookie Secure now that Caddy terminates TLS in front
+      # of this service (see the `caddy` service below) — without this the
+      # cookie would still be sendable over plain HTTP even though HTTPS is
+      # available. See .env.example for the longer explanation.
+      DASHBOARD_SECURE_COOKIES: "1"
+    # No ports: mapping. The dashboard is reachable only through the `caddy`
+    # service below, over pipeline-net by service name — never directly from
+    # the host or the wider network. This is the fix for the gap the caddy
+    # service exists to close: this port used to publish "3000:3000" to ALL
+    # interfaces (unlike postgres below, which is loopback-scoped), so the
+    # login cookie could cross the LAN in clear text. If you need direct
+    # access for local debugging, scope it to loopback the way postgres does
+    # — do not republish it to every interface again.
     volumes:
       - ./private:/app/private:ro
       # Read-only so the status ribbon can resolve a LIVE HEAD (src/dashboard/stats.ts
@@ -87,6 +98,51 @@ services:
       # watcher/dashboard are themselves compose services, so this is what makes the
       # ribbon able to detect compose drifting from source at all — see task-5-report.md.
       - ./.git:/repo/.git:ro
+    networks:
+      - pipeline-net
+
+  # Terminates TLS in front of the dashboard with Caddy's internal CA — see
+  # the Caddyfile at the repo root for the reasoning (SSE flush, Host header)
+  # and private/internal-docs/operator-runbook.md (overlay) for what a
+  # client needs to do once to trust Caddy's root certificate.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - dashboard
+    environment:
+      # Hostname clients use to reach the dashboard. Override per deployment;
+      # the default below is a placeholder, not a real host — see Caddyfile.
+      DASHBOARD_HOSTNAME: ${DASHBOARD_HOSTNAME:-dashboard.localhost}
+    ports:
+      # 443 only — no 80. `tls internal` never needs port 80 for an ACME
+      # challenge, so leaving 80 unpublished means there is no way to reach
+      # this stack over plain HTTP by mistake, ever. (Caddy still configures
+      # an automatic HTTP->HTTPS redirect listener on 80 internally; it's
+      # simply never reachable from outside the container.)
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # /data is what makes the internal CA survive a restart — it holds the
+      # root certificate and key Caddy minted the first time it ran. Losing
+      # this volume mints a NEW root, and every client that already trusted
+      # the old one has to re-trust the new one. /config just persists
+      # Caddy's autosaved running config between restarts; not security
+      # sensitive, kept for continuity.
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      # Checks Caddy's own admin API (plain HTTP, container-local only) is
+      # up and serving a loaded config — the same "is the daemon alive"
+      # level of check as postgres's pg_isready below, not an end-to-end
+      # probe of the HTTPS site. An end-to-end probe isn't practical here:
+      # busybox wget's minimal TLS stack cannot complete a handshake against
+      # Caddy's own HTTPS listener (verified while building this — it fails
+      # the TLS handshake outright, unrelated to certificate trust).
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:2019/config/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - pipeline-net
 
@@ -154,3 +210,5 @@ networks:
 volumes:
   pgdata:
   do-pipeline-state:
+  caddy_data:
+  caddy_config:

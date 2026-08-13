@@ -1,0 +1,33 @@
+# Terminates TLS in front of the dashboard using Caddy's own internal CA
+# (`tls internal`) rather than a public certificate authority — there is no
+# DNS name to prove ownership of and no intent to expose this beyond the
+# deployment's own network. Every client machine trusts Caddy's root
+# certificate once; see private/internal-docs/operator-runbook.md (overlay
+# repo — not shipped here) for how.
+#
+# DASHBOARD_HOSTNAME is a placeholder, overridden per deployment via an
+# environment variable (see docker-compose.yml). This is the public core, so
+# no real hostname is checked in here.
+{$DASHBOARD_HOSTNAME:dashboard.localhost} {
+	tls internal
+
+	# flush_interval -1 flushes every write to the client immediately instead
+	# of buffering — applied to the whole upstream, not scoped to a single
+	# path. That's deliberate: /api/events is a long-lived Server-Sent-Events
+	# stream driving the dashboard's live updates, and buffering it means
+	# updates arrive late, in batches, or not at all, with nothing in any log
+	# to say why. Every other response through here is a small JSON payload
+	# or a single HTML/JS/CSS file, so flushing immediately costs nothing
+	# measurable — applying it everywhere means a future streaming endpoint
+	# can't regress this by accident just because someone forgot to scope a
+	# rule to it.
+	#
+	# Do not add `header_up Host` or anything else that rewrites the Host
+	# header. src/auth/http.ts's originAllowed() compares the request's own
+	# Host header against the browser's Origin header, and that check is
+	# proxy-safe only while Caddy forwards Host unchanged — which is what
+	# reverse_proxy does by default.
+	reverse_proxy dashboard:3000 {
+		flush_interval -1
+	}
+}
