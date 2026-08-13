@@ -17,7 +17,9 @@
  * row change with it — that's the whole point.
  */
 import type postgres from 'postgres';
-import type { AuthUser } from '../auth/types.ts';
+import type { AuthUser, Role } from '../auth/types.ts';
+import type { IUserStore } from '../auth/user-store.interface.ts';
+import type { ISessionStore } from '../auth/session-store.interface.ts';
 import type { IRegistryStore } from '../config/registry-store.interface.ts';
 import type { ISettingsStore } from '../config/settings-store.interface.ts';
 import type { IAuditStore } from '../config/audit-store.interface.ts';
@@ -32,6 +34,14 @@ export interface AdminApiDeps {
   registryStore: IRegistryStore;
   settingsStore: ISettingsStore;
   auditStore: IAuditStore;
+  /** Backing store for `/api/admin/users` — the SAME instance the dashboard
+   *  authenticates against (see `DashboardOptions.userStore` in server.ts),
+   *  never a second, independent one: disabling or re-roling a user through
+   *  this API must take effect for that user's very next login/session
+   *  check, not just in some parallel copy of the table. */
+  userStore: IUserStore;
+  /** Used only to revoke sessions on a password change — see `putUserPassword`. */
+  sessionStore: ISessionStore;
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +408,258 @@ async function listAudit(deps: AdminApiDeps, url: URL): Promise<Response> {
 }
 
 // ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+//
+// Onboarding a colleague without a shell is the entire point of this section
+// — before it, changing a role or disabling an account meant raw SQL on the
+// host. Every mutation below runs the exact `UPDATE`/`INSERT` PgUserStore
+// would run, directly against a transaction handle, and writes its audit row
+// in that same transaction — same reasoning as the module comment at the top
+// of this file. `IUserStore.setRole`/`setDisabled` exist for callers who
+// don't need that atomicity (e.g. future CLI use); they hold their own
+// connection from the pool, so calling them from inside `sql.begin(...)`
+// would NOT participate in that transaction, and the audit row could commit
+// while the actual change rolled back (or vice versa) — the one guarantee
+// this whole feature exists to give up. So these routes never call them.
+//
+// No response, audit row, or log line here may ever contain a password or
+// its hash — every audit entry below is built by hand from named fields,
+// never by spreading the request body or a raw row, so a `password` field
+// slipping in unnoticed is not possible.
+
+/** A lockout guard tripped — thrown only inside a `sql.begin` callback below.
+ *  The dispatcher turns this into a 409 with the message as-is; every
+ *  message here is written for the admin who tripped it, not a log. */
+class GuardrailViolation extends Error {}
+
+// Mirrors readPassword() in src/cli/admin.ts — the CLI and the API must
+// agree on what "too short to be a real password" means.
+const MIN_PASSWORD_LENGTH = 8;
+
+function rowToAuthUser(row: postgres.Row): AuthUser {
+  return {
+    id: row.id as number,
+    email: row.email as string,
+    displayName: row.display_name as string,
+    role: row.role as Role,
+    disabled: row.disabled as boolean,
+  };
+}
+
+async function listUsers(deps: AdminApiDeps): Promise<Response> {
+  return Response.json(await deps.userStore.list());
+}
+
+/**
+ * Locks the target user's row plus every currently-active admin
+ * (`role = 'admin' AND disabled = false`) in one statement, ordered by id.
+ * That ordering is what keeps two concurrent requests aimed at two
+ * *different* admins from deadlocking on each other's rows: both queries
+ * always acquire the overlapping "active admins" locks in the same id order,
+ * so the second transaction blocks cleanly on the first rather than each
+ * waiting on the other.
+ *
+ * That lock is also what makes the "last remaining admin" guard immune to
+ * the count-then-act race: without it, two concurrent transactions could
+ * both read "2 active admins, safe to demote the other one" and both commit,
+ * leaving zero. With it, the second transaction cannot even read a count
+ * until the first has committed (or rolled back) its own change — so the
+ * count it sees already reflects that change.
+ */
+async function lockTargetAndActiveAdmins(
+  tx: postgres.TransactionSql,
+  email: string,
+): Promise<{ target: AuthUser | null; activeAdminCount: number }> {
+  const rows = await tx`
+    SELECT id, email, display_name, role, disabled
+    FROM users
+    WHERE email = ${email} OR (role = 'admin' AND disabled = false)
+    ORDER BY id
+    FOR UPDATE
+  `;
+  const users = rows.map(rowToAuthUser);
+  const target = users.find((u) => u.email === email) ?? null;
+  const activeAdminCount = users.filter((u) => u.role === 'admin' && !u.disabled).length;
+  return { target, activeAdminCount };
+}
+
+async function createUser(req: Request, actor: AuthUser, deps: AdminApiDeps): Promise<Response> {
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body as { email?: unknown; displayName?: unknown; role?: unknown; password?: unknown } | null;
+
+  const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+  if (!email) return Response.json({ error: 'email is required' }, { status: 400 });
+
+  const role = body?.role;
+  if (role !== 'admin' && role !== 'operator') {
+    return Response.json({ error: 'role must be "admin" or "operator"' }, { status: 400 });
+  }
+
+  const password = typeof body?.password === 'string' ? body.password : '';
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return Response.json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` }, { status: 400 });
+  }
+
+  const displayName = typeof body?.displayName === 'string' && body.displayName.trim() ? body.displayName.trim() : email;
+
+  const { hashPassword } = await import('../auth/local-provider.ts');
+  const passwordHash = await hashPassword(password);
+
+  try {
+    const created = await deps.sql.begin(async (tx) => {
+      const rows = await tx`
+        INSERT INTO users (email, display_name, role, password_hash)
+        VALUES (${email}, ${displayName}, ${role}, ${passwordHash})
+        RETURNING id, email, display_name, role, disabled
+      `;
+      const user = rowToAuthUser(rows[0]!);
+      await deps.auditStore.write({
+        actorEmail: actor.email,
+        action: 'create',
+        entityType: 'user',
+        entityKey: email,
+        beforeValue: null,
+        afterValue: { email: user.email, displayName: user.displayName, role: user.role },
+      }, tx);
+      return user;
+    });
+    return Response.json({ ok: true, user: created }, { status: 201 });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return Response.json({ error: `A user with email ${email} already exists` }, { status: 409 });
+    }
+    throw err;
+  }
+}
+
+async function putUserRole(req: Request, actor: AuthUser, deps: AdminApiDeps, email: string): Promise<Response> {
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const role = (parsed.body as { role?: unknown } | null)?.role;
+  if (role !== 'admin' && role !== 'operator') {
+    return Response.json({ error: 'role must be "admin" or "operator"' }, { status: 400 });
+  }
+
+  try {
+    const result = await deps.sql.begin(async (tx) => {
+      const { target, activeAdminCount } = await lockTargetAndActiveAdmins(tx, email);
+      if (!target) return null;
+
+      // Guardrail: an admin may not remove their OWN admin role, regardless
+      // of how many other admins exist — self-demotion has no recovery path
+      // but the CLI.
+      if (target.role === 'admin' && role !== 'admin' && target.email === actor.email) {
+        throw new GuardrailViolation('You cannot remove your own admin role.');
+      }
+      // Guardrail: the last active admin may not be demoted, by anyone.
+      // Only relevant when the target is currently active — demoting an
+      // already-disabled admin doesn't reduce the active count.
+      if (target.role === 'admin' && role !== 'admin' && !target.disabled && activeAdminCount <= 1) {
+        throw new GuardrailViolation('This is the last remaining admin. Promote another admin before removing this one.');
+      }
+
+      await tx`UPDATE users SET role = ${role}, updated_at = now() WHERE id = ${target.id}`;
+      await deps.auditStore.write({
+        actorEmail: actor.email,
+        action: 'update',
+        entityType: 'user',
+        entityKey: email,
+        beforeValue: { role: target.role },
+        afterValue: { role },
+      }, tx);
+      return { ...target, role: role as Role };
+    });
+    if (result === null) return Response.json({ error: `No user with email ${email}` }, { status: 404 });
+    return Response.json({ ok: true, user: result });
+  } catch (err) {
+    if (err instanceof GuardrailViolation) return Response.json({ error: err.message }, { status: 409 });
+    throw err;
+  }
+}
+
+async function putUserDisabled(req: Request, actor: AuthUser, deps: AdminApiDeps, email: string): Promise<Response> {
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const disabled = (parsed.body as { disabled?: unknown } | null)?.disabled;
+  if (typeof disabled !== 'boolean') {
+    return Response.json({ error: '"disabled" must be a boolean' }, { status: 400 });
+  }
+
+  try {
+    const result = await deps.sql.begin(async (tx) => {
+      const { target, activeAdminCount } = await lockTargetAndActiveAdmins(tx, email);
+      if (!target) return null;
+
+      if (disabled && target.role === 'admin' && !target.disabled) {
+        // Guardrail: an admin may not disable their OWN account.
+        if (target.email === actor.email) {
+          throw new GuardrailViolation('You cannot disable your own account.');
+        }
+        // Guardrail: the last active admin may not be disabled, by anyone.
+        if (activeAdminCount <= 1) {
+          throw new GuardrailViolation('This is the last remaining admin. Promote another admin before disabling this one.');
+        }
+      }
+
+      await tx`UPDATE users SET disabled = ${disabled}, updated_at = now() WHERE id = ${target.id}`;
+      await deps.auditStore.write({
+        actorEmail: actor.email,
+        action: 'update',
+        entityType: 'user',
+        entityKey: email,
+        beforeValue: { disabled: target.disabled },
+        afterValue: { disabled },
+      }, tx);
+      return { ...target, disabled };
+    });
+    if (result === null) return Response.json({ error: `No user with email ${email}` }, { status: 404 });
+    return Response.json({ ok: true, user: result });
+  } catch (err) {
+    if (err instanceof GuardrailViolation) return Response.json({ error: err.message }, { status: 409 });
+    throw err;
+  }
+}
+
+/** No guardrail here: resetting a password (including your own) never
+ *  reduces the admin count, so it can't cause the lockout the other three
+ *  routes guard against. Revokes every existing session for the user
+ *  afterward, exactly like `set-password` on the CLI (src/cli/admin.ts) — a
+ *  password change that leaves a stolen cookie valid defeats the point. */
+async function putUserPassword(req: Request, actor: AuthUser, deps: AdminApiDeps, email: string): Promise<Response> {
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const password = (parsed.body as { password?: unknown } | null)?.password;
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    return Response.json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` }, { status: 400 });
+  }
+
+  const { hashPassword } = await import('../auth/local-provider.ts');
+  const passwordHash = await hashPassword(password);
+
+  const targetId = await deps.sql.begin(async (tx) => {
+    const rows = await tx`SELECT id FROM users WHERE email = ${email} FOR UPDATE`;
+    if (rows.length === 0) return null;
+    const id = rows[0]!.id as number;
+    await tx`UPDATE users SET password_hash = ${passwordHash}, updated_at = now() WHERE id = ${id}`;
+    await deps.auditStore.write({
+      actorEmail: actor.email,
+      action: 'update',
+      entityType: 'user',
+      entityKey: email,
+      beforeValue: null,
+      afterValue: { passwordChanged: true },
+    }, tx);
+    return id;
+  });
+
+  if (targetId === null) return Response.json({ error: `No user with email ${email}` }, { status: 404 });
+  await deps.sessionStore.deleteByUser(targetId);
+  return Response.json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -440,6 +702,21 @@ export async function handleAdminApi(req: Request, url: URL, user: AuthUser, dep
     }
 
     if (path === '/api/admin/audit' && req.method === 'GET') return await listAudit(deps, url);
+
+    if (path === '/api/admin/users' && req.method === 'GET') return await listUsers(deps);
+    if (path === '/api/admin/users' && req.method === 'POST') return await createUser(req, user, deps);
+    const userRoleMatch = /^\/api\/admin\/users\/([^/]+)\/role$/.exec(path);
+    if (userRoleMatch && req.method === 'PUT') {
+      return await putUserRole(req, user, deps, decodeURIComponent(userRoleMatch[1]!).trim().toLowerCase());
+    }
+    const userDisabledMatch = /^\/api\/admin\/users\/([^/]+)\/disabled$/.exec(path);
+    if (userDisabledMatch && req.method === 'PUT') {
+      return await putUserDisabled(req, user, deps, decodeURIComponent(userDisabledMatch[1]!).trim().toLowerCase());
+    }
+    const userPasswordMatch = /^\/api\/admin\/users\/([^/]+)\/password$/.exec(path);
+    if (userPasswordMatch && req.method === 'PUT') {
+      return await putUserPassword(req, user, deps, decodeURIComponent(userPasswordMatch[1]!).trim().toLowerCase());
+    }
 
     return Response.json({ error: 'Not found' }, { status: 404 });
   } catch (err) {

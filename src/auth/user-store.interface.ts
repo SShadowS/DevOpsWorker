@@ -8,4 +8,6 @@ export interface IUserStore {
   list(): Promise<AuthUser[]>;
   count(): Promise<number>;
   setPassword(id: number, passwordHash: string): Promise<void>;
+  setRole(id: number, role: Role): Promise<void>;
+  setDisabled(id: number, disabled: boolean): Promise<void>;
 }

@@ -77,6 +77,24 @@ describe.skipIf(!url)('auth stores (integration)', () => {
     expect(again?.passwordHash).toBe('newhash');
   });
 
+  test('setRole changes the role', async () => {
+    const found = await users.findByEmail('authstoretest-a@example.com');
+    expect(found?.role).toBe('operator');
+    await users.setRole(found!.id, 'admin');
+    const again = await users.findByEmail('authstoretest-a@example.com');
+    expect(again?.role).toBe('admin');
+    await users.setRole(found!.id, 'operator'); // leave the row as later tests expect it
+  });
+
+  test('setDisabled toggles the flag', async () => {
+    const found = await users.findByEmail('authstoretest-a@example.com');
+    expect(found?.disabled).toBe(false);
+    await users.setDisabled(found!.id, true);
+    expect((await users.findByEmail('authstoretest-a@example.com'))?.disabled).toBe(true);
+    await users.setDisabled(found!.id, false);
+    expect((await users.findByEmail('authstoretest-a@example.com'))?.disabled).toBe(false);
+  });
+
   test('session create/findValid/touch/delete lifecycle', async () => {
     const user = await users.findByEmail('authstoretest-a@example.com');
     const future = new Date(Date.now() + 60_000);

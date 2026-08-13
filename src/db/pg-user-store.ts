@@ -57,4 +57,16 @@ export class PgUserStore implements IUserStore {
       UPDATE users SET password_hash = ${passwordHash}, updated_at = now() WHERE id = ${id}
     `;
   }
+
+  async setRole(id: number, role: Role): Promise<void> {
+    await this.sql`
+      UPDATE users SET role = ${role}, updated_at = now() WHERE id = ${id}
+    `;
+  }
+
+  async setDisabled(id: number, disabled: boolean): Promise<void> {
+    await this.sql`
+      UPDATE users SET disabled = ${disabled}, updated_at = now() WHERE id = ${id}
+    `;
+  }
 }

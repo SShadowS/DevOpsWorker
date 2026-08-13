@@ -103,7 +103,7 @@ export interface DashboardHandle {
 }
 
 export function startDashboard(options: DashboardOptions): DashboardHandle {
-  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, registryStore, settingsStore, auditStore } = options;
+  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, registryStore, settingsStore, auditStore, userStore, sessionStore } = options;
 
   /** Best-effort registry refresh — a database blip must never fail the
    *  caller (a request, or the background poller below). */
@@ -228,7 +228,7 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
       // prefix (see the '*' rule in route-access.ts), so `user` is a
       // confirmed admin here.
       if (path.startsWith('/api/admin/')) {
-        return handleAdminApi(req, url, user!, { sql, registryStore, settingsStore, auditStore });
+        return handleAdminApi(req, url, user!, { sql, registryStore, settingsStore, auditStore, userStore, sessionStore });
       }
 
       // Action submission endpoint

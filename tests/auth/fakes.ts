@@ -44,6 +44,16 @@ export class FakeUserStore implements IUserStore {
     const row = this.rows.find((r) => r.id === id);
     if (row) row.passwordHash = passwordHash;
   }
+
+  async setRole(id: number, role: Role): Promise<void> {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.role = role;
+  }
+
+  async setDisabled(id: number, disabled: boolean): Promise<void> {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.disabled = disabled;
+  }
 }
 
 export class FakeSessionStore implements ISessionStore {
