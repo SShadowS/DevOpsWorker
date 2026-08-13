@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { handleLogin, handleLogout, handleMe, handleAuthStatus, authenticate, originAllowed, type AuthDeps } from '../../src/auth/http.ts';
+import { handleLogin, handleLogout, handleMe, handleAuthStatus, authenticate, originAllowed, resolveClientIp, type AuthDeps } from '../../src/auth/http.ts';
 import { hashPassword } from '../../src/auth/local-provider.ts';
 import { LoginRateLimiter } from '../../src/auth/rate-limit.ts';
 import { SESSION_COOKIE } from '../../src/auth/cookies.ts';
@@ -105,5 +105,40 @@ describe('originAllowed', () => {
     expect(originAllowed(req({ host: 'dash.local:3000', origin: 'http://dash.local:3000' }))).toBe(true);
     expect(originAllowed(req({ host: 'dash.local', origin: 'http://evil.example' }))).toBe(false);
     expect(originAllowed(req({ host: 'dash.local', origin: '::::' }))).toBe(false);
+  });
+});
+
+describe('resolveClientIp', () => {
+  const req = (xff?: string) =>
+    new Request('http://dash.local/api/auth/login', xff !== undefined ? { headers: { 'x-forwarded-for': xff } } : {});
+
+  test('trust off: the peer address wins even when a header is present — a header can never override it', () => {
+    expect(resolveClientIp(req('6.6.6.6'), '172.22.0.1', false)).toBe('172.22.0.1');
+  });
+
+  test('trust off, no peer address either: unknown', () => {
+    expect(resolveClientIp(req('6.6.6.6'), null, false)).toBe('unknown');
+    expect(resolveClientIp(req('6.6.6.6'), undefined, false)).toBe('unknown');
+  });
+
+  test('trust on, header has one entry: that entry wins over the peer address', () => {
+    expect(resolveClientIp(req('203.0.113.7'), '172.22.0.1', true)).toBe('203.0.113.7');
+  });
+
+  test('trust on, header has several entries: the leftmost (original client) wins', () => {
+    expect(resolveClientIp(req('203.0.113.7, 172.22.0.1'), '172.22.0.1', true)).toBe('203.0.113.7');
+  });
+
+  test('trust on, header absent: falls back to the peer address', () => {
+    expect(resolveClientIp(req(), '172.22.0.1', true)).toBe('172.22.0.1');
+  });
+
+  test('trust on, header present but malformed (blank, or entries that are all blank): falls back to the peer address', () => {
+    expect(resolveClientIp(req(''), '172.22.0.1', true)).toBe('172.22.0.1');
+    expect(resolveClientIp(req(' , , '), '172.22.0.1', true)).toBe('172.22.0.1');
+  });
+
+  test('trust on, no header and no peer address: unknown', () => {
+    expect(resolveClientIp(req(), null, true)).toBe('unknown');
   });
 });

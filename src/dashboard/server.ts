@@ -24,7 +24,7 @@ import type { IUserStore } from '../auth/user-store.interface.ts';
 import type { ISessionStore } from '../auth/session-store.interface.ts';
 import type { IAuthEventStore } from '../auth/auth-event-store.interface.ts';
 import type { AuthUser } from '../auth/types.ts';
-import { authenticate, handleLogin, handleLogout, handleMe, handleAuthStatus, originAllowed, type AuthDeps } from '../auth/http.ts';
+import { authenticate, handleLogin, handleLogout, handleMe, handleAuthStatus, originAllowed, resolveClientIp, type AuthDeps } from '../auth/http.ts';
 import { requiredAccess } from '../auth/route-access.ts';
 import { LoginRateLimiter } from '../auth/rate-limit.ts';
 
@@ -119,6 +119,12 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
     authEventStore: options.authEventStore,
   };
 
+  // See resolveClientIp() in src/auth/http.ts for why this is off unless a
+  // deployment explicitly says its only path in is a proxy that sets
+  // X-Forwarded-For itself (Caddy — see the `caddy` service in
+  // docker-compose.yml, which sets this alongside DASHBOARD_SECURE_COOKIES).
+  const trustProxyHeaders = process.env['TRUST_PROXY_HEADERS'] === '1';
+
   const logPoller = new LogPoller(logSink, stateStore, broadcastSSE);
 
   // Write heartbeat on startup and every 30 seconds
@@ -192,7 +198,7 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
       // ---- the route-access table says 'public'. Default is 'operator'.
       if (path === '/api/auth/login' && req.method === 'POST') {
         if (!originAllowed(req)) return Response.json({ error: 'Cross-origin request rejected' }, { status: 403 });
-        const ip = server.requestIP(req)?.address ?? 'unknown';
+        const ip = resolveClientIp(req, server.requestIP(req)?.address, trustProxyHeaders);
         return handleLogin(req, authDeps, ip);
       }
       if (path === '/api/auth/status' && req.method === 'GET') {
@@ -214,7 +220,7 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
 
       if (path === '/api/auth/me' && req.method === 'GET') return handleMe(user!);
       if (path === '/api/auth/logout' && req.method === 'POST') {
-        return handleLogout(req, authDeps, server.requestIP(req)?.address ?? 'unknown');
+        return handleLogout(req, authDeps, resolveClientIp(req, server.requestIP(req)?.address, trustProxyHeaders));
       }
 
       // Admin config API — repos, companions, settings, audit log. The gate

@@ -127,3 +127,39 @@ export function originAllowed(req: Request): boolean {
     return false;
   }
 }
+
+/** The one place that decides "whose IP is this request from" — both the
+ *  login rate limiter's key and the address written to `auth_events.ip` call
+ *  this, so they can never disagree with each other.
+ *
+ *  `trustProxyHeaders` must stay off by default: `X-Forwarded-For` is just
+ *  another request header, so a caller talking to this server directly could
+ *  set it to anything and pick its own rate-limit bucket. It is only safe to
+ *  turn on (`TRUST_PROXY_HEADERS=1`) when the only thing that can reach this
+ *  server is a proxy that sets that header itself from the real connection —
+ *  which is exactly Caddy's `reverse_proxy` (see the `caddy` service in
+ *  docker-compose.yml). Verified empirically before wiring this up: sending a
+ *  request through Caddy with `X-Forwarded-For` already set to a made-up
+ *  value does not survive the hop — Caddy replaces it with the address it
+ *  itself observed, it does not append to whatever the client already sent.
+ *  That's what makes "trust it, take the leftmost entry" safe here rather
+ *  than a spoofing hole; it would stop being safe if another hop were ever
+ *  added in front of Caddy, so re-verify this if that ever happens.
+ *
+ *  When trusted, the leftmost entry is the original client (each hop appends
+ *  its own address to the right) — this deployment only has the one hop, so
+ *  in practice there is exactly one entry to read. Falls back to
+ *  `peerAddress` (the raw TCP peer, from `server.requestIP()`) whenever the
+ *  header is absent, blank, or every entry in it is blank, or when trust is
+ *  off. Falls back to the literal string `'unknown'` only if there is no
+ *  peer address either — practically only in tests. */
+export function resolveClientIp(req: Request, peerAddress: string | null | undefined, trustProxyHeaders: boolean): string {
+  if (trustProxyHeaders) {
+    const header = req.headers.get('x-forwarded-for');
+    if (header) {
+      const leftmost = header.split(',')[0]?.trim();
+      if (leftmost) return leftmost;
+    }
+  }
+  return peerAddress ?? 'unknown';
+}

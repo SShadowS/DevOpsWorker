@@ -83,6 +83,15 @@ services:
       # cookie would still be sendable over plain HTTP even though HTTPS is
       # available. See .env.example for the longer explanation.
       DASHBOARD_SECURE_COOKIES: "1"
+      # Trust the X-Forwarded-For header Caddy sets on every request it
+      # proxies here, for the login rate limiter's key and the auth_events.ip
+      # column — see resolveClientIp() in src/auth/http.ts. Safe specifically
+      # because Caddy is the only thing that can reach this service (no
+      # ports: below) and Caddy itself sets/overwrites that header from the
+      # real connection rather than forwarding whatever a client already put
+      # in it. Do not set this if the dashboard is ever reachable any other
+      # way.
+      TRUST_PROXY_HEADERS: "1"
     # No ports: mapping. The dashboard is reachable only through the `caddy`
     # service below, over pipeline-net by service name — never directly from
     # the host or the wider network. This is the fix for the gap the caddy

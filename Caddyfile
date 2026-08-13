@@ -22,6 +22,11 @@
 	# can't regress this by accident just because someone forgot to scope a
 	# rule to it.
 	#
+	# If this site block ever gains `encode gzip` or `encode zstd`, revisit
+	# this: flushing on every write fragments each response into many small
+	# compressed blocks instead of one well-sized one, which quietly worsens
+	# the compression ratio site-wide with nothing in any log to explain why.
+	#
 	# Do not add `header_up Host` or anything else that rewrites the Host
 	# header. src/auth/http.ts's originAllowed() compares the request's own
 	# Host header against the browser's Origin header, and that check is
