@@ -87,8 +87,13 @@ async function findMissing(cwd: string, shas: string[]): Promise<string[]> {
  * FETCH_HEAD so nothing can collect them, and outside `refs/heads/` so they never
  * show up in the agent's `git branch`. `origin` is the remote name
  * `docker/entrypoint.sh` creates (`git clone <url> <dir>`) and already fetches from.
+ *
+ * Also used by `review-tree.ts`'s checkout walker, which needs the same recovery
+ * for the same reason: the merge preview, and a deleted branch's head, exist only
+ * under `refs/pull/*`. The `refs/backport-diff/` anchor name is historical — what
+ * matters is that the fetched objects are anchored at all.
  */
-async function recoverFromRef(cwd: string, ref: string): Promise<void> {
+export async function recoverFromRef(cwd: string, ref: string): Promise<void> {
   if (!SAFE_REF.test(ref) || ref.includes('..')) return;
   const dest = `refs/backport-diff/${ref.replace(/^refs\/pull\//, '')}`;
   await runGit(cwd, ['fetch', '--quiet', 'origin', `+${ref}:${dest}`]);

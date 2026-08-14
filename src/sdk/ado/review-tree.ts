@@ -1,4 +1,6 @@
 import type { PRMetadata } from './pull-requests.ts';
+import { checkoutBranch, checkoutSha } from '../git-checkout.ts';
+import { recoverFromRef } from '../git-diff.ts';
 
 /**
  * One rung of the ladder a full review may check out.
@@ -64,6 +66,87 @@ export function reviewTreeCandidates(meta: PRMetadata | undefined): ReviewTreeCa
   if (branch && !branch.startsWith('-')) rungs.push({ kind: 'target-tip', branch });
 
   return rungs;
+}
+
+export type ReviewTreeSource = ReviewTreeCandidate['kind'] | 'default-branch';
+
+export interface ReviewTreeResult {
+  source: ReviewTreeSource;
+  /** What won: the commit's first 12 hex chars, or the branch name. Absent for `default-branch`. */
+  detail?: string;
+}
+
+/**
+ * Which refs can recover a rung's missing object.
+ *
+ * The merge preview exists only at `refs/pull/<id>/merge`. For the source head the
+ * direct ref is `/head`, with `/merge` as a second chance: the merge commit's
+ * second parent IS the source head, so fetching it carries the head object along.
+ *
+ * Both are open-PR only — this instance retains `refs/pull/*` while a PR is open
+ * and drops it on completion (measured: 4/4 active PRs had it, 2/2 completed did
+ * not). A completed PR reaches its code through the other rungs instead: its
+ * `lastMergeCommit` is a real commit on the target branch and is already cloned.
+ */
+const RECOVERY_REFS: Record<'merge-preview' | 'source-head', (prId: number) => string[]> = {
+  'merge-preview': (id) => [`refs/pull/${id}/merge`],
+  'source-head': (id) => [`refs/pull/${id}/head`, `refs/pull/${id}/merge`],
+};
+
+/**
+ * Walk the ladder until a rung lands, fetching a missing object from
+ * `refs/pull/*` before giving up on that rung.
+ *
+ * This is the piece `c11dcf4` lacked. It picked the top rung, whose object no
+ * clone fetches, and stopped — nine green selector tests beside a dead feature,
+ * and an acceptance run that recorded the default branch on the very image
+ * carrying the fix.
+ *
+ * After a fetch the SPECIFIC sha is re-tested, because Azure DevOps recomputes
+ * previews and the ref may hold a newer commit than the metadata named. That
+ * shape descends rather than binding to the wrong tree.
+ *
+ * Never throws — same contract as `git-checkout.ts`. A `default-branch` result
+ * means the tree was left where the entrypoint's clone put it, and the CALLER is
+ * responsible for saying so to the agent: the prompt must not claim the PR's code
+ * over a default-branch tree.
+ */
+export async function checkoutReviewTree(
+  cwd: string,
+  prId: number,
+  meta: PRMetadata | undefined,
+): Promise<ReviewTreeResult> {
+  for (const candidate of reviewTreeCandidates(meta)) {
+    if (candidate.kind === 'target-tip') {
+      const co = await checkoutBranch(cwd, candidate.branch);
+      if (co.ok) {
+        console.log(`[review-tree] checked out target-tip (${candidate.branch})`);
+        return { source: 'target-tip', detail: candidate.branch };
+      }
+      console.log(`[review-tree] target-tip ${candidate.branch} failed (${co.error}) — trying the next rung`);
+      continue;
+    }
+
+    let co = await checkoutSha(cwd, candidate.sha);
+    if (!co.ok) {
+      for (const ref of RECOVERY_REFS[candidate.kind](prId)) {
+        await recoverFromRef(cwd, ref);
+        co = await checkoutSha(cwd, candidate.sha);
+        if (co.ok) break;
+      }
+    }
+    if (co.ok) {
+      console.log(`[review-tree] checked out ${candidate.kind} (${candidate.sha.slice(0, 12)})`);
+      return { source: candidate.kind, detail: candidate.sha.slice(0, 12) };
+    }
+    console.log(
+      `[review-tree] ${candidate.kind} ${candidate.sha.slice(0, 12)} is not in the clone ` +
+      `and could not be fetched — trying the next rung`,
+    );
+  }
+
+  console.log('[review-tree] no usable tree — the clone stays on the default branch');
+  return { source: 'default-branch' };
 }
 
 /**
