@@ -129,7 +129,7 @@ function agentSurfaces(): AgentSurface[] {
     surface('pr-reviewer', createPRReviewConfig(cfg, {
       prId: 1, repoKey: 'k', repoUrl: 'https://x', repositoryId: 'r',
       project: 'p', sourceBranch: 'refs/heads/a', targetBranch: 'refs/heads/b',
-      noPost: true,
+      treeSource: 'default-branch', noPost: true,
     })),
     surface('test-case-reviewer', createTestCaseReviewerConfig(cfg)),
     surface('test-cases', createTestCasesConfig(cfg)),

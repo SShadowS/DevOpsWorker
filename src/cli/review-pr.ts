@@ -1291,7 +1291,7 @@ export async function reviewPR(args: string[]): Promise<void> {
     // duplicated at the two call sites — the argument list is long enough that two
     // copies would drift.
     const runFullReview = () => runPRReview(
-      { prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId, project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl, prTitle: resolvedTitle, prDescription: resolvedDescription, noPost, priorFindingsBlock },
+      { prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId, project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl, prTitle: resolvedTitle, prDescription: resolvedDescription, noPost, priorFindingsBlock, treeSource: 'default-branch' },
       config,
       logger,
     );

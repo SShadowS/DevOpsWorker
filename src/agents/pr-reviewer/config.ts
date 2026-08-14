@@ -10,6 +10,7 @@ import { runAgent } from '../../sdk/run-agent.ts';
 import { createInitialState } from '../../pipeline/initial-state.ts';
 import { AgentExecutionError } from '../../sdk/errors.ts';
 import type { PipelineLogger } from '../../sdk/pipeline-logger.ts';
+import type { ReviewTreeSource } from '../../sdk/ado/review-tree.ts';
 
 const MCP_ADD_COMMENT_TOOL = 'mcp__azureDevOps__add_pull_request_comment';
 const MCP_UPDATE_COMMENT_TOOL = 'mcp__azureDevOps__update_pull_request_comment';
@@ -28,6 +29,18 @@ export interface PRReviewParams {
   prTitle?: string;
   prDescription?: string;
   noPost?: boolean;
+  /**
+   * Which tree the clone at the cwd actually holds — set by the checkout walk in
+   * `review-pr.ts`, never assumed.
+   *
+   * Required on purpose: the compiler then forces every constructor to decide.
+   * The defect this replaces was a prompt that described the clone the same way
+   * whatever was in it, while for roughly half of reviews it held a different
+   * release line than the PR.
+   */
+  treeSource: ReviewTreeSource;
+  /** What won: short commit sha, or branch name. Absent when `treeSource` is `default-branch`. */
+  treeDetail?: string;
   /**
    * Markdown table of the `file` + `title` pairs that already carry an inline
    * thread on this PR (built by `buildPriorFindingsBlock`), or '' when there are
@@ -131,6 +144,43 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
   originalPrId ??= parentFromTitle;
 
   return { isCherryPick, originalPrId };
+}
+
+/**
+ * What the clone's working tree actually holds, in words the agent can act on.
+ *
+ * One branch per `ReviewTreeSource`. The honest degradation on `default-branch`
+ * is the point: the defect this replaces was a prompt that implied the PR's code
+ * over a tree from another release line — and, as the comment on the backport
+ * path's own fix puts it, that "would answer from a different release line and
+ * look verified".
+ */
+function workingTreeLines(params: PRReviewParams): string[] {
+  const at = params.treeDetail ? ` (${params.treeDetail})` : '';
+  switch (params.treeSource) {
+    case 'merge-preview':
+      return [
+        `The repository is cloned at the current working directory, checked out to this PR merged into its target branch${at}.`,
+        `Files the PR does not touch match the target branch; files it touches already include the PR's changes.`,
+      ];
+    case 'source-head':
+      return [
+        `The repository is cloned at the current working directory, checked out to this PR's own head commit${at}.`,
+        `It contains the PR's changes, but not target-branch work that landed after the PR branched.`,
+      ];
+    case 'target-tip':
+      return [
+        `The repository is cloned at the current working directory, checked out to the tip of the target branch${at}.`,
+        `It does NOT contain this PR's changes — read those from the diff and the MCP file tools.`,
+        `It IS the right place to read the current behaviour of code the PR calls but does not change.`,
+      ];
+    case 'default-branch':
+      return [
+        `WARNING: the PR's code could not be checked out. The clone at the current working directory sits on the repository's default branch, which may be a different release line than this PR's target (${params.targetBranch}).`,
+        `Do not trust the clone for the behaviour of code this PR touches or calls — verify against the target branch with mcp__azureDevOps__get_file_content when a finding depends on it.`,
+        `Pass this warning to every analysis sub-agent.`,
+      ];
+  }
 }
 
 function calleeGuide(mechanism: string): string {
@@ -239,7 +289,8 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
         `- **Target branch:** ${params.targetBranch}`,
         params.prUrl ? `- **URL:** ${params.prUrl}` : '',
         ``,
-        `The repository is cloned locally at the current working directory.`,
+        `## Working Tree`,
+        ...workingTreeLines(params),
         `Use local file tools (Read, Grep, Glob, Bash) for code analysis alongside the MCP tools for PR metadata.`,
         ``,
         `Follow the instructions in your CLAUDE.md to:`,

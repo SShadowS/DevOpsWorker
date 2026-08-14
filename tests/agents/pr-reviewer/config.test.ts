@@ -53,6 +53,7 @@ function mockParams(overrides?: Partial<PRReviewParams>): PRReviewParams {
     project: 'Example Software',
     sourceBranch: 'feature/fix-posting',
     targetBranch: 'master',
+    treeSource: 'merge-preview',
     ...overrides,
   };
 }

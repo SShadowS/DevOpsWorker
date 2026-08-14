@@ -396,6 +396,9 @@ export function buildAgentKnobsReport(
 // ---------------------------------------------------------------------------
 
 const STUB_PR_REVIEW_PARAMS: PRReviewParams = {
+  // This stub renders a config report; it never clones or checks anything out, so
+  // the honest value is the one meaning "nothing was checked out".
+  treeSource: 'default-branch',
   prId: 0,
   repoKey: 'stub',
   repoUrl: '',
