@@ -9,8 +9,14 @@ import { Glob } from 'bun';
 // `disallowedTools` was added after checking the CLI binary's own frontmatter
 // schema rather than assuming, given the `allowed_tools` history. The schema
 // describes it as "Tools removed from the default set. Ignored if `tools` is
-// set.", accepts the kebab-case `disallowed-tools` as an alias, and the
-// agent-file loader carries it through to the agent definition.
+// set.", and the agent-file loader carries it through to the agent definition.
+//
+// camelCase ONLY in an agent file. The kebab-case `disallowed-tools` is an alias
+// in the slash-command frontmatter schema and in the CLI flags — the agent-file
+// loader reads the camelCase key alone, so a kebab spelling here would bind
+// nothing. `frontmatterKeys()` cannot even extract a hyphenated key, so this
+// allowlist would not flag it either: it would fail exactly as silently as
+// `allowed_tools` did.
 const VALID_KEYS = new Set([
   'name', 'description', 'model', 'tools', 'color', 'skills', 'disallowedTools',
 ]);

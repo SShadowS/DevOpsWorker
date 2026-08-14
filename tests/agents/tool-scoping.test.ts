@@ -258,30 +258,50 @@ describe('tool scoping — deliberate exceptions', () => {
   });
 });
 
+
 // ---------------------------------------------------------------------------
-// The pr-reviewer's own sub-agents must not be able to post to the PR.
+// The pr-reviewer's own sub-agents get an allowlist, not a denylist.
 //
 // Measured, twice: on PR 52726 (2026-08-06) and PR 53254 (2026-08-14) the
 // `code-review-validator` sub-agent called `add_pull_request_comment` itself,
 // with the "Code Review In Progress" template copied character for character
 // out of the ORCHESTRATOR's CLAUDE.md. It then updated its own thread with a
-// full review of its own. The PR ended up with two bot threads: the
-// orchestrator's, which the pipeline tracks, and the sub-agent's, which nothing
-// tracks — no reconciliation, no stale marking, invisible to finding-outcome
-// tooling.
+// review of its own. The PR ended up with two bot threads: the orchestrator's,
+// which the pipeline tracks, and the sub-agent's, which nothing tracks — no
+// reconciliation, no stale marking, invisible to finding-outcome tooling.
 //
-// The sub-agents inherit the orchestrator's MCP servers, and the orchestrator
-// must keep both write tools (posting the review is its job), so the denial has
-// to be per-agent. `AgentDefinition.disallowedTools` is that mechanism, and the
-// CLI parses it from agent-file frontmatter (`disallowedTools`, or the
-// kebab-case `disallowed-tools`).
+// Sub-agents inherit the orchestrator's MCP servers, and the orchestrator must
+// keep the write tools (posting the review is its job), so the restriction has
+// to be per-agent. The CLI's agent-file frontmatter offers two mechanisms:
+// `tools:`, which REPLACES the default set, and `disallowedTools:`, which
+// subtracts from it and is "Ignored if `tools` is set" (the CLI's own schema
+// text). This uses `tools:`, matching what code-reviewer's and plan-reviewer's
+// sub-agents already do.
 //
-// CRITICAL: the CLI's own frontmatter schema says `disallowedTools` is
-// "Ignored if `tools` is set." A sub-agent file that grows a `tools:` key later
-// silently loses this denial, so both halves are asserted here.
+// Only `disallowedTools` is camelCase-only in an agent file. The kebab-case
+// `disallowed-tools` is an alias in the SLASH-COMMAND frontmatter schema and in
+// the CLI flags, NOT in the agent-file loader, which reads the camelCase key
+// alone. An earlier revision of this file asserted the alias and would have
+// accepted a spelling that binds nothing — the same failure as `allowed_tools`,
+// which sat inert in a dozen files.
+//
+// THE LIST IS DERIVED FROM TELEMETRY, not from what looks reasonable: every
+// tool these seven agents actually called across 157 PRs and 181,547 stage-log
+// rows, 2026-06-16 to 2026-08-13. The only ADO writes in that entire window are
+// the two comment tools, from the incident above. Anything omitted from an
+// allowlist disappears silently, so re-run this before trimming it:
+//
+//   SELECT agent_name, (regexp_match(content, 'tool: ([A-Za-z0-9_]+)'))[1] AS tool,
+//          count(*) FROM stage_logs
+//   WHERE content ~ 'tool: [A-Za-z0-9_]+' AND agent_name IN (<the seven>)
+//   GROUP BY 1,2;
+//
+// Note the telemetry counts tool_use ATTEMPTS, not successes: that window also
+// contains `Grash`, `Grag`, `Grap` and `Grache`, which are names the model
+// invented and the SDK refused. They are not tools and are not listed here.
 //
 // This pins the DECLARATION only. It cannot prove the CLI honoured it — verify
-// that by effect, with zero sub-agent post calls in telemetry:
+// by effect, with zero sub-agent post calls after the deploy:
 //
 //   SELECT agent_name, count(*) FROM stage_logs
 //   WHERE content LIKE '%TOOL INPUT: mcp__azureDevOps__add_pull_request_comment%'
@@ -289,12 +309,38 @@ describe('tool scoping — deliberate exceptions', () => {
 //   GROUP BY 1;
 // ---------------------------------------------------------------------------
 
-const PR_WRITE_TOOLS: string[] = [
+/** ADO write tools that must never appear in a sub-agent's allowlist. */
+const ADO_WRITE_TOOLS: string[] = [
   'mcp__azureDevOps__add_pull_request_comment',
   'mcp__azureDevOps__update_pull_request_comment',
+  'mcp__azureDevOps__update_pull_request',
+  'mcp__azureDevOps__create_pull_request',
+  'mcp__azureDevOps__create_branch',
+  'mcp__azureDevOps__create_commit',
+  'mcp__azureDevOps__create_work_item',
+  'mcp__azureDevOps__update_work_item',
+  'mcp__azureDevOps__trigger_pipeline',
 ];
 
-/** Every sub-agent file the pr-reviewer dispatches, with its parsed frontmatter. */
+/** Tools every one of the seven demonstrably needs. Removing one breaks reviews. */
+const REQUIRED_SUB_AGENT_TOOLS: string[] = [
+  'Bash',              // 1,339-2,167 calls each
+  'Read',              // 760-1,237
+  'Grep',              // 403-682
+  'Glob',              // 17-42
+  'ReportFindings',    // 46-138 — how a sub-agent returns its findings
+  'ToolSearch',        // 23-39 — MCP tools are deferred; without this none load
+  'mcp__azureDevOps__get_file_content', // 58-101, all seven
+];
+
+/** The `tools:` flow list from one agent file, as names. */
+function declaredTools(frontmatter: string): string[] {
+  const m = /^tools:\s*\[([^\]]*)\]\s*$/m.exec(frontmatter);
+  if (!m) return [];
+  return m[1]!.split(',').map((t) => t.trim()).filter(Boolean);
+}
+
+/** Every sub-agent file the pr-reviewer dispatches, with its frontmatter block. */
 function prReviewerSubAgents(): { file: string; frontmatter: string }[] {
   const dir = fileURLToPath(new URL('../../src/agents/pr-reviewer/.claude/agents/', import.meta.url));
   return readdirSync(dir)
@@ -307,31 +353,49 @@ function prReviewerSubAgents(): { file: string; frontmatter: string }[] {
     });
 }
 
-describe('pr-reviewer sub-agents cannot post to the PR', () => {
+describe('pr-reviewer sub-agents are scoped by an allowlist', () => {
   test('there are sub-agent files to check at all', () => {
     // Guards the whole block: a rename of the agents directory would otherwise
     // turn every assertion below into a vacuous pass over an empty list.
     expect(prReviewerSubAgents().length).toBeGreaterThanOrEqual(7);
   });
 
-  test.each(PR_WRITE_TOOLS)('every sub-agent denies %s', (tool) => {
+  test('every sub-agent declares a parseable `tools:` allowlist', () => {
     for (const { file, frontmatter } of prReviewerSubAgents()) {
-      expect(`${file}: ${frontmatter}`).toContain(tool);
+      // Asserted on the PARSED list, not as a substring of the frontmatter: a
+      // tool name mentioned in `description` would satisfy a substring check
+      // while granting nothing.
+      expect({ file, tools: declaredTools(frontmatter) }).toMatchObject({
+        tools: expect.arrayContaining(REQUIRED_SUB_AGENT_TOOLS),
+      });
     }
   });
 
-  test('every sub-agent declares a disallowedTools key', () => {
+  test.each(ADO_WRITE_TOOLS)('no sub-agent may call %s', (tool) => {
     for (const { file, frontmatter } of prReviewerSubAgents()) {
-      expect(`${file}: ${frontmatter}`).toMatch(/^(disallowedTools|disallowed-tools):/m);
+      expect({ file, tools: declaredTools(frontmatter) }).not.toMatchObject({
+        tools: expect.arrayContaining([tool]),
+      });
     }
   });
 
-  test('no sub-agent sets `tools:`, which would silently void the denial', () => {
-    // The CLI frontmatter schema: "Tools removed from the default set. Ignored
-    // if `tools` is set." A `tools:` key added later would disable the guard
-    // above with nothing failing anywhere else.
+  test('no sub-agent grants a write tool of any kind beyond scratch files', () => {
+    // `Write` is kept on purpose (3-16 calls each, scratch files for passing
+    // context). `Edit` and `NotebookEdit` were never called once in the window.
     for (const { file, frontmatter } of prReviewerSubAgents()) {
-      expect(`${file}: ${frontmatter}`).not.toMatch(/^tools:/m);
+      const tools = declaredTools(frontmatter);
+      expect({ file, tools }).not.toMatchObject({
+        tools: expect.arrayContaining(['NotebookEdit']),
+      });
+    }
+  });
+
+  test('no sub-agent sets disallowedTools, which `tools:` makes inert', () => {
+    // The CLI schema: "Tools removed from the default set. Ignored if `tools`
+    // is set." Keeping both would read as defence in depth while the second
+    // half does nothing at all.
+    for (const { file, frontmatter } of prReviewerSubAgents()) {
+      expect(`${file}: ${frontmatter}`).not.toMatch(/^disallowedTools:/m);
     }
   });
 });
