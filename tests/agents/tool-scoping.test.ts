@@ -1,4 +1,7 @@
 import { describe, test, expect } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { PipelineConfig } from '../../src/types/pipeline.types.ts';
 import { createAnalyzerConfig } from '../../src/agents/analyzer/config.ts';
 import { createBackportReviewConfig } from '../../src/agents/cherry-pick-reviewer/config.ts';
@@ -251,6 +254,84 @@ describe('tool scoping — deliberate exceptions', () => {
     const dw = agentSurfaces().find(a => a.name === 'docs-writer')!;
     for (const t of ['Write', 'Edit', 'Bash']) {
       expect(dw.disallowedTools).not.toContain(t);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The pr-reviewer's own sub-agents must not be able to post to the PR.
+//
+// Measured, twice: on PR 52726 (2026-08-06) and PR 53254 (2026-08-14) the
+// `code-review-validator` sub-agent called `add_pull_request_comment` itself,
+// with the "Code Review In Progress" template copied character for character
+// out of the ORCHESTRATOR's CLAUDE.md. It then updated its own thread with a
+// full review of its own. The PR ended up with two bot threads: the
+// orchestrator's, which the pipeline tracks, and the sub-agent's, which nothing
+// tracks — no reconciliation, no stale marking, invisible to finding-outcome
+// tooling.
+//
+// The sub-agents inherit the orchestrator's MCP servers, and the orchestrator
+// must keep both write tools (posting the review is its job), so the denial has
+// to be per-agent. `AgentDefinition.disallowedTools` is that mechanism, and the
+// CLI parses it from agent-file frontmatter (`disallowedTools`, or the
+// kebab-case `disallowed-tools`).
+//
+// CRITICAL: the CLI's own frontmatter schema says `disallowedTools` is
+// "Ignored if `tools` is set." A sub-agent file that grows a `tools:` key later
+// silently loses this denial, so both halves are asserted here.
+//
+// This pins the DECLARATION only. It cannot prove the CLI honoured it — verify
+// that by effect, with zero sub-agent post calls in telemetry:
+//
+//   SELECT agent_name, count(*) FROM stage_logs
+//   WHERE content LIKE '%TOOL INPUT: mcp__azureDevOps__add_pull_request_comment%'
+//     AND agent_name <> 'pr-reviewer' AND created_at > '<deploy time>'
+//   GROUP BY 1;
+// ---------------------------------------------------------------------------
+
+const PR_WRITE_TOOLS: string[] = [
+  'mcp__azureDevOps__add_pull_request_comment',
+  'mcp__azureDevOps__update_pull_request_comment',
+];
+
+/** Every sub-agent file the pr-reviewer dispatches, with its parsed frontmatter. */
+function prReviewerSubAgents(): { file: string; frontmatter: string }[] {
+  const dir = fileURLToPath(new URL('../../src/agents/pr-reviewer/.claude/agents/', import.meta.url));
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => {
+      const raw = readFileSync(join(dir, f), 'utf8');
+      const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
+      if (!m) throw new Error(`${f} has no frontmatter block`);
+      return { file: f, frontmatter: m[1]! };
+    });
+}
+
+describe('pr-reviewer sub-agents cannot post to the PR', () => {
+  test('there are sub-agent files to check at all', () => {
+    // Guards the whole block: a rename of the agents directory would otherwise
+    // turn every assertion below into a vacuous pass over an empty list.
+    expect(prReviewerSubAgents().length).toBeGreaterThanOrEqual(7);
+  });
+
+  test.each(PR_WRITE_TOOLS)('every sub-agent denies %s', (tool) => {
+    for (const { file, frontmatter } of prReviewerSubAgents()) {
+      expect(`${file}: ${frontmatter}`).toContain(tool);
+    }
+  });
+
+  test('every sub-agent declares a disallowedTools key', () => {
+    for (const { file, frontmatter } of prReviewerSubAgents()) {
+      expect(`${file}: ${frontmatter}`).toMatch(/^(disallowedTools|disallowed-tools):/m);
+    }
+  });
+
+  test('no sub-agent sets `tools:`, which would silently void the denial', () => {
+    // The CLI frontmatter schema: "Tools removed from the default set. Ignored
+    // if `tools` is set." A `tools:` key added later would disable the guard
+    // above with nothing failing anywhere else.
+    for (const { file, frontmatter } of prReviewerSubAgents()) {
+      expect(`${file}: ${frontmatter}`).not.toMatch(/^tools:/m);
     }
   });
 });

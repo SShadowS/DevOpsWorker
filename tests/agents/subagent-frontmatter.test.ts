@@ -5,7 +5,15 @@ import { Glob } from 'bun';
 
 // Keys the Claude Code sub-agent frontmatter schema actually supports.
 // `allowed_tools` is NOT one of them — it was used in 12 files and silently ignored.
-const VALID_KEYS = new Set(['name', 'description', 'model', 'tools', 'color', 'skills']);
+//
+// `disallowedTools` was added after checking the CLI binary's own frontmatter
+// schema rather than assuming, given the `allowed_tools` history. The schema
+// describes it as "Tools removed from the default set. Ignored if `tools` is
+// set.", accepts the kebab-case `disallowed-tools` as an alias, and the
+// agent-file loader carries it through to the agent definition.
+const VALID_KEYS = new Set([
+  'name', 'description', 'model', 'tools', 'color', 'skills', 'disallowedTools',
+]);
 
 function agentFiles(): string[] {
   const glob = new Glob('src/agents/*/.claude/agents/*.md');

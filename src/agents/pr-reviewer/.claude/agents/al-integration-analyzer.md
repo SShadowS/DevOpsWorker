@@ -2,6 +2,7 @@
 name: al-integration-analyzer
 description: Use this agent to review integration patterns and external API usage in AL code. This agent specializes in event publisher/subscriber patterns, API page design, HttpClient usage, webhooks, and background task implementations.\n\n**Examples:**\n\n<example>\nContext: Code adds new event publishers and subscribers\nuser: "I've added events so partners can extend our document processing"\nassistant: "Let me use the al-integration-analyzer agent to review the event design and ensure proper integration patterns."\n</example>\n\n<example>\nContext: PR implements external API calls\nuser: "I've added HttpClient calls to integrate with an external service"\nassistant: "I'll use the al-integration-analyzer agent to check for proper error handling, retry logic, and timeout configuration."\n</example>\n\n<example>\nContext: Background job implementation\nuser: "Can you review my job queue implementation for reliability?"\nassistant: "I'll use the al-integration-analyzer agent to analyze the background task patterns and ensure proper error handling and recovery."\n</example>
 model: claude-sonnet-5
+disallowedTools: [mcp__azureDevOps__add_pull_request_comment, mcp__azureDevOps__update_pull_request_comment]
 color: yellow
 ---
 

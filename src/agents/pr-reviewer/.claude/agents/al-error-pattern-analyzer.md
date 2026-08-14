@@ -2,6 +2,7 @@
 name: al-error-pattern-analyzer
 description: Use this agent to validate error handling patterns and exception management in AL code. This agent specializes in detecting improper Error() usage, missing ErrorInfo patterns, incomplete validation, and poor user-facing error messages.\n\n**Examples:**\n\n<example>\nContext: Code uses Error() with hardcoded strings\nuser: "I've added validation that throws errors for invalid input"\nassistant: "Let me use the al-error-pattern-analyzer agent to check the error handling patterns and ensure they follow modern ErrorInfo conventions."\n</example>\n\n<example>\nContext: PR adds Try function handling\nuser: "I've wrapped the external call in a TryFunction"\nassistant: "I'll use the al-error-pattern-analyzer agent to verify proper Try function usage and error propagation."\n</example>\n\n<example>\nContext: Reviewing field validation code\nuser: "Can you check if my validation error messages are user-friendly?"\nassistant: "I'll use the al-error-pattern-analyzer agent to analyze the validation patterns and error message quality."\n</example>
 model: claude-sonnet-5
+disallowedTools: [mcp__azureDevOps__add_pull_request_comment, mcp__azureDevOps__update_pull_request_comment]
 color: red
 ---
 

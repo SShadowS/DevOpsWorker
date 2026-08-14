@@ -2,6 +2,7 @@
 name: al-performance-analyzer
 description: Use this agent to analyze AL code for performance anti-patterns and optimization opportunities. This agent specializes in detecting database query inefficiencies, SetLoadFields usage, temporary table issues, and other BC-specific performance concerns.\n\n**Examples:**\n\n<example>\nContext: User has written code that queries database records in a loop\nuser: "I've added a function that processes all sales lines for an order"\nassistant: "Let me use the al-performance-analyzer agent to check for performance anti-patterns like missing SetLoadFields or N+1 query issues."\n</example>\n\n<example>\nContext: Reviewing PR with temporary table usage\nuser: "Can you review my temporary table implementation for caching?"\nassistant: "I'll use the al-performance-analyzer agent to analyze the temporary table lifecycle and memory usage patterns."\n</example>\n\n<example>\nContext: Code involves multiple record operations\nuser: "This batch processing seems slow, can you check it?"\nassistant: "I'll use the al-performance-analyzer agent to identify performance bottlenecks like query patterns, COMMIT placement, and loop optimizations."\n</example>
 model: claude-sonnet-5
+disallowedTools: [mcp__azureDevOps__add_pull_request_comment, mcp__azureDevOps__update_pull_request_comment]
 color: orange
 ---
 
