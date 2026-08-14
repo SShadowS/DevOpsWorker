@@ -239,6 +239,15 @@ export async function fetchReviewThreadsRaw(
 export interface InlineThreadArgs {
   filePath: string;
   line: number;
+  /**
+   * Column-1 end anchor for the thread's range.
+   *
+   * Omit for a plain comment: the range then collapses onto `line`, which is
+   * all a comment needs. A thread carrying a suggestion MUST pass this — the
+   * range has to end at column 1 of the line AFTER the last replaced line, or
+   * the "replacement" is a zero-width insert. See `suggestion.ts`.
+   */
+  endLine?: number;
   content: string;
 }
 
@@ -266,7 +275,7 @@ export async function postInlineThread(
         threadContext: {
           filePath,
           rightFileStart: { line: args.line, offset: 1 },
-          rightFileEnd: { line: args.line, offset: 1 },
+          rightFileEnd: { line: args.endLine ?? args.line, offset: 1 },
         },
       }),
     },

@@ -206,3 +206,33 @@ describe('likePRComment', () => {
     expect(init.body).toBeUndefined();
   });
 });
+
+describe('postInlineThread anchor', () => {
+  test('without endLine, start and end anchor the same line — unchanged behaviour', async () => {
+    const bodies: string[] = [];
+    globalThis.fetch = mock((_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await postInlineThread(1, { filePath: 'App/X.al', line: 12, content: 'hi' }, config);
+
+    const sent = JSON.parse(bodies[0]!);
+    expect(sent.threadContext.rightFileStart).toEqual({ line: 12, offset: 1 });
+    expect(sent.threadContext.rightFileEnd).toEqual({ line: 12, offset: 1 });
+  });
+
+  test('with endLine, the range ends at column 1 of that line', async () => {
+    const bodies: string[] = [];
+    globalThis.fetch = mock((_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await postInlineThread(1, { filePath: 'App/X.al', line: 12, endLine: 14, content: 'hi' }, config);
+
+    const sent = JSON.parse(bodies[0]!);
+    expect(sent.threadContext.rightFileStart).toEqual({ line: 12, offset: 1 });
+    expect(sent.threadContext.rightFileEnd).toEqual({ line: 14, offset: 1 });
+  });
+});
