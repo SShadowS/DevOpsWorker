@@ -54,7 +54,23 @@ export interface PRReviewRow {
   /** Counters from posting Critical/Major findings as inline PR threads. Null
    *  when nothing was attempted (noPost mode or no findings) — distinct from
    *  an all-zero result, which means it ran and found nothing to anchor. */
-  inlineThreads: { created: number; updated: number; stale: number; failed: number } | null;
+  inlineThreads: {
+    created: number;
+    updated: number;
+    stale: number;
+    failed: number;
+    /**
+     * How many threads carried a one-click suggested fix, and how many findings
+     * offered one that the verification gate refused. Both optional: every row
+     * written before suggestions existed genuinely lacks them.
+     *
+     * `suggested=0 dropped=0` on a review whose findings carried the fields
+     * means the gate never ran — which is what a broken file read looks like,
+     * and is otherwise indistinguishable from a reviewer with no fixes to offer.
+     */
+    suggested?: number;
+    suggestionDropped?: number;
+  } | null;
   /** Which reviewer ran: `sanity:<sourcePrId>` for the cheap backport path, or
    *  `full:<reason>` naming why the full path was chosen. Null for rows recorded
    *  before this routing existed. */

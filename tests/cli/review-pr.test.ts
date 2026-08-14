@@ -912,7 +912,7 @@ describe('applyInlineFindings', () => {
     const spy = mock(() => Promise.resolve(new Response('{}', { status: 200 })));
     globalThis.fetch = spy as unknown as typeof fetch;
     const r = await applyInlineFindings(1, [], config);
-    expect(r).toEqual({ created: 0, updated: 0, stale: 0, failed: 0 });
+    expect(r).toEqual({ created: 0, updated: 0, stale: 0, failed: 0, suggested: 0, suggestionDropped: 0 });
     expect(spy).not.toHaveBeenCalled();
   });
 
@@ -957,7 +957,7 @@ describe('applyInlineFindings', () => {
     try {
       const findings = [{ severity: 'critical', title: 'X', file: 'A.al', line: 3, body: 'b' }] as any;
       const r = await applyInlineFindings(1, findings, config);
-      expect(r).toEqual({ created: 0, updated: 0, stale: 0, failed: 0 });
+      expect(r).toEqual({ created: 0, updated: 0, stale: 0, failed: 0, suggested: 0, suggestionDropped: 0 });
       expect(spy).not.toHaveBeenCalled();
     } finally {
       delete process.env['PR_REVIEW_NO_POST'];
@@ -983,7 +983,7 @@ describe('applyInlineFindings', () => {
     const findings = [{ severity: 'critical', title: 'Boom', file: 'A.al', line: 5, body: 'it breaks' }] as any;
     const r = await applyInlineFindings(1, findings, config);
 
-    expect(r).toEqual({ created: 1, updated: 0, stale: 0, failed: 0 });
+    expect(r).toEqual({ created: 1, updated: 0, stale: 0, failed: 0, suggested: 0, suggestionDropped: 0 });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.method).toBe('POST');
     expect(calls[0]!.url).toContain('/pullrequests/1/threads?api-version=7.0');
@@ -1016,7 +1016,7 @@ describe('applyInlineFindings', () => {
     const findings = [{ severity: 'critical', title: 'Boom', file: 'A.al', line: 5, body: 'still breaks' }] as any;
     const r = await applyInlineFindings(1, findings, config);
 
-    expect(r).toEqual({ created: 0, updated: 1, stale: 0, failed: 0 });
+    expect(r).toEqual({ created: 0, updated: 1, stale: 0, failed: 0, suggested: 0, suggestionDropped: 0 });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.method).toBe('PATCH');
     expect(calls[0]!.url).toContain('/pullrequests/1/threads/7/comments/30?api-version=7.0');
@@ -1049,7 +1049,7 @@ describe('applyInlineFindings', () => {
     const findings = [{ severity: 'critical', title: 'Unrelated, locationless', body: 'x' }] as any;
     const r = await applyInlineFindings(1, findings, config, { today: '2026-07-29' });
 
-    expect(r).toEqual({ created: 0, updated: 0, stale: 1, failed: 0 });
+    expect(r).toEqual({ created: 0, updated: 0, stale: 1, failed: 0, suggested: 0, suggestionDropped: 0 });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.method).toBe('POST');
     expect(calls[0]!.url).toContain('/pullrequests/1/threads/9/comments?api-version=7.0');
@@ -1083,7 +1083,7 @@ describe('applyInlineFindings', () => {
     const findings = [{ severity: 'critical', title: 'Unrelated, locationless', body: 'x' }] as any;
     const r = await applyInlineFindings(1, findings, config, { today: '2026-07-29', suppressStale: true });
 
-    expect(r).toEqual({ created: 0, updated: 0, stale: 0, failed: 0 });
+    expect(r).toEqual({ created: 0, updated: 0, stale: 0, failed: 0, suggested: 0, suggestionDropped: 0 });
     expect(calls).toHaveLength(0); // no write of any kind — nothing to create/update, stale suppressed
   });
 });

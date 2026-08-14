@@ -157,8 +157,8 @@ Offer one only for a small mechanical fix you are certain of — a wrong operato
 missing call site or a divergent hunk needs a human to decide what the right code is, and a
 suggestion would put your guess behind a button the author may click without reading. The
 pipeline checks `replacesText` against the real file before posting and drops the suggestion
-silently if it does not match, so a stale claim costs the suggestion but never posts a wrong
-one.
+silently if it does not match, so a stale claim costs you the suggestion rather than putting
+a wrong fix on the PR.
 
 ## Recommendation
 

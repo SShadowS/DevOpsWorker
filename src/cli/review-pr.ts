@@ -30,6 +30,8 @@ import { chooseReviewPath, compareDiffs, renderDiffComparison, type FileDiff } f
 import { checkoutBranch, resolveRef } from '../sdk/git-checkout.ts';
 import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
 import { extractKey, findingKey, FINDING_MARKER_RE, markerFor } from '../sdk/ado/finding-key.ts';
+import { fetchFileAtCommit } from '../sdk/ado/items.ts';
+import { buildSuggestionBlock, suggestionEndLine, suggestionApplies } from '../sdk/ado/suggestion.ts';
 
 export function makeReviewRunId(prId: number): string {
   return `pr-${prId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -746,8 +748,40 @@ export function isTestRun(): boolean {
  * its later update — the only difference between the two call sites is which
  * ADO write carries this same string.
  */
-function buildCommentBody(finding: PRFinding, key: string): string {
-  return `${markerFor(key)}\n\n**${finding.severity === 'critical' ? '🔴 Critical' : '🟠 Major'}** — ${finding.title}\n\n${finding.body}`;
+function buildCommentBody(finding: PRFinding, key: string, suggestionBlock?: string): string {
+  const head = `${markerFor(key)}\n\n**${finding.severity === 'critical' ? '🔴 Critical' : '🟠 Major'}** — ${finding.title}\n\n${finding.body}`;
+  return suggestionBlock ? `${head}\n\n${suggestionBlock}` : head;
+}
+
+/**
+ * Decide whether this finding may carry a one-click suggested fix.
+ *
+ * A suggestion replaces whole lines literally, and the author applies it with a
+ * single click — often without re-reading it. So the reviewer's claim about
+ * what currently sits at those lines is checked against the file at the PR's
+ * source commit before any Apply button is offered. Every doubt returns null
+ * and the thread posts as an ordinary comment: no suggestion is a small loss,
+ * a wrong one is committed code.
+ */
+export async function resolveSuggestion(
+  finding: PRFinding,
+  sourceCommit: string | undefined,
+  config: PipelineConfig,
+): Promise<{ block: string; endLine: number } | null> {
+  if (!finding.suggestedFix || !finding.replacesText) return null;
+  if (!sourceCommit || !finding.file || finding.line == null) return null;
+  // A fence inside the replacement would close the suggestion block early and
+  // leave the rest of it rendering as prose next to a live Apply button.
+  if (/^\s*```/m.test(finding.suggestedFix)) return null;
+
+  const fileText = await fetchFileAtCommit(finding.file, sourceCommit, config);
+  if (fileText === null) return null;
+  if (!suggestionApplies(fileText, finding.line, finding.replacesText)) return null;
+
+  return {
+    block: buildSuggestionBlock(finding.suggestedFix),
+    endLine: suggestionEndLine(finding.line, finding.replacesText),
+  };
 }
 
 /**
@@ -894,8 +928,8 @@ export async function applyInlineFindings(
   findings: PRFinding[],
   config: PipelineConfig,
   opts: { today?: string; suppressStale?: boolean } = {},
-): Promise<{ created: number; updated: number; stale: number; failed: number }> {
-  const result = { created: 0, updated: 0, stale: 0, failed: 0 };
+): Promise<{ created: number; updated: number; stale: number; failed: number; suggested: number; suggestionDropped: number }> {
+  const result = { created: 0, updated: 0, stale: 0, failed: 0, suggested: 0, suggestionDropped: 0 };
   if (findings.length === 0) return result;
   // Belt and braces: the call site already guards on `!noPost`, but this function
   // is exported and an A/B harness is about to call it directly across many arms.
@@ -926,10 +960,65 @@ export async function applyInlineFindings(
     return result;
   }
 
+  // Read at WRITE time, not from the caller. The caller's PR metadata was read
+  // before the agent ran and a review takes minutes: an author who pushes during
+  // it leaves that commit stale, and Azure DevOps anchors a new thread against
+  // the LATEST iteration. Verifying a suggestion against a superseded commit
+  // passes the gate and still puts the Apply button on code nothing checked.
+  // Same reasoning as the second threads read in reviewPR.
+  //
+  // Lazy and cached: reviews that offer no suggestions pay nothing, and a review
+  // that offers ten reads the metadata once. A failed read leaves it undefined,
+  // resolveSuggestion refuses every finding, and every thread posts as a plain
+  // comment — the same degradation as any other doubt.
+  let sourceCommit: string | undefined;
+  let sourceCommitRead = false;
+  const currentSourceCommit = async (): Promise<string | undefined> => {
+    if (sourceCommitRead) return sourceCommit;
+    sourceCommitRead = true;
+    try {
+      sourceCommit = (await fetchPRMetadata(prId, config)).lastMergeSourceCommit;
+    } catch (err) {
+      console.log(`[inline] could not read the PR's current source commit, posting no suggestions: ${err}`);
+    }
+    return sourceCommit;
+  };
+
   for (const action of actions) {
     try {
       if (action.kind === 'create') {
         const { finding, key } = action;
+        // Suggestions ride on creation only. An existing thread's anchor cannot
+        // be changed by editing its comment, and Azure DevOps re-anchors threads
+        // across iterations — so a suggestion added on update would point at
+        // lines this gate never checked.
+        const offered = Boolean(finding.suggestedFix && finding.replacesText);
+        const suggestion = offered
+          ? await resolveSuggestion(finding, await currentSourceCommit(), config)
+          : null;
+
+        if (suggestion) {
+          try {
+            await postInlineThread(prId, {
+              filePath: finding.file!,
+              line: finding.line!,
+              endLine: suggestion.endLine,
+              content: buildCommentBody(finding, key, suggestion.block),
+            }, config);
+            result.created++;
+            result.suggested++;
+            continue;
+          } catch (err) {
+            // The widened anchor is the only thing this post has that a plain one
+            // does not, so a rejection here costs the SUGGESTION, not the finding.
+            // Falling through to the plain post keeps the invariant that failure
+            // degrades to an ordinary comment; letting it reach the outer catch
+            // would drop the inline thread entirely.
+            console.log(`[inline] widened anchor rejected, retrying without the suggestion: ${err}`);
+          }
+        }
+
+        if (offered) result.suggestionDropped++;
         await postInlineThread(prId, {
           filePath: finding.file!,
           line: finding.line!,
@@ -950,7 +1039,7 @@ export async function applyInlineFindings(
     }
   }
 
-  console.log(`[inline] created=${result.created} updated=${result.updated} stale=${result.stale} failed=${result.failed}`);
+  console.log(`[inline] created=${result.created} updated=${result.updated} stale=${result.stale} failed=${result.failed} suggested=${result.suggested} dropped=${result.suggestionDropped}`);
   return result;
 }
 
@@ -1393,7 +1482,7 @@ export async function reviewPR(args: string[]): Promise<void> {
     // it has no basis to declare a full-review finding "not detected" — suppress the
     // stale notice there. The full path passes `{}`, identical to passing nothing,
     // and keeps today's stale-marking behaviour.
-    let inlineThreads: { created: number; updated: number; stale: number; failed: number } | null = null;
+    let inlineThreads: Awaited<ReturnType<typeof applyInlineFindings>> | null = null;
     if (!noPost && result.output?.findingsList?.length) {
       inlineThreads = await applyInlineFindings(prId, result.output.findingsList, config, route.path === 'sanity' ? { suppressStale: true } : {});
     }

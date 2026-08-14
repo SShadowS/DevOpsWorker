@@ -383,7 +383,7 @@ Return the PRReviewResult with:
 - **findingsCount**: total number of deduplicated findings
 - **recommendation**: the overall recommendation string (`"approve"`, `"request changes"`, or `"needs discussion"`)
 - **findings**: object with counts by severity: `{ critical: N, major: N, minor: N, nitpick: N }`. Count each deduplicated finding based on its final severity after merging.
-- **findingsList**: every finding as a structured record — `{severity, title, file, line, location, body}`.
+- **findingsList**: every finding as a structured record — `{severity, title, file, line, location, replacesText, suggestedFix, body}`.
   - `severity` is the same label you printed in the heading: `critical` / `major` / `minor` / `nitpick`.
   - `title` must match the finding's heading text. `file` and `title` together are what link a finding to the thread already discussing it, so keeping both stable across reviews of this PR is what makes a re-review update that thread rather than open a second one beside it.
   - `file` is the **repo-relative** path of a changed file (`App/Cloud/Al/Codeunits/X.Codeunit.al`), not an AL object name. Spell the same path the same way every review — a path written differently between runs identifies a different finding, exactly as a reworded title does.
