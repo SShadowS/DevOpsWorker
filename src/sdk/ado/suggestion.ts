@@ -60,3 +60,46 @@ export function suggestionEndLine(startLine: number, replacedText: string): numb
 export function buildSuggestionBlock(replacement: string): string {
   return `\`\`\`suggestion\n${stripTrailingNewlines(replacement)}\n\n\`\`\``;
 }
+
+/**
+ * Does the reviewer's claim about the current code still hold?
+ *
+ * `replacedText` is what the reviewer said sits at lines
+ * `startLine..startLine+n-1`. This compares that claim against the file as it
+ * actually stands, line by line and character for character — indentation
+ * included, because a suggestion replaces whole lines literally and wrong
+ * indentation produces code that compiles differently or not at all.
+ *
+ * Line endings are the one difference tolerated: Azure DevOps serves file
+ * content with whatever endings the repo stores, and the reviewer writes LF.
+ *
+ * Fails closed on every doubt — empty claim, range past end of file, line
+ * number below one, and a range ending on the file's last line.
+ */
+export function suggestionApplies(
+  fileText: string,
+  startLine: number,
+  replacedText: string,
+): boolean {
+  if (startLine < 1) return false;
+
+  const claimed = splitLines(stripTrailingNewlines(replacedText));
+  // An empty claim would otherwise "match" any blank line and authorise a
+  // replacement the reviewer never actually looked at.
+  if (claimed.length === 0 || (claimed.length === 1 && claimed[0] === '')) return false;
+
+  const actual = splitLines(fileText);
+  // STRICTLY less than, not `<=`. The thread's end anchor sits at column 1 of
+  // the line AFTER the last replaced line, so that line has to exist. A file
+  // ending in a newline has a final empty element here, which is exactly the
+  // line the anchor lands on; a file with no trailing newline does not, and its
+  // last line is refused. Azure DevOps' behaviour for an anchor past the end was
+  // never probed, and an unprobed anchor behind an Apply button is the one thing
+  // this function exists to prevent.
+  if (startLine - 1 + claimed.length >= actual.length) return false;
+
+  for (let i = 0; i < claimed.length; i++) {
+    if (actual[startLine - 1 + i] !== claimed[i]) return false;
+  }
+  return true;
+}
