@@ -118,6 +118,14 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS inline_threads JSONB;
 -- 'full:<reason>' naming why the full path was chosen. Null for rows recorded
 -- before this routing existed.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_path TEXT;
+-- Which tree the review's clone actually held: 'merge-preview' | 'source-head' |
+-- 'target-tip' | 'default-branch'. The full path used to check out nothing, leaving
+-- the clone on the repo's default branch while the agents were told it was the place
+-- to read a callee's real behaviour — wrong for the ~50% of PRs that target another
+-- release line. This column is how that fix is verified by effect rather than by the
+-- flag being set: a run recording 'merge-preview' whose reads still resolve to the
+-- default branch did not bind.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS tree_source TEXT;
 -- File-modification counts from the eval-only PR_REVIEW_* hooks (agent set,
 -- routing, scoped payload, BC-only security, sub-agent model override, tool
 -- rule) that were ENABLED this run, keyed by lever name. Null for a production

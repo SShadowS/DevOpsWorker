@@ -27,7 +27,8 @@ import {
   type PRMetadata,
 } from '../sdk/ado/pull-requests.ts';
 import { chooseReviewPath, compareDiffs, renderDiffComparison, type FileDiff } from '../sdk/ado/backport.ts';
-import { checkoutBranch, resolveRef } from '../sdk/git-checkout.ts';
+import { checkoutBranch, checkoutSha, resolveRef } from '../sdk/git-checkout.ts';
+import { chooseReviewTree } from '../sdk/ado/review-tree.ts';
 import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
 import { extractKey, findingKey, FINDING_MARKER_RE, markerFor } from '../sdk/ado/finding-key.ts';
 import { fetchFileAtCommit } from '../sdk/ado/items.ts';
@@ -1295,6 +1296,41 @@ export async function reviewPR(args: string[]): Promise<void> {
       logger,
     );
 
+    // The full path used to check out NOTHING, leaving the clone on the repo
+    // registry's default branch while `calleeGuide` tells every analysis sub-agent
+    // that this clone is where to read a called procedure's real behaviour.
+    // Measured over 14 days: 49.7% of reviews target a different release line, and
+    // of 18 files actually read from the clone during such reviews, 12 held
+    // different content than the PR's line (1,491 lines vs 1,326 in one case; in
+    // another, 460 vs 460 with the content still different). Findings were posted
+    // on several — the exact shape `git-checkout.ts` warns about: it "would answer
+    // from a different release line and look verified".
+    //
+    // The tree supplies CALLEE CONTEXT only. Finding line numbers and a suggested
+    // fix's `replacesText` still come from the source-branch fetch, because the
+    // orchestrator requires right-side lines and `resolveSuggestion` verifies
+    // against `lastMergeSourceCommit`.
+    let treeSource = 'default-branch';
+    if (route.path !== 'sanity') {
+      const choice = chooseReviewTree(prMetadata);
+      if (choice.kind !== 'none') {
+        const target = choice.kind === 'target-tip' ? choice.branch : choice.sha;
+        const co = choice.kind === 'target-tip'
+          ? await checkoutBranch(repoDir, target)
+          : await checkoutSha(repoDir, target);
+        if (co.ok) {
+          treeSource = choice.kind;
+          console.log(`[review-tree] checked out ${choice.kind} (${target.slice(0, 12)})`);
+        } else {
+          // Degrade to today's behaviour, loudly. The one state ruled out is a
+          // prompt claiming the PR's code over a default-branch tree.
+          console.log(`[review-tree] ${choice.kind} checkout failed, staying on the default branch: ${co.error}`);
+        }
+      } else {
+        console.log(`[review-tree] no usable ref for PR ${prId}, staying on the default branch`);
+      }
+    }
+
     // A failed checkout falls back to the full review: at this point the diffs
     // above are already fetched but no agent has run, so falling back is still
     // free — see the brief's note on why this ordering is the one that matters.
@@ -1514,6 +1550,7 @@ export async function reviewPR(args: string[]): Promise<void> {
           findingsList: result.output.findingsList ?? null,
           inlineThreads,
           reviewPath: reviewPath,
+          treeSource,
           appliedLevers,
           imageSha: process.env['BUILD_SHA'] ?? null,
           isTest: isTestRun(),
@@ -1569,6 +1606,7 @@ export async function reviewPR(args: string[]): Promise<void> {
         findingsList: null,
         inlineThreads: null,
         reviewPath: reviewPath,
+        treeSource: null,
         appliedLevers,
         imageSha: process.env['BUILD_SHA'] ?? null,
         isTest: isTestRun(),

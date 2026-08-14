@@ -1,0 +1,60 @@
+import type { PRMetadata } from './pull-requests.ts';
+
+/**
+ * Which commit the review's working tree should hold.
+ *
+ * `target-tip` names a branch rather than a sha because the target branch is
+ * already in the clone — no fetch needed — while the two commit rungs generally
+ * are not.
+ */
+export type ReviewTreeChoice =
+  | { kind: 'merge-preview'; sha: string }
+  | { kind: 'source-head'; sha: string }
+  | { kind: 'target-tip'; branch: string }
+  | { kind: 'none' };
+
+/**
+ * Pick the tree a full review should read.
+ *
+ * The full path historically checked out nothing, leaving the clone on the repo
+ * registry's DEFAULT branch while telling agents that clone is where to read a
+ * called procedure's real behaviour (`calleeGuide`). Half of all PRs target a
+ * different release line, so half of all reviews resolved callees against code
+ * from another line — and, in the words of the comment on the fix that was
+ * applied to the backport path, that "would answer from a different release line
+ * and look verified".
+ *
+ * The ladder, in order:
+ *
+ * 1. `lastMergeCommit` — Azure DevOps' merge preview, the PR merged into its
+ *    target. Measured live: present on an ACTIVE PR when `mergeStatus` is
+ *    `succeeded`, absent when it is `conflicts`.
+ * 2. `lastMergeSourceCommit` — the PR head, when no preview exists.
+ * 3. The target branch tip. This is the floor, and it is deliberately NOT the
+ *    repo default: falling back to the default reproduces the defect being
+ *    fixed. The tip needs no fetch, exists for every PR including completed
+ *    ones, and on files the PR does not touch it is identical to the merge
+ *    preview by definition of a merge — and unchanged files are where the
+ *    measured damage was.
+ *
+ * The chosen tree supplies CALLEE CONTEXT only. Finding line numbers and the
+ * `replacesText` a suggested fix quotes continue to come from the source-branch
+ * fetch, because the orchestrator requires right-side line numbers and
+ * `resolveSuggestion` verifies against `lastMergeSourceCommit`. Deriving those
+ * from the preview would drift wherever the target also touched the same file,
+ * silently dropping suggestions and misplacing inline anchors.
+ */
+export function chooseReviewTree(meta: PRMetadata | undefined): ReviewTreeChoice {
+  if (!meta) return { kind: 'none' };
+
+  if (meta.lastMergeCommit) return { kind: 'merge-preview', sha: meta.lastMergeCommit };
+  if (meta.lastMergeSourceCommit) return { kind: 'source-head', sha: meta.lastMergeSourceCommit };
+
+  const branch = (meta.targetBranch ?? '').replace(/^refs\/heads\//, '');
+  // A leading `-` is read as a flag by `git checkout`, and the container's git
+  // 2.39.5 does not support `--end-of-options` there — `checkoutBranch` rejects
+  // the same shape for the same reason.
+  if (!branch || branch.startsWith('-')) return { kind: 'none' };
+
+  return { kind: 'target-tip', branch };
+}

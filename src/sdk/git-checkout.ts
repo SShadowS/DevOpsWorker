@@ -72,13 +72,21 @@ export async function checkoutBranch(
  * Returns `null` when there is nothing usable to fall back to, so the caller can
  * report the ORIGINAL branch error — that is the one a human needs to see.
  */
-async function checkoutCommit(
+/**
+ * Detach the working tree onto a commit sha, or `null` if that cannot be done.
+ *
+ * The shared half of `checkoutCommit` (backport path) and `checkoutSha` (review
+ * path). They differ only in what they log and what they return, so the git
+ * sequence — validate shape, prove the object is present, detach, verify HEAD —
+ * lives here once. Getting any of those four steps wrong silently checks out the
+ * wrong tree, which is the failure this whole area exists to prevent.
+ */
+async function detachTo(
   run: (args: string[]) => ReturnType<typeof runGit>,
-  fallbackSha: string | undefined,
-  branchError: string,
-): Promise<{ ok: true; sha: string; via: 'commit' } | null> {
-  if (!fallbackSha) return null;
-  const sha = fallbackSha.trim();
+  rawSha: string | undefined,
+): Promise<string | null> {
+  if (!rawSha) return null;
+  const sha = rawSha.trim();
   // Validate the shape before handing it to git. A non-sha string would otherwise be
   // interpreted as a ref name and could resolve to something unrelated.
   if (!/^[0-9a-f]{40}$/.test(sha)) return null;
@@ -87,7 +95,7 @@ async function checkoutCommit(
   // locally; a reachability test would be over-strict and reject valid commits. A
   // filtered (`--filter=blob:none`) clone lazily fetches on demand, so this can
   // succeed there for objects a full clone would not have — production clones are
-  // unfiltered, and failing closed here just means the full review.
+  // unfiltered, and failing closed here just means the caller's fallback.
   const present = await run(['cat-file', '-e', `${sha}^{commit}`]);
   if (present.code !== 0) return null;
 
@@ -97,6 +105,35 @@ async function checkoutCommit(
   const rev = await run(['rev-parse', 'HEAD']);
   const head = rev.out.trim();
   if (rev.code !== 0 || head !== sha) return null;
+  return sha;
+}
+
+/**
+ * Check a clone out onto a commit sha.
+ *
+ * Used by the FULL review path, where the commit is the PR's merge preview or its
+ * head — neither of which is a branch in the clone. Separate from
+ * `checkoutBranch`'s `fallbackSha`, which only fires after a branch checkout has
+ * already failed; here the sha is the intended target, not a consolation.
+ *
+ * Never throws, same contract as the rest of this module.
+ */
+export async function checkoutSha(
+  cwd: string,
+  sha: string,
+): Promise<{ ok: true; sha: string } | { ok: false; error: string }> {
+  const landed = await detachTo((args) => runGit(cwd, args), sha);
+  if (!landed) return { ok: false, error: `could not check out ${sha.slice(0, 12)}` };
+  return { ok: true, sha: landed };
+}
+
+async function checkoutCommit(
+  run: (args: string[]) => ReturnType<typeof runGit>,
+  fallbackSha: string | undefined,
+  branchError: string,
+): Promise<{ ok: true; sha: string; via: 'commit' } | null> {
+  const sha = await detachTo(run, fallbackSha);
+  if (!sha) return null;
 
   console.log(
     `[backport] source branch unavailable (${branchError.slice(0, 120)}); ` +

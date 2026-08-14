@@ -374,8 +374,20 @@ export interface PRMetadata {
   lastMergeSourceCommit?: string;
   lastMergeTargetCommit?: string;
   /**
-   * The commit the PR was merged AS. Present once a PR completes, absent on active
-   * and abandoned ones (0/40 abandoned PRs measured had it).
+   * The commit the PR was merged AS once it completes — and, on an ACTIVE PR, the
+   * merge PREVIEW: the PR merged into its target, recomputed by Azure DevOps.
+   *
+   * This comment previously said the field is "absent on active" PRs. That is
+   * wrong, and it was wrong in a load-bearing way — a design cited it as reason to
+   * expect the preview never to exist mid-flight. Measured live 2026-08-14:
+   *
+   * | PR    | status | mergeStatus | lastMergeCommit |
+   * |-------|--------|-------------|-----------------|
+   * | 53254 | active | succeeded   | present         |
+   * | 52109 | active | conflicts   | absent          |
+   *
+   * So it tracks `mergeStatus`, not completion: present whenever Azure DevOps
+   * could compute a merge, absent when it could not. (Abandoned PRs remain 0/40.)
    *
    * For a PR completed with `deleteSourceBranch: true` this is the only checkout
    * target that survives: the source branch is gone and its head is usually
@@ -383,6 +395,12 @@ export interface PRMetadata {
    * branch, which is always cloned.
    */
   lastMergeCommit?: string;
+  /**
+   * Azure DevOps' merge state — `succeeded`, `conflicts`, `queued`, … Read because
+   * it explains an absent `lastMergeCommit` above: without it, "no preview" and
+   * "preview not computed yet" are indistinguishable.
+   */
+  mergeStatus?: string;
 }
 
 /**
@@ -406,6 +424,7 @@ export async function fetchPRMetadata(
     lastMergeSourceCommit?: { commitId?: string };
     lastMergeTargetCommit?: { commitId?: string };
     lastMergeCommit?: { commitId?: string };
+    mergeStatus?: string;
   }>(
     config.azureDevOps,
     `git/repositories/${config.azureDevOps.repositoryId}/pullrequests/${prId}?api-version=7.0`,
@@ -419,6 +438,7 @@ export async function fetchPRMetadata(
     ...(pr.lastMergeSourceCommit?.commitId ? { lastMergeSourceCommit: pr.lastMergeSourceCommit.commitId } : {}),
     ...(pr.lastMergeTargetCommit?.commitId ? { lastMergeTargetCommit: pr.lastMergeTargetCommit.commitId } : {}),
     ...(pr.lastMergeCommit?.commitId ? { lastMergeCommit: pr.lastMergeCommit.commitId } : {}),
+    ...(pr.mergeStatus ? { mergeStatus: pr.mergeStatus } : {}),
   };
 }
 

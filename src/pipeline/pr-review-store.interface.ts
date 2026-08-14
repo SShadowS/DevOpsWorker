@@ -75,6 +75,12 @@ export interface PRReviewRow {
    *  `full:<reason>` naming why the full path was chosen. Null for rows recorded
    *  before this routing existed. */
   reviewPath: string | null;
+  /**
+   * The tree the clone held while the agents read it: 'merge-preview' |
+   * 'source-head' | 'target-tip' | 'default-branch'. Optional so rows written
+   * before the full path checked anything out stay valid.
+   */
+  treeSource?: string | null;
   /** File-modification counts from the eval-only `PR_REVIEW_*` hooks that were
    *  enabled this run. Null for a production review (no lever env vars set)
    *  or a row recorded before this was captured — never a map of zeros, which
