@@ -147,6 +147,19 @@ When a finding has no single location — a partial port, a file missing from th
 nothing, because the finding still reaches the author through the summary. The same applies
 to `location` when the finding sits inside no procedure.
 
+A finding may also carry `replacesText` and `suggestedFix`, which turn its inline thread into
+a one-click "Apply change" suggestion. Supply both or neither. `replacesText` is the exact
+current text of the lines starting at `line`, copied character for character from the file
+including indentation; `suggestedFix` is the complete replacement for exactly those lines.
+
+Offer one only for a small mechanical fix you are certain of — a wrong operator, a missing
+`not`, a misspelled identifier. Most backport findings do not qualify: a partial port, a
+missing call site or a divergent hunk needs a human to decide what the right code is, and a
+suggestion would put your guess behind a button the author may click without reading. The
+pipeline checks `replacesText` against the real file before posting and drops the suggestion
+silently if it does not match, so a stale claim costs the suggestion but never posts a wrong
+one.
+
 ## Recommendation
 
 The three checks decide `recommendation`:

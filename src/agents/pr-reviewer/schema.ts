@@ -6,6 +6,8 @@ export const PRFindingSchema = z.object({
   file: z.string().optional().describe('Repo-relative path of the file the finding concerns. Omit when the finding has no single location.'),
   line: z.number().optional().describe('Line number on the RIGHT (source-branch) side of the diff. Omit unless it is a real line in a changed file.'),
   location: z.string().optional().describe('Name of the enclosing procedure, trigger, or method the finding sits in — e.g. OnAfterValidateEvent, PostDocument. Omit when the finding is not inside one.'),
+  replacesText: z.string().optional().describe('The EXACT current text of the lines your fix replaces, starting at `line`, copied character for character from the file including indentation. Only supply this together with suggestedFix. If it does not match the file exactly the suggestion is silently dropped, so copy rather than retype.'),
+  suggestedFix: z.string().optional().describe('The complete replacement for those lines, as whole lines with correct indentation. Offer this only for a small mechanical fix you are certain of — a wrong operator, a missing not, a typo. Omit it for anything structural. The author applies it with one click and may not re-read it.'),
   body: z.string().describe('The finding explanation in markdown, same prose as the summary comment'),
 });
 

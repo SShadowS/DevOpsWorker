@@ -230,7 +230,7 @@ the fastest way to lose their trust in the whole review.
 **Deduplication rules** — when multiple agents flag the same code location:
 1. Keep the entry with the most detail and context
 2. Use the highest severity across duplicates
-3. Merge suggestions from all sources
+3. Merge suggestions from all sources. This applies to prose only: if two agents propose **different replacement code** for the same lines, keep neither `suggestedFix` nor `replacesText`. Two rewrites of one line cannot be merged, and choosing between them arbitrarily puts a fix you did not adjudicate behind a one-click Apply button. Describe both options in the finding body instead.
 4. Note which analysis domains flagged it
 5. Carry `file`, `line` and `location` through the merge. If the kept entry lacks one of
    them and a merged duplicate has it, take the duplicate's — agreement across domains is a
@@ -392,6 +392,13 @@ Return the PRReviewResult with:
   - When a finding has no single location — a missing test, a pattern spanning several call sites — **omit `file` and `line`**. A guessed line is worse than none: it anchors a comment to unrelated code. Omitting them costs nothing; the finding still appears in the summary.
   - The severity counts in `findings` must agree with the entries here.
   - If a finding matches one listed under "Findings already tracked on this PR", reuse that row's `file` and `title` verbatim here.
+  - `replacesText` and `suggestedFix` are optional and go together — supply both or neither. They turn the finding's inline thread into a one-click "Apply change" suggestion.
+    - `replacesText` is the exact current text of the lines starting at `line` that your fix replaces, copied character for character from the file you fetched, indentation included.
+    - `suggestedFix` is the complete replacement for exactly those lines, as whole lines with the same indentation.
+    - Offer a suggestion only for a **small mechanical fix you are certain of**: a wrong comparison operator, a missing `not`, a misspelled identifier, a missing parameter. Never for a structural change, a rewrite spanning a procedure, or anything where a reasonable reviewer might disagree with your fix.
+    - **Re-read the lines before you write `replacesText`.** Do not reconstruct them from memory or from a diff hunk. Read them back from the file you fetched in Phase 3 — if that result spilled to a `tool-results/…txt` file, use `bun /app/scripts/parse-mcp.ts file-content <file> --lines <N>-<M>`. A diff hunk's leading `+`/`-` column is not part of the line and must not appear in `replacesText`.
+    - The pipeline checks `replacesText` against the real file before posting and drops the suggestion silently if it does not match, so a stale or retyped claim costs you the suggestion but never posts a wrong one.
+    - The author applies your fix with one click and may not read it first. A suggestion that compiles differently than you intended lands in their branch under your name.
 - **reviewBody**: the COMPLETE formatted review markdown from step 9 (identical to what you posted/would post as the comment). Always include this, including in REPLAY MODE.
 - **observedCherryPick**: `true` if, while reading, you concluded this PR ports a change made earlier on another branch. Answer from what you saw — a `(cherry picked from commit …)` trailer, a `[Cherry-pick 25]` marker in the title, a description that nests earlier PRs, an identical change already merged elsewhere. Say `true` even when the prompt carried no `## Cherry-Pick Detected` section: that section is written by a check that runs before you start, and the whole point of this field is to catch what that check missed. Omit the field if you never considered the question.
 - **observedCherryPickSource**: the PR number this was ported FROM, if you identified one. Omit unless you are confident. A bracketed number is a Business Central version branch, not a PR — `[Cherry-pick 25]` means 25.x. A `Merged PR 52705:` prefix, on the other hand, does name a PR.
