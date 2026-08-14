@@ -1,20 +1,19 @@
 import type { PRMetadata } from './pull-requests.ts';
 
 /**
- * Which commit the review's working tree should hold.
+ * One rung of the ladder a full review may check out.
  *
  * `target-tip` names a branch rather than a sha because the target branch is
  * already in the clone — no fetch needed — while the two commit rungs generally
  * are not.
  */
-export type ReviewTreeChoice =
+export type ReviewTreeCandidate =
   | { kind: 'merge-preview'; sha: string }
   | { kind: 'source-head'; sha: string }
-  | { kind: 'target-tip'; branch: string }
-  | { kind: 'none' };
+  | { kind: 'target-tip'; branch: string };
 
 /**
- * Pick the tree a full review should read.
+ * The rungs a full review may check out, best first.
  *
  * The full path historically checked out nothing, leaving the clone on the repo
  * registry's DEFAULT branch while telling agents that clone is where to read a
@@ -23,6 +22,12 @@ export type ReviewTreeChoice =
  * from another line — and, in the words of the comment on the fix that was
  * applied to the backport path, that "would answer from a different release line
  * and look verified".
+ *
+ * **The caller WALKS this list until one lands.** Returning a single choice is
+ * the bug that shipped in `c11dcf4`: the merge preview lives on
+ * `refs/pull/<id>/merge`, which no clone fetches, so one pick with no descent
+ * left the tree on the default branch — and a real acceptance run recorded
+ * exactly that, on the very image carrying the fix.
  *
  * The ladder, in order:
  *
@@ -44,17 +49,28 @@ export type ReviewTreeChoice =
  * from the preview would drift wherever the target also touched the same file,
  * silently dropping suggestions and misplacing inline anchors.
  */
-export function chooseReviewTree(meta: PRMetadata | undefined): ReviewTreeChoice {
-  if (!meta) return { kind: 'none' };
+export function reviewTreeCandidates(meta: PRMetadata | undefined): ReviewTreeCandidate[] {
+  if (!meta) return [];
 
-  if (meta.lastMergeCommit) return { kind: 'merge-preview', sha: meta.lastMergeCommit };
-  if (meta.lastMergeSourceCommit) return { kind: 'source-head', sha: meta.lastMergeSourceCommit };
+  const rungs: ReviewTreeCandidate[] = [];
+  if (meta.lastMergeCommit) rungs.push({ kind: 'merge-preview', sha: meta.lastMergeCommit });
+  if (meta.lastMergeSourceCommit) rungs.push({ kind: 'source-head', sha: meta.lastMergeSourceCommit });
 
   const branch = (meta.targetBranch ?? '').replace(/^refs\/heads\//, '');
   // A leading `-` is read as a flag by `git checkout`, and the container's git
   // 2.39.5 does not support `--end-of-options` there — `checkoutBranch` rejects
-  // the same shape for the same reason.
-  if (!branch || branch.startsWith('-')) return { kind: 'none' };
+  // the same shape for the same reason. Dropping an unusable branch must not
+  // discard the commit rungs above it.
+  if (branch && !branch.startsWith('-')) rungs.push({ kind: 'target-tip', branch });
 
-  return { kind: 'target-tip', branch };
+  return rungs;
+}
+
+/**
+ * Transitional shim — `review-pr.ts` still imports this until the rewiring lands,
+ * at which point both this and the type below are deleted.
+ */
+export type ReviewTreeChoice = ReviewTreeCandidate | { kind: 'none' };
+export function chooseReviewTree(meta: PRMetadata | undefined): ReviewTreeChoice {
+  return reviewTreeCandidates(meta)[0] ?? { kind: 'none' };
 }
