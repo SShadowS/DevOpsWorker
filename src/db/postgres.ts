@@ -118,8 +118,11 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS inline_threads JSONB;
 -- 'full:<reason>' naming why the full path was chosen. Null for rows recorded
 -- before this routing existed.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_path TEXT;
--- Which tree the review's clone actually held: 'merge-preview' | 'source-head' |
--- 'target-tip' | 'default-branch'. The full path used to check out nothing, leaving
+-- Which tree the review's clone actually held. The full path walks a ladder:
+-- 'merge-preview' | 'source-head' | 'target-tip' | 'default-branch'. The sanity
+-- (backport) path records 'source-branch' (the PR's own branch) or 'merge-commit'
+-- (a completed PR's merged result) — before this, every sanity row claimed
+-- 'default-branch' while sitting on the PR's code. The full path used to check out nothing, leaving
 -- the clone on the repo's default branch while the agents were told it was the place
 -- to read a callee's real behaviour — wrong for the ~50% of PRs that target another
 -- release line. This column is how that fix is verified by effect rather than by the

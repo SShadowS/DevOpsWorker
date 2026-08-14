@@ -148,12 +148,3 @@ export async function checkoutReviewTree(
   console.log('[review-tree] no usable tree — the clone stays on the default branch');
   return { source: 'default-branch' };
 }
-
-/**
- * Transitional shim — `review-pr.ts` still imports this until the rewiring lands,
- * at which point both this and the type below are deleted.
- */
-export type ReviewTreeChoice = ReviewTreeCandidate | { kind: 'none' };
-export function chooseReviewTree(meta: PRMetadata | undefined): ReviewTreeChoice {
-  return reviewTreeCandidates(meta)[0] ?? { kind: 'none' };
-}

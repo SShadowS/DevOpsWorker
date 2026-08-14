@@ -1372,7 +1372,7 @@ describe('reviewPR call site — the prior-findings block reaches the agent', ()
     // anchor on the definition — that is where the argument list, and therefore the
     // block, is actually captured.
     const readAt = src.indexOf('priorFindingsBlock = buildPriorFindingsBlock(');
-    const defAt = src.indexOf('const runFullReview = () => runPRReview(');
+    const defAt = src.indexOf('const runFullReview = async () => {');
     expect(readAt).toBeGreaterThan(-1);
     expect(defAt).toBeGreaterThan(-1);
     // Both call sites go through the closure, so no invocation can precede the read.
@@ -1384,7 +1384,7 @@ describe('reviewPR call site — the prior-findings block reaches the agent', ()
   });
 
   test('the block is passed into the full review', () => {
-    const call = src.match(/const runFullReview = \(\) => runPRReview\(\s*\{([\s\S]*?)\},/);
+    const call = src.match(/const runFullReview = async \(\) => \{[\s\S]*?return runPRReview\(\s*\{([\s\S]*?)\},/);
     expect(call).not.toBeNull();
     expect(call![1]).toContain('priorFindingsBlock');
     // Exactly one runPRReview call site: two would let the fallback path drift from
@@ -2028,5 +2028,35 @@ describe('reviewPR threads isTest through both save() calls via isTestRun()', ()
     for (const call of saveCalls) {
       expect(call).toMatch(/isTest:\s*isTestRun\(\)/);
     }
+  });
+});
+
+describe('reviewPR call site — the checkout walk runs on EVERY full-review entry', () => {
+  // The first attempt put the walk before the route settled, guarded on
+  // `route.path !== 'sanity'`. Three separate paths degrade sanity -> full AFTER
+  // that point — a failed sanity checkout, an unusable port diff, and a sanity
+  // agent that errors — so each of those would have run the full review on
+  // whatever tree the sanity path happened to leave behind.
+  //
+  // Putting the walk INSIDE the closure is what makes "wherever the full review
+  // starts, the PR's code is under it" true. Pinned by source because exercising
+  // it would need the whole agent stack.
+  const src = readFileSync(fileURLToPath(new URL('../../src/cli/review-pr.ts', import.meta.url)), 'utf-8');
+
+  test('the walk is inside runFullReview, not before the route settles', () => {
+    const closure = src.match(/const runFullReview = async \(\) => \{([\s\S]*?)\n    \};/);
+    expect(closure).not.toBeNull();
+    expect(closure![1]).toContain('checkoutReviewTree(');
+  });
+
+  test('there is exactly one checkout walk, so no entry path can skip it', () => {
+    expect((src.match(/checkoutReviewTree\(/g) ?? []).length).toBe(1);
+  });
+
+  test('the tree the walk chose is what reaches the agent prompt', () => {
+    // treeSource is a required param; passing a literal here instead of the walk's
+    // result would compile and silently describe a tree nobody checked out.
+    const closure = src.match(/const runFullReview = async \(\) => \{([\s\S]*?)\n    \};/);
+    expect(closure![1]).toContain('treeSource: tree.source');
   });
 });

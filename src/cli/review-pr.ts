@@ -27,8 +27,8 @@ import {
   type PRMetadata,
 } from '../sdk/ado/pull-requests.ts';
 import { chooseReviewPath, compareDiffs, renderDiffComparison, type FileDiff } from '../sdk/ado/backport.ts';
-import { checkoutBranch, checkoutSha, resolveRef } from '../sdk/git-checkout.ts';
-import { chooseReviewTree } from '../sdk/ado/review-tree.ts';
+import { checkoutBranch, resolveRef } from '../sdk/git-checkout.ts';
+import { checkoutReviewTree } from '../sdk/ado/review-tree.ts';
 import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
 import { extractKey, findingKey, FINDING_MARKER_RE, markerFor } from '../sdk/ado/finding-key.ts';
 import { fetchFileAtCommit } from '../sdk/ado/items.ts';
@@ -1284,52 +1284,46 @@ export async function reviewPR(args: string[]): Promise<void> {
   // source branch — i.e. the PR is already completed. Read by the staleness check.
   let reviewedMergeCommit = false;
 
+  // Which tree the clone held when the agents read it. A fact about the run, so it
+  // is persisted even when the review itself fails. 'default-branch' until a
+  // checkout lands; both the sanity checkout and the full path's ladder walk
+  // overwrite it with what they actually did.
+  let treeSource: string = 'default-branch';
+  let treeDetail: string | undefined;
+
   try {
     let result: AgentResult<PRReviewResult> | AgentResult<BackportReview>;
 
     // Named so the sanity path can fall back to it. Declared once rather than
-    // duplicated at the two call sites — the argument list is long enough that two
-    // copies would drift.
-    const runFullReview = () => runPRReview(
-      { prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId, project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl, prTitle: resolvedTitle, prDescription: resolvedDescription, noPost, priorFindingsBlock, treeSource: 'default-branch' },
-      config,
-      logger,
-    );
-
-    // The full path used to check out NOTHING, leaving the clone on the repo
-    // registry's default branch while `calleeGuide` tells every analysis sub-agent
-    // that this clone is where to read a called procedure's real behaviour.
-    // Measured over 14 days: 49.7% of reviews target a different release line, and
-    // of 18 files actually read from the clone during such reviews, 12 held
-    // different content than the PR's line (1,491 lines vs 1,326 in one case; in
-    // another, 460 vs 460 with the content still different). Findings were posted
-    // on several — the exact shape `git-checkout.ts` warns about: it "would answer
-    // from a different release line and look verified".
+    // duplicated at the call sites — the argument list is long enough that copies
+    // would drift.
+    //
+    // The checkout walk lives HERE, not before the route settles: three separate
+    // paths degrade sanity -> full AFTER that point (a failed sanity checkout, an
+    // unusable port diff, and a sanity agent that errors), and a walk placed
+    // earlier would skip all three. Wherever the full review starts, this is what
+    // puts the PR's code under it first.
     //
     // The tree supplies CALLEE CONTEXT only. Finding line numbers and a suggested
     // fix's `replacesText` still come from the source-branch fetch, because the
     // orchestrator requires right-side lines and `resolveSuggestion` verifies
     // against `lastMergeSourceCommit`.
-    let treeSource = 'default-branch';
-    if (route.path !== 'sanity') {
-      const choice = chooseReviewTree(prMetadata);
-      if (choice.kind !== 'none') {
-        const target = choice.kind === 'target-tip' ? choice.branch : choice.sha;
-        const co = choice.kind === 'target-tip'
-          ? await checkoutBranch(repoDir, target)
-          : await checkoutSha(repoDir, target);
-        if (co.ok) {
-          treeSource = choice.kind;
-          console.log(`[review-tree] checked out ${choice.kind} (${target.slice(0, 12)})`);
-        } else {
-          // Degrade to today's behaviour, loudly. The one state ruled out is a
-          // prompt claiming the PR's code over a default-branch tree.
-          console.log(`[review-tree] ${choice.kind} checkout failed, staying on the default branch: ${co.error}`);
-        }
-      } else {
-        console.log(`[review-tree] no usable ref for PR ${prId}, staying on the default branch`);
-      }
-    }
+    const runFullReview = async () => {
+      const tree = await checkoutReviewTree(repoDir, prId, prMetadata);
+      treeSource = tree.source;
+      treeDetail = tree.detail;
+      return runPRReview(
+        {
+          prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId,
+          project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl,
+          prTitle: resolvedTitle, prDescription: resolvedDescription, noPost, priorFindingsBlock,
+          treeSource: tree.source,
+          ...(tree.detail ? { treeDetail: tree.detail } : {}),
+        },
+        config,
+        logger,
+      );
+    };
 
     // A failed checkout falls back to the full review: at this point the diffs
     // above are already fetched but no agent has run, so falling back is still
@@ -1349,6 +1343,14 @@ export async function reviewPR(args: string[]): Promise<void> {
         // reviewing the branch, and `review_path` is what a human reads later.
         reviewPath = `${reviewPath}+merge-commit`;
         reviewedMergeCommit = true;
+        treeSource = 'merge-commit';
+        treeDetail = checkout.sha.slice(0, 12);
+      } else {
+        // The sanity path DID move the tree — onto the PR's own branch. Leaving
+        // `treeSource` at 'default-branch' here made every backport row claim a
+        // tree it did not have, against this column's own contract.
+        treeSource = 'source-branch';
+        treeDetail = checkout.sha.slice(0, 12);
       }
     }
 
@@ -1606,7 +1608,10 @@ export async function reviewPR(args: string[]): Promise<void> {
         findingsList: null,
         inlineThreads: null,
         reviewPath: reviewPath,
-        treeSource: null,
+        // Unlike the fields above, the tree state was established BEFORE the agent
+        // ran: a failed review still read from a real tree, and which one is
+        // exactly what a human debugging the failure needs.
+        treeSource,
         appliedLevers,
         imageSha: process.env['BUILD_SHA'] ?? null,
         isTest: isTestRun(),
