@@ -13,6 +13,7 @@ import { createDraftPRConfig } from '../../src/agents/draft-pr/config.ts';
 import { createPlanReviewerConfig } from '../../src/agents/plan-reviewer/config.ts';
 import { createPlannerConfig } from '../../src/agents/planner/config.ts';
 import { createPRReviewConfig } from '../../src/agents/pr-reviewer/config.ts';
+import { createReflectionConfig } from '../../src/agents/reflection/config.ts';
 import { createTestCaseReviewerConfig } from '../../src/agents/test-case-reviewer/config.ts';
 import { createTestCasesConfig } from '../../src/agents/test-cases/config.ts';
 import {
@@ -130,6 +131,9 @@ function agentSurfaces(): AgentSurface[] {
       prId: 1, repoKey: 'k', repoUrl: 'https://x', repositoryId: 'r',
       project: 'p', sourceBranch: 'refs/heads/a', targetBranch: 'refs/heads/b',
       treeSource: 'default-branch', noPost: true,
+    })),
+    surface('reflection', createReflectionConfig(cfg, {
+      learningSetBlock: '', promptFilesBlock: '', windowDays: 35, cycleDate: '2026-08-15',
     })),
     surface('test-case-reviewer', createTestCaseReviewerConfig(cfg)),
     surface('test-cases', createTestCasesConfig(cfg)),
