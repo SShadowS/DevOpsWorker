@@ -441,9 +441,22 @@ export interface ReflectionDispatchDeps {
  * row is superseded therefore reaches here as `null`, indistinguishable from
  * a cycle with no proposal at all, and this function does not need to know
  * 'superseded' exists.
+ *
+ * **UTC, not local time** — `getUTCDate()`, not `getDate()`. `cycleDate` in
+ * `executeReflection` is `now.toISOString().slice(0, 10)`, and `reflect.ts`'s
+ * own default cycle date is the same UTC-based string. Gating on the local
+ * day while keying the lookup on the UTC day lets a host east of UTC (local
+ * date already the 16th while UTC is still the 15th) or west of UTC (local
+ * date still the 14th while UTC has rolled to the 15th) pass this gate on a
+ * tick where `cycleDate` reads a day the guard never intended to admit — or,
+ * worse, let two ticks either side of UTC midnight both read local-15th,
+ * each produce a DIFFERENT `cycleDate`, each see `findByCycle` return null
+ * for their own key, and each dispatch: the exact double-spawn the advisory
+ * lock exists to prevent, defeated by the gate and the key disagreeing about
+ * which calendar they're using.
  */
 export function shouldDispatchReflection(now: Date, existing: ReflectionProposal | null): boolean {
-  return now.getDate() === 15 && existing === null;
+  return now.getUTCDate() === 15 && existing === null;
 }
 
 /**
