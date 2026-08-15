@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, spyOn } from 'bun:test';
 import { rowToReflectionProposal, PROPOSAL_STATUSES } from '../../src/db/reflection-proposal-mapper.ts';
 
 describe('rowToReflectionProposal', () => {
@@ -40,8 +40,37 @@ describe('rowToReflectionProposal', () => {
   });
 
   test('unknown status maps to null and warns once', () => {
-    const p = rowToReflectionProposal({ ...fullRow, status: 'wat' });
-    expect(p.status).toBeNull();
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const p = rowToReflectionProposal({ ...fullRow, status: 'unknown-status-1' });
+      expect(p.status).toBeNull();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test('same unknown status does not warn again', () => {
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      rowToReflectionProposal({ ...fullRow, status: 'repeated-unknown-status' });
+      rowToReflectionProposal({ ...fullRow, status: 'repeated-unknown-status' });
+      rowToReflectionProposal({ ...fullRow, status: 'repeated-unknown-status' });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test('different unknown status warns again', () => {
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      rowToReflectionProposal({ ...fullRow, status: 'first-distinct-unknown' });
+      rowToReflectionProposal({ ...fullRow, status: 'second-distinct-unknown' });
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   test('null JSONB columns map to null, not empty arrays', () => {
