@@ -294,6 +294,32 @@ ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS request_count INTEGE
 -- back to the default lookback and says so, same as the model column above.
 ALTER TABLE finding_outcome_sweeps ADD COLUMN IF NOT EXISTS lookback_days INTEGER;
 
+-- One monthly reflection run's proposal; history is the point, rows are superseded, never deleted.
+-- See src/db/reflection-proposal-mapper.ts for the row ⇄ object mapping.
+CREATE TABLE IF NOT EXISTS reflection_proposals (
+  id              SERIAL PRIMARY KEY,
+  cycle_date      DATE NOT NULL,
+  window_days     INTEGER NOT NULL DEFAULT 35,
+  coverage        JSONB,
+  adjudications   JSONB NOT NULL,
+  clusters        JSONB NOT NULL,
+  proposed_changes JSONB NOT NULL,
+  watch_ledger    JSONB,
+  classifier_notes JSONB,
+  expected_effects JSONB,
+  log_entry_draft TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  decided_by      TEXT,
+  decided_at      TIMESTAMPTZ,
+  applied_at      TIMESTAMPTZ,
+  applied_commits JSONB,
+  cost_usd        REAL,
+  session_id      TEXT,
+  error           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_reflection_proposals_created ON reflection_proposals (created_at DESC);
+
 CREATE TABLE IF NOT EXISTS users (
   id            SERIAL PRIMARY KEY,
   email         TEXT NOT NULL UNIQUE,
