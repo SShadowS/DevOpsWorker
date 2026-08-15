@@ -308,16 +308,27 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
         // Narrow: only a genuinely malformed request body belongs on the 400
         // path. Store/DB failures below get their own try — see the comment
         // there for why the two must never share a catch.
-        let body: { decision?: string };
+        let body: unknown;
         try {
-          body = (await req.json()) as { decision?: string };
+          body = await req.json();
         } catch {
           return Response.json({ error: 'Invalid request body' }, { status: 400 });
         }
 
-        if (body.decision !== 'approved' && body.decision !== 'rejected') {
-          return Response.json({ error: 'decision must be "approved" or "rejected"' }, { status: 400 });
+        // Shape guard, not just a value check: `body` is `unknown` here — valid
+        // JSON like a bare `null`, a number, or an array parses fine (req.json()
+        // doesn't throw), so a `.decision` read without first ruling those out
+        // throws a TypeError that escapes this handler uncaught. `body === null`
+        // is checked before the property read below, and `||` short-circuits, so
+        // that read is never reached when body isn't a plain object.
+        if (
+          typeof body !== 'object' ||
+          body === null ||
+          ((body as { decision?: unknown }).decision !== 'approved' && (body as { decision?: unknown }).decision !== 'rejected')
+        ) {
+          return Response.json({ error: 'Invalid request body' }, { status: 400 });
         }
+        const decision = (body as { decision: 'approved' | 'rejected' }).decision;
 
         // A separate try from the JSON parse above: findById/decide/write can
         // throw on a genuine store/DB failure, and that is never "an invalid
@@ -329,16 +340,16 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
           const proposal = await reflectionStore.findById(id);
           if (!proposal) return Response.json({ error: `No reflection proposal with id ${id}.` }, { status: 404 });
 
-          const decided = await reflectionStore.decide(id, body.decision, user!.email);
+          const decided = await reflectionStore.decide(id, decision, user!.email);
           if (!decided) return Response.json({ error: 'This proposal was already decided.' }, { status: 409 });
 
           await auditStore.write({
             actorEmail: user!.email,
-            action: body.decision,
+            action: decision,
             entityType: 'reflection',
             entityKey: String(id),
             beforeValue: { status: proposal.status },
-            afterValue: { status: body.decision },
+            afterValue: { status: decision },
           });
 
           return Response.json({ ok: true });

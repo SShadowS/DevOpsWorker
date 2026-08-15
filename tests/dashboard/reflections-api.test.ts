@@ -263,6 +263,24 @@ describe('reflections API (real server, fake reflection + audit stores)', () => 
     expect((await reflectionStore.findById(id))!.status).toBe('pending');
   });
 
+  // Regression: `req.json()` on a body of literal `null` is VALID JSON — it
+  // parses without throwing, so it never reached the parse try/catch's 400
+  // path. The old code read `body.decision` straight off the parsed value,
+  // which threw an unhandled TypeError for exactly this body (`null.decision`)
+  // and escaped the fetch handler entirely, rather than returning any HTTP
+  // response.
+  test('a body that is valid JSON but not an object (bare null) returns 400, not a crash', async () => {
+    const id = await reflectionStore.save(minimalProposal);
+
+    const res = await postDecision(id, null);
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('Invalid request body');
+
+    expect(auditStore.written.some((w) => w.entityKey === String(id))).toBe(false);
+    expect((await reflectionStore.findById(id))!.status).toBe('pending');
+  });
+
   test('unauthenticated requests are rejected the same way as the rest of the API', async () => {
     const id = await reflectionStore.save(minimalProposal);
     expect((await fetch(`${base}/api/reflections`)).status).toBe(401);
