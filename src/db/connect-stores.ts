@@ -12,6 +12,7 @@ import { PgAuthEventStore } from './pg-auth-event-store.ts';
 import { PgRegistryStore } from './pg-registry-store.ts';
 import { PgSettingsStore } from './pg-settings-store.ts';
 import { PgAuditStore } from './pg-audit-store.ts';
+import { PgReflectionStore } from './pg-reflection-store.ts';
 
 export async function connectStores(options: ConnectDatabaseOptions = {}) {
   const url = process.env['DATABASE_URL'];
@@ -30,6 +31,7 @@ export async function connectStores(options: ConnectDatabaseOptions = {}) {
     registryStore: new PgRegistryStore(sql),
     settingsStore: new PgSettingsStore(sql),
     auditStore: new PgAuditStore(sql),
+    reflectionStore: new PgReflectionStore(sql),
     logSink: (workItemId: number) => new PgLogSink(sql, workItemId),
     prReviewLogSink: (prId: number, reviewRunId: string) => new PgPrReviewLogSink(sql, prId, reviewRunId),
   };
