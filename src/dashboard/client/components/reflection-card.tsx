@@ -59,7 +59,7 @@ type ReflectionListState =
   | { status: 'empty' }
   | { status: 'ready'; proposals: ReflectionProposal[] };
 
-const listState = signal<ReflectionListState>({ status: 'loading' });
+export const listState = signal<ReflectionListState>({ status: 'loading' });
 
 /** Which decision is in flight, or null. Drives per-button "Approving…" /
  *  "Rejecting…" labels and disables both buttons while either is running —
@@ -69,7 +69,7 @@ const listState = signal<ReflectionListState>({ status: 'loading' });
 const decisionBusy = signal<'approved' | 'rejected' | null>(null);
 const decisionError = signal<string | null>(null);
 
-async function loadReflections(): Promise<void> {
+export async function loadReflections(): Promise<void> {
   listState.value = { status: 'loading' };
   try {
     const res = await fetch('/api/reflections?limit=5');
@@ -324,7 +324,7 @@ function ReflectionAdjudications({ rows }: { rows: Adjudication[] }) {
   }
   return (
     <ReflectionSection title="Disputed findings, adjudicated">
-      <table class="config-table">
+      <table class="config-table reflection-table">
         <thead>
           <tr>
             <th>Severity</th>
@@ -511,7 +511,7 @@ function ReflectionProposalDetail({ proposal }: { proposal: ReflectionProposal }
 function ReflectionHistory({ proposals }: { proposals: ReflectionProposal[] }) {
   return (
     <ReflectionSection title="Earlier cycles">
-      <table class="config-table">
+      <table class="config-table reflection-table">
         <thead><tr><th>Cycle</th><th>Status</th></tr></thead>
         <tbody>
           {proposals.map((p) => (

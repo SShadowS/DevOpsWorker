@@ -3106,3 +3106,55 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .diff-view__line--del { color: var(--color-error-text); background: rgba(239, 68, 68, 0.12); }
 .diff-view__line--hunk { color: var(--color-info-text, var(--color-text-secondary)); }
 .diff-view__line--file { color: var(--color-text-secondary); font-weight: 600; }
+
+/* --- Stats tab section switcher -------------------------------------------
+ * Groups the tab's seven panels into four sections. Underline style rather
+ * than the pill style of the window/population selectors: those pick a
+ * SCOPE for the numbers, this picks WHICH PAGE you are on — two different
+ * jobs should not wear the same clothes. Accent appears only on the active
+ * section (selection, per the palette's own rule), never on hover. */
+.stats-subnav {
+  display: flex;
+  gap: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  margin: var(--space-md) 0 var(--space-sm) 0;
+}
+.stats-subnav__btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  padding: var(--space-xs) 2px calc(var(--space-xs) + 2px) 2px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stats-subnav__btn:hover { color: var(--color-text-primary); }
+.stats-subnav__btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 2px; }
+.stats-subnav__btn--active {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--color-accent);
+}
+.stats-subnav__badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+}
+.stats-subnav__badge--attention { background: rgba(245, 158, 11, 0.18); color: var(--color-warning); }
+.stats-subnav__badge--pending { background: var(--color-accent-dim); color: var(--color-accent); }
+
+/* --- Reflection card table row delimiters ----------------------------------
+ * The adjudication and history tables carry multi-line prose cells; without
+ * row rules thirty rows read as one block. Scoped to the reflection card so
+ * the compact key-value config tables elsewhere keep their airier look. */
+.reflection-table td {
+  border-bottom: 1px solid var(--color-border-muted);
+  padding: 6px 12px 6px 0;
+}
+.reflection-table tbody tr:last-child td { border-bottom: none; }

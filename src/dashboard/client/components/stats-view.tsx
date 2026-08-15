@@ -1,4 +1,5 @@
 import { useEffect } from 'preact/hooks';
+import { signal } from '@preact/signals';
 import {
   statsWindow, statsPopulation, costStats, qualityStats, integrityStats, operationalStats,
   setStatsWindow, setStatsPopulation, loadAllStats, STATS_WINDOWS, STATS_POPULATIONS,
@@ -11,7 +12,8 @@ import { ConfigPanel } from './stats-config.tsx';
 import { CostQualityPanel } from './stats-costquality.tsx';
 import { ReviewValuePanel } from './stats-review-value.tsx';
 import { OperationalPanel } from './stats-operational.tsx';
-import { ReflectionCard } from './reflection-card.tsx';
+import { ReflectionCard, listState as reflectionListState, loadReflections } from './reflection-card.tsx';
+import { assessFlaggedModelKeys, assessErrorRate } from '../assessors.ts';
 import { countOf } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,103 @@ export function pickPopulationMeta(...states: FetchState<PopulationMeta>[]): Pop
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Section sub-navigation — the tab grew to seven stacked panels (~4 screens
+// of scroll), so the panels are grouped into four sections behind a
+// segmented switcher. The ribbon stays global above it: it is already the
+// "worst signal wins" summary for the whole tab, which is exactly what makes
+// hiding five of seven panels safe — an alarm is visible before any
+// switching. Each section button additionally carries its own attention
+// marker so a reader knows WHERE to click, not just that something is off.
+// ---------------------------------------------------------------------------
+
+const STATS_SECTIONS = ['health', 'value', 'reflection', 'config'] as const;
+export type StatsSection = (typeof STATS_SECTIONS)[number];
+
+const SECTION_LABEL: Record<StatsSection, string> = {
+  health: 'Health',
+  value: 'Cost & value',
+  reflection: 'Reflection',
+  config: 'Config',
+};
+
+const SECTION_STORAGE_KEY = 'stats-section';
+
+function initialSection(): StatsSection {
+  try {
+    const saved = localStorage.getItem(SECTION_STORAGE_KEY);
+    if (saved && (STATS_SECTIONS as readonly string[]).includes(saved)) return saved as StatsSection;
+  } catch { /* storage unavailable — session default is fine */ }
+  return 'health';
+}
+
+const activeSection = signal<StatsSection>(initialSection());
+
+function setSection(s: StatsSection): void {
+  activeSection.value = s;
+  try { localStorage.setItem(SECTION_STORAGE_KEY, s); } catch { /* best effort */ }
+}
+
+/** How many of the integrity readings ask for attention right now. Reuses
+ *  the SAME assessors the Integrity panel itself renders with — the badge
+ *  must never disagree with the panel it points at. Only the two assessors
+ *  that need nothing beyond IntegrityStats run here; the contamination
+ *  reading needs its own fetch and stays the panel's business. Null while
+ *  the signal has not settled — no guessed badge. */
+export function healthAttentionCount(integrity: FetchState<Parameters<typeof assessFlaggedModelKeys>[0]>): number | null {
+  if (integrity.status !== 'ready') return null;
+  const readings = [
+    assessFlaggedModelKeys(integrity.data),
+    assessErrorRate(integrity.data.errorRate, integrity.data.lowSample),
+  ];
+  return readings.filter((r) => r.severity === 'attention').length;
+}
+
+/** True when a proposal is waiting on a human decision — the reflection
+ *  section's reason to be visited. A failed run's row (error set, status
+ *  still at its 'pending' default) counts too: it also needs a person to
+ *  look. Null while the list has not settled. */
+export function reflectionPendingCount(state: typeof reflectionListState.value): number | null {
+  if (state.status === 'empty') return 0;
+  if (state.status !== 'ready') return null;
+  return state.proposals.filter((p) => p.status === 'pending').length;
+}
+
+function SectionBadge({ count, kind }: { count: number | null; kind: 'attention' | 'pending' }) {
+  if (count == null || count === 0) return null;
+  const label = kind === 'attention'
+    ? `${countOf(count, 'reading')} asking for attention`
+    : `${countOf(count, 'proposal')} waiting for a decision`;
+  return <span class={`stats-subnav__badge stats-subnav__badge--${kind}`} title={label} aria-label={label}>{count}</span>;
+}
+
+/** Same `role="group"` + per-button `aria-pressed` convention as the window
+ *  and population selectors below it — deliberately NOT a nested
+ *  `role="tablist"` inside the app's real tab bar, for the same reason the
+ *  window selector isn't one. */
+function SectionNav() {
+  const current = activeSection.value;
+  const health = healthAttentionCount(integrityStats.value);
+  const pending = reflectionPendingCount(reflectionListState.value);
+  return (
+    <div class="stats-subnav" role="group" aria-label="Section">
+      {STATS_SECTIONS.map((s) => (
+        <button
+          key={s}
+          type="button"
+          class={`stats-subnav__btn ${s === current ? 'stats-subnav__btn--active' : ''}`}
+          aria-pressed={s === current}
+          onClick={() => setSection(s)}
+        >
+          {SECTION_LABEL[s]}
+          {s === 'health' && <SectionBadge count={health} kind="attention" />}
+          {s === 'reflection' && <SectionBadge count={pending} kind="pending" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function WindowSelector() {
   const current = statsWindow.value;
   return (
@@ -154,53 +253,68 @@ function PopulationDisclosure() {
 export function StatsView() {
   // Refetch every time the tab is opened rather than caching across mounts:
   // this is an operate-mode dashboard, and a stale number with no visible
-  // "stale" marker is worse than a brief loading flash.
-  useEffect(() => { loadAllStats(); }, []);
+  // "stale" marker is worse than a brief loading flash. All sections'
+  // signals load up front (not lazily per section) so the section badges
+  // are honest from the first paint and switching is instant.
+  // `loadReflections` joins the same policy: its badge and the card share
+  // one signal, so a decision made inside the card updates the badge too.
+  useEffect(() => { loadAllStats(); void loadReflections(); }, []);
+
+  const section = activeSection.value;
+  // The Prod|Test and window controls scope only the four windowed stats
+  // endpoints. Config is a fact about the environment and reflections are
+  // "the last few cycles, full stop" — showing scoping chrome above panels
+  // it does not scope is the invisible-control problem this tab exists to
+  // avoid, so the toolbar renders only on the sections it really governs.
+  const windowed = section === 'health' || section === 'value';
 
   return (
     <div class="stats-view">
       {/* Ribbon is "directly under the tabs, above everything else" per Task
-          5's brief — it's the reason this page exists; the window selector
-          (chrome, not a panel) comes after it, not before. Own component
-          (stats-ribbon.tsx): each of its 4 indicators degrades through its
-          OWN fetch's loading/error/empty/ready cycle rather than a
-          combined-worst-of-N-sources pattern, since the drift comparison is
-          worth reading even when /api/stats/integrity comes back empty for
-          this window. The ribbon reads its own always-production signal
-          (`ribbonIntegrityStats`) and is NOT affected by the Prod|Test
-          control below it — see stats-ribbon.tsx. */}
+          5's brief — and it is what makes the section switcher below safe:
+          it summarizes the worst signal across ALL sections, so nothing
+          alarming is invisible while another section is open. The ribbon
+          reads its own always-production signal (`ribbonIntegrityStats`)
+          and is NOT affected by the Prod|Test control — see
+          stats-ribbon.tsx. */}
       <StatsRibbon />
 
-      <div class="stats-view__toolbar">
-        <PopulationSelector />
-        <WindowSelector />
-      </div>
+      <SectionNav />
 
-      <PopulationDisclosure />
+      {windowed && (
+        <div class="stats-view__toolbar">
+          <PopulationSelector />
+          <WindowSelector />
+        </div>
+      )}
 
-      <StatsIntegrityPanel />
+      {windowed && <PopulationDisclosure />}
 
-      <ConfigPanel />
+      {section === 'health' && (
+        <>
+          <StatsIntegrityPanel />
+          <OperationalPanel />
+        </>
+      )}
 
-      <CostQualityPanel />
+      {section === 'value' && (
+        <>
+          <CostQualityPanel />
+          {/* Directly after Cost & Quality, which reports what reviews COST
+              and PRODUCE — this is the only panel that reports whether any
+              of it MATTERED (it reads `finding_outcomes`, not
+              `pr_reviews`). */}
+          <ReviewValuePanel />
+        </>
+      )}
 
-      {/* Directly after Cost & Quality, which reports what reviews COST and
-          PRODUCE. This is the only slot that reports whether any of it
-          MATTERED, and it reads a different table (`finding_outcomes`) — so it
-          sits beside the cost figures it qualifies, not at the end of the
-          page under operational throughput. */}
-      <ReviewValuePanel />
+      {/* Reflection is its own section, not an appendix to Cost & value:
+          it is the one surface on this tab with a human ACTION on it
+          (approve/reject), and its section button carries a pending count
+          so that action is findable without scrolling past four panels. */}
+      {section === 'reflection' && <ReflectionCard />}
 
-      {/* Task 7: beside Review value, not windowed/population-scoped like
-          every panel above it — `/api/reflections` takes neither param, it
-          is what the monthly reflection agent proposed from what Review
-          value (and the rest of this tab) measured. Placed directly after
-          it for that reason: this is the next step in the same story, "here
-          is what review found" -> "here is what we propose changing about
-          it." */}
-      <ReflectionCard />
-
-      <OperationalPanel />
+      {section === 'config' && <ConfigPanel />}
     </div>
   );
 }
