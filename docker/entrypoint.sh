@@ -1,9 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# --- Peek the pipeline command early ---
+# Needed before validation: 'reflect' (see the early-exit branch below, right
+# after the git/Azure CLI setup) skips REPO_CONFIG entirely and skips every
+# repo/AL step that follows. Consumed once, here — reused both for that
+# branch check and for the final `exec` at the bottom of this script, which
+# no longer re-derives it.
+COMMAND="${1:-run}"
+shift || true
+
 # --- Validate required env vars ---
 : "${AZURE_DEVOPS_PAT:?AZURE_DEVOPS_PAT is required}"
-: "${REPO_CONFIG:?REPO_CONFIG is required}"
+# 'reflect' has no work item and clones no repo (see the early-exit branch
+# below) — REPO_CONFIG only matters to the repo/AL machinery it skips.
+if [ "${COMMAND}" != "reflect" ]; then
+  : "${REPO_CONFIG:?REPO_CONFIG is required}"
+fi
 
 if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   echo "ERROR: Either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY must be set"
@@ -25,6 +38,33 @@ export AZURE_DEVOPS_EXT_PAT="${AZURE_DEVOPS_PAT}"
 
 # Environment-tool backend (ENV_CLI) is wired by a deployment overlay via
 # /entrypoint.d/*.sh (sourced below), not by this generic base entrypoint.
+
+# --- reflect: no work item, no repo clone — skip straight to the CLI -------
+# Everything from here down to the "Run as root" section at the bottom (the
+# retry helper, the workspace-layout resolve, Phases 1-4 clone/companions,
+# the AL1001 backslash-path hack, and the AL extension/LSP plugin fetch) is
+# repo/AL work that 'reflect' — which reads pipeline history from Postgres
+# and clones nothing — does not need. Sets the (trivial) state dir and runs
+# the deployment overlay hooks below (a deployment may set env the CLI reads,
+# e.g. ENV_CLI or the git email above) before handing off — same two steps
+# the normal tail performs, just without everything in between.
+if [ "${COMMAND}" = "reflect" ]; then
+  export STATE_DIR="/state/state"
+  mkdir -p "${STATE_DIR}"
+  mkdir -p "/state/logs"
+  mkdir -p "/state/actions"
+
+  if [ -d /entrypoint.d ]; then
+    shopt -s nullglob          # empty dir → loop body runs zero times, not once on a literal glob
+    for hook in /entrypoint.d/*.sh; do
+      [ -r "${hook}" ] && . "${hook}"
+    done
+    shopt -u nullglob
+  fi
+
+  cd /app
+  exec bun run src/cli/index.ts "${COMMAND}" "$@"
+fi
 
 # --- Retry helper for transient network issues ---
 MAX_RETRIES=5
@@ -281,8 +321,7 @@ if [ -d /entrypoint.d ]; then
 fi
 
 # --- Run as root (IS_SANDBOX=1 allows --dangerously-skip-permissions) ---
-COMMAND="${1:-run}"
-shift || true
-
+# COMMAND and the positional args were already peeked at the very top of this
+# script (needed there for the 'reflect' early-exit branch) — not re-derived.
 cd /app
 exec bun run src/cli/index.ts "${COMMAND}" "$@"
