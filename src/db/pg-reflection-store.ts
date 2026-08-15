@@ -4,11 +4,40 @@ import { rowToReflectionProposal, type ReflectionProposal } from './reflection-p
 
 type SaveInput = Parameters<IReflectionStore['save']>[0];
 
+/**
+ * Advisory-lock key for `save`'s transaction-scoped serialization below. A
+ * value clearly distinct from the other two advisory-lock keys in this
+ * codebase, so none of the three can ever contend with each other:
+ * `REFLECTION_LOCK_KEY` (0x5245464c, 'REFL') in `src/cli/watch/
+ * container-dispatcher.ts` guards the dispatch guard+spawn, and
+ * `SWEEP_LOCK_KEY` (0x53575001) in the overlay's `outcome-store.ts` guards the
+ * PR-outcome sweep. Both of those are SESSION-scoped (`pg_advisory_lock`,
+ * taken on a reserved connection and released explicitly); this one is
+ * TRANSACTION-scoped (`pg_advisory_xact_lock`) on purpose — see below.
+ */
+const SAVE_LOCK_KEY = 0x52534156; // 'RSAV'
+
 export class PgReflectionStore implements IReflectionStore {
   constructor(private readonly sql: postgres.Sql) {}
 
   async save(p: SaveInput): Promise<number> {
     return this.sql.begin(async (tx) => {
+      // Serialize concurrent saves for the SAME cycle_date before either one
+      // touches a row: read-committed isolation means two concurrent
+      // first-of-cycle saves both see "no pending row yet" and both commit —
+      // the supersede-on-save UPDATE below has nothing to find and lock when
+      // there is no row yet, so without this the single-pending-row invariant
+      // (see the interface doc) can be broken by a race, not just an update.
+      // Two-arg `pg_advisory_xact_lock` keys the lock on (a constant
+      // identifying this lock's use, `hashtext(cycleDate)`) so only saves for
+      // the same cycle contend — a different cycle's save is not blocked
+      // waiting on this one. Transaction-scoped, not session-scoped: it is
+      // released automatically on commit or rollback, so there is no paired
+      // release call and no risk of leaking a held lock past this function
+      // returning (the failure mode the session-scoped locks above guard
+      // against with an explicit release-on-every-path).
+      await tx`SELECT pg_advisory_xact_lock(${SAVE_LOCK_KEY}, hashtext(${p.cycleDate}))`;
+
       // Single writer per cycle: supersede any still-pending row for this
       // cycle_date before inserting the new one, inside the same transaction
       // so the two never race against a concurrent save for the same cycle.

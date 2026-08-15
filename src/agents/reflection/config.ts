@@ -96,19 +96,40 @@ export function createReflectionConfig(
     // its sandbox is unestablished, so denying it is cheap insurance against
     // an unverified write route rather than proof one exists.
     //
-    // The four ADO writes: this agent must never post to a PR, edit a work
-    // item, or open one — its proposal is reviewed and applied by a human
-    // (Task 6), never by this run.
+    // Every ADO write: this agent must never post to a PR, edit or create a work
+    // item or wiki page, push a branch or commit, link work items, trigger a
+    // pipeline, or open/update a PR — its proposal is reviewed and applied by a
+    // human (Task 6), never by this run. `allowedTools` above names five
+    // read-only lookups; everything else the MCP server exposes that creates,
+    // updates, triggers, or manages state is denied here explicitly, because
+    // `allowedTools` alone (see the comment above) grants nothing back — an ADO
+    // tool omitted from BOTH lists stays callable under bypassPermissions. This
+    // is the full mutating surface of `@sshadows/mcp-server-azure-devops` as of
+    // this write; re-check the server's tool list when it's upgraded.
     disallowedTools: [
       'Write', 'Edit', 'NotebookEdit', 'Bash',
       'Agent', 'Task', 'Workflow', 'REPL',
       'mcp__azureDevOps__add_pull_request_comment',
       'mcp__azureDevOps__update_pull_request_comment',
-      'mcp__azureDevOps__update_work_item',
+      'mcp__azureDevOps__update_pull_request',
       'mcp__azureDevOps__create_pull_request',
+      'mcp__azureDevOps__update_work_item',
+      'mcp__azureDevOps__create_work_item',
+      'mcp__azureDevOps__manage_work_item_link',
+      'mcp__azureDevOps__create_branch',
+      'mcp__azureDevOps__create_commit',
+      'mcp__azureDevOps__create_wiki',
+      'mcp__azureDevOps__create_wiki_page',
+      'mcp__azureDevOps__update_wiki_page',
+      'mcp__azureDevOps__trigger_pipeline',
     ],
     mcpServers: { azureDevOps: azureDevOpsMcp(config) },
     cwd: config.paths.sessionRoot,
+    // Read-only single-pass adjudication over a bounded learning set — there is
+    // no legitimate reason this run costs anywhere near a coder or reviewer
+    // run. A ceiling here is cheap insurance against a runaway loop burning
+    // spend unattended (this CLI has no human watching it turn-by-turn).
+    maxBudgetUsd: 30,
 
     buildPrompt(_state: PipelineState, _ctx: PipelineContext): string {
       // `null` marks a section that does not apply and is dropped; `''` is a

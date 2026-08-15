@@ -358,10 +358,27 @@ export async function runReflect(argv: string[]): Promise<number> {
       return 0;
     }
 
+    // The agent's `output.coverage` is only ever an echo of the numbers this CLI
+    // already computed and injected into its prompt (see `buildLearningSetBlock`'s
+    // doc comment) — it has no database access to compute them itself. Persist the
+    // CLI's own numbers, not the model's repetition of them, and say so plainly
+    // when the two disagree rather than silently picking one.
+    if (
+      output.coverage.total !== coverage.total ||
+      output.coverage.withSaid !== coverage.withSaid ||
+      output.coverage.pct !== coverage.pct
+    ) {
+      console.warn(
+        `[reflect] coverage mismatch — the agent reported ${output.coverage.withSaid}/${output.coverage.total} ` +
+        `(${output.coverage.pct}%) but the CLI computed ${coverage.withSaid}/${coverage.total} (${coverage.pct}%) ` +
+        `from the database; saving the CLI's numbers.`,
+      );
+    }
+
     try {
       const id = await reflectionStore.save({
         cycleDate, windowDays,
-        coverage: output.coverage,
+        coverage,
         adjudications: output.adjudications,
         clusters: output.clusters,
         proposedChanges: output.proposedChanges,
