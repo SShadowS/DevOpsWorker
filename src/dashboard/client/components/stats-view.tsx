@@ -11,6 +11,7 @@ import { ConfigPanel } from './stats-config.tsx';
 import { CostQualityPanel } from './stats-costquality.tsx';
 import { ReviewValuePanel } from './stats-review-value.tsx';
 import { OperationalPanel } from './stats-operational.tsx';
+import { ReflectionCard } from './reflection-card.tsx';
 import { countOf } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
@@ -189,6 +190,15 @@ export function StatsView() {
           sits beside the cost figures it qualifies, not at the end of the
           page under operational throughput. */}
       <ReviewValuePanel />
+
+      {/* Task 7: beside Review value, not windowed/population-scoped like
+          every panel above it — `/api/reflections` takes neither param, it
+          is what the monthly reflection agent proposed from what Review
+          value (and the rest of this tab) measured. Placed directly after
+          it for that reason: this is the next step in the same story, "here
+          is what review found" -> "here is what we propose changing about
+          it." */}
+      <ReflectionCard />
 
       <OperationalPanel />
     </div>

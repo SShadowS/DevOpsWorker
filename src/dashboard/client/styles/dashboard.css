@@ -2784,6 +2784,80 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   font-style: italic;
 }
 
+/* ============================================================
+   Reflection card (Task 7) — own `.reflection-*` namespace, shell rules
+   deliberately identical to `.review-value-section`/`.operational-section`
+   (background/border-left/padding/radius, uppercase title, secondary-colour
+   summary/note) so this card reads as part of the same system rather than a
+   new one — same "one shell rule, now N names" precedent as every other
+   panel on this tab. Sits on the Stats & Config tab beside Review value
+   (stats-view.tsx), not inside `.stats-slot`'s window/population machinery:
+   it reuses `.stats-slot`/`.stats-slot__header`/`.stats-slot__title`/
+   `.stats-slot__window`/`.stats-slot__status-text` directly for its own
+   outer wrapper and the newest proposal's own header row, since both are
+   already generic across this tab (not scoped to any one panel).
+   ============================================================ */
+
+.reflection-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.reflection-proposal__cycle { font-weight: 600; color: var(--color-text-primary); }
+
+.reflection-section {
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-stage-pending);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+}
+.reflection-section--attention {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-tertiary));
+}
+
+.reflection-section__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 4px 0;
+}
+
+.reflection-section__summary, .reflection-section__note, .reflection-section__empty {
+  margin: 4px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+.reflection-section__body > *:first-child,
+.reflection-section > .reflection-section__summary:first-child { margin-top: 0; }
+
+.reflection-change {
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--color-border-muted);
+}
+.reflection-change:first-child { padding-top: 0; border-top: none; }
+.reflection-change__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.reflection-list { margin: 4px 0 0 0; padding-left: 1.2em; }
+.reflection-list li { font-size: 0.82rem; color: var(--color-text-secondary); margin-top: 2px; }
+
+.reflection-decision {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+.reflection-decision__buttons { display: flex; gap: var(--space-sm); }
+
 /* ---- Login page ---- */
 .login-page {
   display: flex;
