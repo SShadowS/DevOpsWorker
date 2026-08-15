@@ -304,12 +304,28 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
       const reflectionDecisionMatch = path.match(/^\/api\/reflections\/(\d+)\/decision$/);
       if (reflectionDecisionMatch && req.method === 'POST') {
         const id = parseInt(reflectionDecisionMatch[1]!, 10);
-        try {
-          const body = (await req.json()) as { decision?: string };
-          if (body.decision !== 'approved' && body.decision !== 'rejected') {
-            return Response.json({ error: 'decision must be "approved" or "rejected"' }, { status: 400 });
-          }
 
+        // Narrow: only a genuinely malformed request body belongs on the 400
+        // path. Store/DB failures below get their own try — see the comment
+        // there for why the two must never share a catch.
+        let body: { decision?: string };
+        try {
+          body = (await req.json()) as { decision?: string };
+        } catch {
+          return Response.json({ error: 'Invalid request body' }, { status: 400 });
+        }
+
+        if (body.decision !== 'approved' && body.decision !== 'rejected') {
+          return Response.json({ error: 'decision must be "approved" or "rejected"' }, { status: 400 });
+        }
+
+        // A separate try from the JSON parse above: findById/decide/write can
+        // throw on a genuine store/DB failure, and that is never "an invalid
+        // request body" — folding it into the same catch as the parse above
+        // used to misreport a 500-shaped problem as a 400, and (worse) would
+        // also mask a decide() that succeeded but whose audit write then
+        // failed, leaving the caller thinking nothing happened at all.
+        try {
           const proposal = await reflectionStore.findById(id);
           if (!proposal) return Response.json({ error: `No reflection proposal with id ${id}.` }, { status: 404 });
 
@@ -326,8 +342,12 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
           });
 
           return Response.json({ ok: true });
-        } catch {
-          return Response.json({ error: 'Invalid request body' }, { status: 400 });
+        } catch (err) {
+          console.error(`[dashboard] failed to save a reflection decision for proposal ${id}:`, err);
+          return Response.json(
+            { error: 'Saving the decision failed — the proposal may or may not have been updated; check the reflections list.' },
+            { status: 500 },
+          );
         }
       }
 

@@ -96,6 +96,17 @@ class RecordingAuditStore implements IAuditStore {
   }
 }
 
+/** A `decide()` that always throws — stands in for a genuine store/DB
+ *  failure (a dropped connection, a constraint violation, whatever). Used to
+ *  prove the decision route's second try/catch (the one wrapping the store
+ *  work) reports this as a 500, distinct from the first try/catch (the JSON
+ *  parse), which must never see it. */
+class ThrowingDecideStore extends FakeReflectionStore {
+  override async decide(_id: number, _decision: 'approved' | 'rejected', _decidedBy: string): Promise<boolean> {
+    throw new Error('simulated store failure');
+  }
+}
+
 type SaveInput = Parameters<IReflectionStore['save']>[0];
 
 const minimalProposal: SaveInput = {
@@ -260,5 +271,77 @@ describe('reflections API (real server, fake reflection + audit stores)', () => 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ decision: 'approved' }),
     })).status).toBe(401);
+  });
+});
+
+describe('reflections API — a genuine store failure is a 500, not a 400', () => {
+  let handle: DashboardHandle;
+  let base: string;
+  let operatorCookie: string;
+  let reflectionStore: ThrowingDecideStore;
+  let auditStore: RecordingAuditStore;
+  let repoSnapshot: RepoRegistry;
+  let companionSnapshot: CompanionRegistry;
+
+  beforeAll(async () => {
+    repoSnapshot = { ...repos };
+    companionSnapshot = { ...companionRegistry };
+    _resetHydrationState();
+
+    const userStore = new FakeUserStore();
+    const sessionStore = new FakeSessionStore();
+    await userStore.create({ email: 'op-fail@x.y', displayName: 'Op', role: 'operator', passwordHash: await hashPassword('op-password-1') });
+
+    reflectionStore = new ThrowingDecideStore();
+    auditStore = new RecordingAuditStore();
+
+    handle = startDashboard({
+      port: 0,
+      stateStore: new StubStateStore(),
+      actionStore: new StubActionStore(),
+      runnerStatus: new StubRunnerStatus(),
+      logSink: () => stubLogSink(),
+      prReviewStore: new StubPRReviewStore(),
+      prReviewLogSink: () => stubLogSink(),
+      sql: {} as postgres.Sql,
+      userStore,
+      sessionStore,
+      authEventStore: new FakeAuthEventStore(),
+      registryStore: new FakeRegistryStore(),
+      settingsStore: new StubSettingsStore(),
+      auditStore,
+      reflectionStore,
+    });
+    base = `http://localhost:${handle.server.port}`;
+
+    const res = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'op-fail@x.y', password: 'op-password-1' }),
+    });
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get('Set-Cookie')!;
+    operatorCookie = new RegExp(`${SESSION_COOKIE}=([^;]+)`).exec(setCookie)![1]!;
+  });
+
+  afterAll(() => {
+    handle.stop();
+    replaceRepos(repoSnapshot);
+    replaceCompanions(companionSnapshot);
+  });
+
+  test('decide() throwing surfaces as 500 with a plain-English message, and writes no audit row', async () => {
+    const id = await reflectionStore.save(minimalProposal);
+
+    const res = await fetch(`${base}/api/reflections/${id}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `${SESSION_COOKIE}=${operatorCookie}` },
+      body: JSON.stringify({ decision: 'approved' }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain('Saving the decision failed');
+    expect(auditStore.written.length).toBe(0);
   });
 });
