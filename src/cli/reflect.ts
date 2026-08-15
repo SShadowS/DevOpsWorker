@@ -1,6 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { connectStores } from '../db/connect-stores.ts';
 import { loadConfig, readAllSettingsSafely } from './config.ts';
 import { createReflectionConfig } from '../agents/reflection/config.ts';
@@ -315,6 +315,17 @@ export async function runReflect(argv: string[]): Promise<number> {
 
     // --- 5. Run the agent. ---
     const sessionRoot = process.env['SESSION_ROOT'] ?? process.cwd();
+    // createReflectionConfig sets the agent's cwd to config.paths.sessionRoot, which
+    // loadConfig sets verbatim to this same sessionRoot — so this is exactly the
+    // directory stageAgentWorkspace will copy CLAUDE.md into. Every other CLI command
+    // that runs an agent (review-pr, the pipeline stages) gets this directory for free:
+    // the container entrypoint creates SESSION_ROOT as a side effect of cloning the
+    // target repo into it. reflect clones no repo, so nothing else ever creates it —
+    // without this, the very first agent run fails with ENOENT on the CLAUDE.md copy.
+    // Safe to call unconditionally: recursive mkdir is a no-op when the directory
+    // already exists (local runs where SESSION_ROOT is unset fall back to cwd, which
+    // always exists).
+    mkdirSync(sessionRoot, { recursive: true });
     const settings = await readAllSettingsSafely(stores.settingsStore);
     const config = loadConfig(sessionRoot, settings);
 
