@@ -14,6 +14,7 @@ import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import type { IRegistryStore } from '../config/registry-store.interface.ts';
 import type { ISettingsStore } from '../config/settings-store.interface.ts';
 import type { IAuditStore } from '../config/audit-store.interface.ts';
+import type { IReflectionStore } from '../pipeline/reflection-store.interface.ts';
 import { validateSetting } from '../config/schemas.ts';
 import { refreshRegistryIfStale } from '../config/hydrate.ts';
 import { handleAdminApi } from './admin-api.ts';
@@ -79,8 +80,12 @@ export interface DashboardOptions {
   authEventStore: IAuthEventStore;
   registryStore: IRegistryStore;
   /** Backing store for the admin config API (`/api/admin/*`) — see
-   *  `src/dashboard/admin-api.ts`. */
+   *  `src/dashboard/admin-api.ts`. Also the audit sink for `POST
+   *  /api/reflections/:id/decision` below. */
   auditStore: IAuditStore;
+  /** Backing store for `/api/reflections` and `/api/reflections/:id/decision`
+   *  — the monthly reflection agent's proposed prompt/config changes. */
+  reflectionStore: IReflectionStore;
 }
 
 /** How stale the repo/companion registry may be before a request or the
@@ -103,7 +108,7 @@ export interface DashboardHandle {
 }
 
 export function startDashboard(options: DashboardOptions): DashboardHandle {
-  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, registryStore, settingsStore, auditStore, userStore, sessionStore } = options;
+  const { port, stateStore, actionStore, runnerStatus, logSink, prReviewStore, prReviewLogSink, sql, registryStore, settingsStore, auditStore, userStore, sessionStore, reflectionStore } = options;
 
   /** Best-effort registry refresh — a database blip must never fail the
    *  caller (a request, or the background poller below). */
@@ -281,6 +286,49 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
         const limitParam = url.searchParams.get('limit');
         const limit = Math.min(Math.max(parseInt(limitParam ?? '100', 10) || 100, 1), 500);
         return Response.json(await actionStore.listRecent(limit));
+      }
+
+      // Reflection Agent — list recent proposals (dashboard review tab).
+      if (path === '/api/reflections' && req.method === 'GET') {
+        const limitParam = url.searchParams.get('limit');
+        if (limitParam === null) return Response.json(await reflectionStore.listRecent());
+        const limit = Math.min(Math.max(parseInt(limitParam, 10) || 20, 1), 200);
+        return Response.json(await reflectionStore.listRecent(limit));
+      }
+
+      // Reflection Agent — approve or reject a pending proposal. Every
+      // decision is recorded in audit_log so "who approved this prompt
+      // change" is answerable the same way as any other admin mutation (see
+      // admin-api.ts) — this route just isn't gated to the admin role, since
+      // reviewing reflection proposals is an operator task.
+      const reflectionDecisionMatch = path.match(/^\/api\/reflections\/(\d+)\/decision$/);
+      if (reflectionDecisionMatch && req.method === 'POST') {
+        const id = parseInt(reflectionDecisionMatch[1]!, 10);
+        try {
+          const body = (await req.json()) as { decision?: string };
+          if (body.decision !== 'approved' && body.decision !== 'rejected') {
+            return Response.json({ error: 'decision must be "approved" or "rejected"' }, { status: 400 });
+          }
+
+          const proposal = await reflectionStore.findById(id);
+          if (!proposal) return Response.json({ error: `No reflection proposal with id ${id}.` }, { status: 404 });
+
+          const decided = await reflectionStore.decide(id, body.decision, user!.email);
+          if (!decided) return Response.json({ error: 'This proposal was already decided.' }, { status: 409 });
+
+          await auditStore.write({
+            actorEmail: user!.email,
+            action: body.decision,
+            entityType: 'reflection',
+            entityKey: String(id),
+            beforeValue: { status: proposal.status },
+            afterValue: { status: body.decision },
+          });
+
+          return Response.json({ ok: true });
+        } catch {
+          return Response.json({ error: 'Invalid request body' }, { status: 400 });
+        }
       }
 
       // Learn-rules endpoint

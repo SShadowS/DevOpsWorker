@@ -9,6 +9,7 @@ import { PgAuthEventStore } from '../../src/db/pg-auth-event-store.ts';
 import { PgRegistryStore } from '../../src/db/pg-registry-store.ts';
 import { PgSettingsStore } from '../../src/db/pg-settings-store.ts';
 import { PgAuditStore } from '../../src/db/pg-audit-store.ts';
+import { FakeReflectionStore } from '../pipeline/reflection-store.test.ts';
 import type { IStateStore } from '../../src/pipeline/state-store.interface.ts';
 import type { IActionStore, ActionRecord } from '../../src/pipeline/action-store.interface.ts';
 import type { IRunnerStatus } from '../../src/pipeline/runner-status.interface.ts';
@@ -184,6 +185,7 @@ describe.skipIf(!url)('admin users API (real server + real Postgres)', () => {
       registryStore,
       settingsStore,
       auditStore,
+      reflectionStore: new FakeReflectionStore(),
     });
     base = `http://localhost:${handle.server.port}`;
   });

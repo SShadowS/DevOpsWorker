@@ -11,6 +11,7 @@ import { PgRegistryStore } from '../../src/db/pg-registry-store.ts';
 import { PgSettingsStore } from '../../src/db/pg-settings-store.ts';
 import { PgAuditStore } from '../../src/db/pg-audit-store.ts';
 import { mkRepo, mkCompanion } from '../config/fixtures/fake-registry-store.ts';
+import { FakeReflectionStore } from '../pipeline/reflection-store.test.ts';
 import { repos, replaceRepos } from '../../src/config/repos.ts';
 import { companionRegistry, replaceCompanions } from '../../src/config/companions.ts';
 import { _resetHydrationState } from '../../src/config/hydrate.ts';
@@ -240,6 +241,7 @@ describe.skipIf(!url)('admin API (real server + real Postgres)', () => {
       registryStore,
       settingsStore,
       auditStore,
+      reflectionStore: new FakeReflectionStore(),
     });
     base = `http://localhost:${handle.server.port}`;
 

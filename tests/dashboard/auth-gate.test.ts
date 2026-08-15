@@ -11,6 +11,7 @@ import type { IPRReviewStore, PRReviewRow } from '../../src/pipeline/pr-review-s
 import type { ISettingsStore } from '../../src/config/settings-store.interface.ts';
 import type { IAuditStore, AuditRow } from '../../src/config/audit-store.interface.ts';
 import { FakeRegistryStore } from '../config/fixtures/fake-registry-store.ts';
+import { FakeReflectionStore } from '../pipeline/reflection-store.test.ts';
 import { repos, replaceRepos } from '../../src/config/repos.ts';
 import { companionRegistry, replaceCompanions } from '../../src/config/companions.ts';
 import { _resetHydrationState } from '../../src/config/hydrate.ts';
@@ -134,6 +135,7 @@ describe('dashboard auth gate (real HTTP round trip)', () => {
       registryStore: new FakeRegistryStore(),
       settingsStore: new StubSettingsStore(),
       auditStore: new StubAuditStore(),
+      reflectionStore: new FakeReflectionStore(),
     });
     base = `http://localhost:${handle.server.port}`;
 
