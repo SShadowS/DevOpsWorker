@@ -89,4 +89,28 @@ describe('buildDockerArgs', () => {
     const imageIdx = args.indexOf('devopsworker:latest');
     expect(args[imageIdx + 1]).toBe('continue');
   });
+
+  test('omits repo coordinates for reflect (no clone) and passes --cycle-date via extraArgs', () => {
+    const config: ContainerConfig = {
+      workItemId: 0,
+      command: 'reflect',
+      env: { DATABASE_URL: 'postgres://x' },
+      stateVolume: 'state',
+      workspaceVolume: 'reflection-2026-08-15',
+      imageName: 'devopsworker:latest',
+      extraArgs: ['--cycle-date', '2026-08-15'],
+    };
+
+    const args = buildDockerArgs(config);
+
+    expect(args.join(' ')).not.toContain('REPO_CONFIG=');
+    expect(args.join(' ')).not.toContain('REPO_URL=');
+    expect(args.join(' ')).not.toContain('REPO_BRANCH=');
+    expect(args).not.toContain('--work-item');
+
+    const imageIdx = args.indexOf('devopsworker:latest');
+    expect(args[imageIdx + 1]).toBe('reflect');
+    expect(args[imageIdx + 2]).toBe('--cycle-date');
+    expect(args[imageIdx + 3]).toBe('2026-08-15');
+  });
 });

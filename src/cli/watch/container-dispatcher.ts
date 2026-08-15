@@ -1,4 +1,7 @@
+import type postgres from 'postgres';
 import type { IStateStore } from '../../pipeline/state-store.interface.ts';
+import type { IReflectionStore } from '../../pipeline/reflection-store.interface.ts';
+import type { ReflectionProposal } from '../../db/reflection-proposal-mapper.ts';
 import type { PipelineConfig, PipelineState } from '../../types/pipeline.types.ts';
 import type { RepoConfig } from '../../config/repo-config.ts';
 import { fetchWorkItem, getPullRequestStatus, postWorkItemComment, addWorkItemTags, removeWorkItemTags } from '../../sdk/azure-devops-client.ts';
@@ -10,9 +13,11 @@ import {
   createWorkspaceVolume,
   removeWorkspaceVolume,
   removeStaleContainer,
+  createVolume,
+  removeContainer,
   spawnContainer,
 } from '../../sdk/docker.ts';
-import { logWI, workItemUrl } from './watch-logger.ts';
+import { log, logWI, workItemUrl } from './watch-logger.ts';
 import { ensurePat } from './env-actions.ts';
 
 // ---------------------------------------------------------------------------
@@ -401,4 +406,165 @@ export async function executeContinue(
   const exitCode = await spawnContainer(args);
 
   await handleContainerOutcome(workItemId, exitCode, stateStore, pollingConfig, watchConfig);
+}
+
+// ---------------------------------------------------------------------------
+// Reflection dispatch
+//
+// The monthly reflection agent has no work item and no repo — it reads
+// finding_outcomes/pr_reviews history from Postgres and writes a proposal
+// row, so its container needs the DB + credential env pattern the PR
+// reviewer uses, minus every repo coordinate (no clone happens).
+// ---------------------------------------------------------------------------
+
+export interface ReflectionDispatchDeps {
+  /**
+   * A Postgres client capable of `.reserve()`. The advisory lock below is
+   * SESSION-scoped, so it must be taken and released on the SAME physical
+   * connection — see `acquireReflectionLock`.
+   */
+  sql: postgres.Sql;
+  reflectionStore: IReflectionStore;
+  watchConfig: WatchConfig;
+  /** Injectable clock, defaulting to the real one — lets a test pin "today"
+   *  without faking the global Date. */
+  now?: () => Date;
+}
+
+/**
+ * Whether today's scheduler tick should dispatch a reflection run.
+ *
+ * Pure and total: no I/O, so the day-15 gate and the one-proposal-per-cycle
+ * gate can both be exercised without a database. `existing` is expected to
+ * come from `IReflectionStore.findByCycle`, which already excludes
+ * 'superseded' rows before this function ever sees them — a cycle whose only
+ * row is superseded therefore reaches here as `null`, indistinguishable from
+ * a cycle with no proposal at all, and this function does not need to know
+ * 'superseded' exists.
+ */
+export function shouldDispatchReflection(now: Date, existing: ReflectionProposal | null): boolean {
+  return now.getDate() === 15 && existing === null;
+}
+
+/**
+ * Advisory-lock key for the reflection dispatch guard+spawn. Any stable
+ * constant works, as long as it does not collide with another advisory lock
+ * on the same database — mirrors the overlay's `SWEEP_LOCK_KEY` pattern in
+ * `private/scripts/lib/outcome-store.ts`, a different fixed value so the two
+ * locks can never contend with each other.
+ */
+const REFLECTION_LOCK_KEY = 0x52_45_46_4c; // 'REFL'
+
+/**
+ * Cross-process mutual exclusion around the reflection guard+spawn.
+ *
+ * `runAtStart: true` (the overlay's `monthly-reflection` task) means every
+ * watcher boot calls `executeReflection`, and more than one watcher can be up
+ * at once — a compose restart overlapping a hand-run `pipeline watch`. Without
+ * this lock, two processes can both read "no proposal for this cycle yet" and
+ * both spawn a container: a second, wasted reflection run racing the first.
+ * This is the system-level single-writer guarantee the guard alone cannot
+ * provide, so it wraps the guard check AND the spawn, not just the spawn.
+ *
+ * Session-scoped like `pg_advisory_lock` always is, so it is taken and
+ * released on the SAME reserved connection — postgres.js pools, and
+ * `pg_advisory_unlock` on a different pooled connection is a no-op that
+ * leaves the lock held until that backend eventually dies.
+ *
+ * Returns the reserved connection when the lock was taken, or `null` when
+ * another process holds it — not an error, it means the work is already
+ * being done.
+ */
+async function acquireReflectionLock(sql: postgres.Sql): Promise<postgres.ReservedSql | null> {
+  const held = await sql.reserve();
+  try {
+    const rows = await held<{ locked: boolean }[]>`SELECT pg_try_advisory_lock(${REFLECTION_LOCK_KEY}) AS locked`;
+    if (rows[0]?.locked) return held;
+    held.release();
+    return null;
+  } catch (err) {
+    held.release();
+    throw err;
+  }
+}
+
+/** Release the advisory lock and return the connection to the pool. Safe on every path. */
+async function releaseReflectionLock(held: postgres.ReservedSql): Promise<void> {
+  try {
+    await held`SELECT pg_advisory_unlock(${REFLECTION_LOCK_KEY})`;
+  } finally {
+    // Releasing the connection is what matters even if the unlock statement
+    // failed: the lock dies with the backend, but a reserved connection never
+    // returned to the pool leaks for good.
+    held.release();
+  }
+}
+
+/**
+ * Dispatch the monthly reflection container, if today is its day and no
+ * proposal exists yet for this cycle.
+ *
+ * Called by the overlay's `monthly-reflection` scheduled task on every tick,
+ * including once at watcher startup — so this must tolerate being invoked
+ * far more often than once a month, and do nothing on every day but the 15th.
+ *
+ * Never throws. A dispatch failure — a lock error, a docker error, anything
+ * unexpected — is logged and swallowed here, matching the `ScheduledTask.run`
+ * contract: this must never take the watcher down and must never fail
+ * silently. (The scheduler wraps every task's `run` in its own catch too;
+ * this function does not rely on that alone, so it behaves the same way
+ * whether or not it is reached through the scheduler.)
+ */
+export async function executeReflection(deps: ReflectionDispatchDeps): Promise<void> {
+  try {
+    const now = (deps.now ?? (() => new Date()))();
+    const cycleDate = now.toISOString().slice(0, 10);
+
+    const held = await acquireReflectionLock(deps.sql);
+    if (!held) {
+      log('Reflection dispatch: another watcher holds the dispatch lock — skipping this tick');
+      return;
+    }
+    try {
+      const existing = await deps.reflectionStore.findByCycle(cycleDate);
+      if (!shouldDispatchReflection(now, existing)) return;
+
+      // Named after the cycle, not `wi-{id}` — there is no work item. Reused
+      // rather than random so a container that dies mid-run leaves a
+      // recognisable stale name for `removeContainer` to clear next tick.
+      const name = `reflection-${cycleDate}`;
+      await createVolume(name);
+      await removeContainer(name);
+
+      const args = buildDockerArgs({
+        workItemId: 0,
+        command: 'reflect',
+        env: getPrReviewContainerEnv(),
+        stateVolume: deps.watchConfig.stateVolume,
+        workspaceVolume: name,
+        imageName: deps.watchConfig.imageName,
+        extraArgs: ['--cycle-date', cycleDate],
+      });
+      // buildDockerArgs names the container `wi-0` (no work item to key off
+      // of) — override it with the cycle-scoped name used above.
+      const nameIdx = args.indexOf('--name');
+      if (nameIdx !== -1 && args[nameIdx + 1]) args[nameIdx + 1] = name;
+
+      log(`Reflection dispatch: spawning container for cycle ${cycleDate}`);
+      const exitCode = await spawnContainer(args);
+      if (exitCode === 0) {
+        log(`Reflection dispatch: container for cycle ${cycleDate} finished`);
+      } else {
+        // Not escalated further here — the reflect agent records its own
+        // error on the proposal row and notifies Discord itself (see
+        // src/cli/reflect.ts). This log is only about the dispatch, i.e.
+        // whether the container ran at all.
+        log(`Reflection dispatch: container for cycle ${cycleDate} exited with code ${exitCode}`);
+      }
+    } finally {
+      await releaseReflectionLock(held);
+    }
+  } catch (err) {
+    log(`Reflection dispatch failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }

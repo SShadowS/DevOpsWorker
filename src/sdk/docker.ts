@@ -2,14 +2,21 @@ import type { RepoConfig } from '../config/repo-config.ts';
 
 export interface ContainerConfig {
   workItemId: number;
-  repoKey: string;
-  repo: RepoConfig;
-  command: 'run' | 'continue' | 'review-pr';
+  /**
+   * Repo coordinates. Required for 'run'/'continue' (they clone and branch a
+   * target repo); absent for 'reflect', which reads pipeline history from
+   * Postgres and clones nothing. 'review-pr' still supplies them today (the
+   * container needs the PR's repo to review it), even though it also drives
+   * its command via `extraArgs` rather than `--work-item`.
+   */
+  repoKey?: string;
+  repo?: RepoConfig;
+  command: 'run' | 'continue' | 'review-pr' | 'reflect';
   env: Record<string, string>;
   stateVolume: string;
   workspaceVolume: string;
   imageName: string;
-  /** Extra CLI args appended after the command (e.g., --pr-id 44801) */
+  /** Extra CLI args appended after the command (e.g., --pr-id 44801, --cycle-date 2026-08-15) */
   extraArgs?: string[];
 }
 
@@ -54,16 +61,18 @@ export function buildDockerArgs(config: ContainerConfig): string[] {
     if (databaseUrl) args.push('-e', `DATABASE_URL=${databaseUrl}`);
   }
 
-  // Repo-specific env vars
-  args.push('-e', `REPO_CONFIG=${config.repoKey}`);
-  args.push('-e', `REPO_URL=${config.repo.url}`);
-  args.push('-e', `REPO_BRANCH=${config.repo.branch}`);
+  // Repo-specific env vars — absent for commands (e.g. 'reflect') that clone nothing.
+  if (config.repoKey && config.repo) {
+    args.push('-e', `REPO_CONFIG=${config.repoKey}`);
+    args.push('-e', `REPO_URL=${config.repo.url}`);
+    args.push('-e', `REPO_BRANCH=${config.repo.branch}`);
+  }
   args.push('-e', 'SESSION_ROOT=/workspace/session');
 
   // Image + command
   args.push(config.imageName);
   args.push(config.command);
-  if (config.command === 'review-pr') {
+  if (config.command === 'review-pr' || config.command === 'reflect') {
     args.push(...(config.extraArgs ?? []));
   } else {
     args.push('--work-item', String(config.workItemId));
