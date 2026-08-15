@@ -253,6 +253,36 @@ function ReflectionSection({ title, attention, empty, children }: {
   );
 }
 
+/** Which colour a unified-diff line gets. Only genuine change markers are
+ *  highlighted: `+++`/`---` file headers are checked BEFORE `+`/`-` so they
+ *  read as headers, not as a one-character addition or removal. */
+function diffLineClass(line: string): string {
+  if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) {
+    return 'diff-view__line diff-view__line--file';
+  }
+  if (line.startsWith('@@')) return 'diff-view__line diff-view__line--hunk';
+  if (line.startsWith('+')) return 'diff-view__line diff-view__line--add';
+  if (line.startsWith('-')) return 'diff-view__line diff-view__line--del';
+  return 'diff-view__line';
+}
+
+/** A unified diff with per-line highlighting. Line-by-line spans in a <pre>,
+ *  text nodes only — agent-authored patch text must never be interpreted as
+ *  markup. The trailing '\n' stays on each rendered line so copy-paste from
+ *  the browser reproduces the original patch byte-for-byte. */
+function DiffView({ text }: { text: string }) {
+  const lines = text.split('\n');
+  return (
+    <pre class="diff-view">
+      {lines.map((line, i) => (
+        <span key={i} class={diffLineClass(line)}>
+          {i < lines.length - 1 ? `${line}\n` : line}
+        </span>
+      ))}
+    </pre>
+  );
+}
+
 /** One proposed change: file, target repo (named in full — "public core" /
  *  "private overlay", matching this project's own vocabulary rather than the
  *  bare `core`/`overlay` enum value), rationale, and the diff behind a
@@ -272,7 +302,7 @@ function ReflectionChangeItem({ change }: { change: ProposedChange }) {
       <button type="button" class="btn" onClick={() => setShowDiff((v) => !v)} aria-expanded={showDiff}>
         {showDiff ? 'Hide diff' : 'Show diff'}
       </button>
-      {showDiff && <pre class="pr-review-detail__body-text">{change.unifiedDiff}</pre>}
+      {showDiff && <DiffView text={change.unifiedDiff} />}
     </div>
   );
 }
