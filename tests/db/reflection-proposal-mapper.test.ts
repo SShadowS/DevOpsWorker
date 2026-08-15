@@ -24,6 +24,7 @@ describe('rowToReflectionProposal', () => {
     decided_by: null, decided_at: null,
     applied_at: null, applied_commits: null,
     cost_usd: 7.5, session_id: 'sess-1', error: null,
+    image_sha: 'a36d701',
     created_at: new Date('2026-08-15T06:00:00Z'),
   };
 
@@ -36,7 +37,13 @@ describe('rowToReflectionProposal', () => {
     expect(p.adjudications[0]!.verdictLabel).toBe('reviewer-wrong');
     expect(p.proposedChanges[0]!.target).toBe('core');
     expect(p.status).toBe('pending');
+    expect(p.imageSha).toBe('a36d701');
     expect(p.createdAt).toBe('2026-08-15T06:00:00.000Z');
+  });
+
+  test('image_sha absent (pre-column rows) maps to null', () => {
+    const p = rowToReflectionProposal({ ...fullRow, image_sha: null });
+    expect(p.imageSha).toBeNull();
   });
 
   test('unknown status maps to null and warns once', () => {

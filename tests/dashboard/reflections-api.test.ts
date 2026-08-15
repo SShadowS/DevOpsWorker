@@ -113,7 +113,7 @@ const minimalProposal: SaveInput = {
   cycleDate: '2026-08-01', windowDays: 35, coverage: null,
   adjudications: [], clusters: [], proposedChanges: [],
   watchLedger: null, classifierNotes: null, expectedEffects: null,
-  logEntryDraft: null, costUsd: null, sessionId: null, error: null,
+  logEntryDraft: null, costUsd: null, sessionId: null, error: null, imageSha: null,
 };
 
 describe('reflections API (real server, fake reflection + audit stores)', () => {

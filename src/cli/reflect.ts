@@ -247,6 +247,7 @@ export async function runReflect(argv: string[]): Promise<number> {
         adjudications: [], clusters: [], proposedChanges: [],
         watchLedger: [], classifierNotes: [], expectedEffects: [],
         logEntryDraft: null, costUsd: null, sessionId: null, error: errorMsg,
+        imageSha: process.env['BUILD_SHA'] ?? null,
       };
 
       if (dryRun) {
@@ -389,6 +390,7 @@ export async function runReflect(argv: string[]): Promise<number> {
         costUsd: result.costUsd,
         sessionId: result.sessionId,
         error: null,
+        imageSha: process.env['BUILD_SHA'] ?? null,
       });
       console.log(`[reflect] saved proposal id=${id}`);
     } catch (saveErr) {
@@ -426,6 +428,7 @@ export async function runReflect(argv: string[]): Promise<number> {
           adjudications: [], clusters: [], proposedChanges: [],
           watchLedger: [], classifierNotes: [], expectedEffects: [],
           logEntryDraft: null, costUsd: null, sessionId: null, error: errorMsg,
+          imageSha: process.env['BUILD_SHA'] ?? null,
         });
       } catch (saveErr) {
         console.error(`[reflect] failed to persist error row: ${saveErr}`);

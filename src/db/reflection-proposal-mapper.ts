@@ -62,6 +62,12 @@ export interface ReflectionProposal {
   costUsd: number | null;
   sessionId: string | null;
   error: string | null;
+  /** Short core sha baked into the image that produced this proposal
+   *  (`process.env.BUILD_SHA`), mirroring `pr_reviews.image_sha` so the
+   *  dashboard's drift ribbon can see reflection runs too. Null for rows
+   *  written before the column existed or by an image built without the
+   *  BUILD_SHA build-arg. */
+  imageSha: string | null;
   createdAt: string;
 }
 
@@ -105,6 +111,7 @@ export function rowToReflectionProposal(row: Record<string, unknown>): Reflectio
     costUsd: num(row['cost_usd']),
     sessionId: str(row['session_id']),
     error: str(row['error']),
+    imageSha: str(row['image_sha']),
     createdAt: iso(row['created_at']) ?? '',
   };
 }

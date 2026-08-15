@@ -32,6 +32,7 @@ function proposal(status: ReflectionProposal['status']): ReflectionProposal {
     costUsd: null,
     sessionId: null,
     error: null,
+    imageSha: null,
     createdAt: '2026-08-15T00:00:00Z',
   };
 }

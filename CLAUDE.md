@@ -226,7 +226,7 @@ builds both stages), then the compose services:
 
 ```bash
 pwsh private/deploy/docker-build.ps1           # builds devopsworker-public, then devopsworker:latest
-docker compose build                           # Rebuild compose service images
+BUILD_SHA=$(git rev-parse --short HEAD) docker compose build   # Rebuild compose services (BUILD_SHA stamps provenance for the drift card; plain build bakes 'unknown')
 docker compose up -d                           # Restart services
 ```
 

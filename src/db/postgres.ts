@@ -319,6 +319,10 @@ CREATE TABLE IF NOT EXISTS reflection_proposals (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_reflection_proposals_created ON reflection_proposals (created_at DESC);
+-- Which image produced the proposal, mirroring pr_reviews.image_sha so the
+-- dashboard's drift ribbon sees reflection runs too. Null on rows written
+-- before this column existed.
+ALTER TABLE reflection_proposals ADD COLUMN IF NOT EXISTS image_sha TEXT;
 
 CREATE TABLE IF NOT EXISTS users (
   id            SERIAL PRIMARY KEY,

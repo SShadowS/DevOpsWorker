@@ -2362,10 +2362,20 @@ export async function getDriftStats(
   const days = getWindowDays(window);
   const totalN = await countInWindow(sql, days);
 
+  // Reflection runs use the same spawned image as reviews, so the "most
+  // recent spawned image" reading considers both tables — otherwise a rebuild
+  // followed only by a reflection run keeps showing the older review's sha
+  // and reports drift that no longer exists. The window DISTRIBUTION below
+  // stays pr_reviews-only on purpose: it describes review-run provenance
+  // states, and a dozen reflection rows a year would only blur those counts.
   const [mostRecent] = await sql<Array<{ image_sha: string; created_at: string }>>`
-    SELECT image_sha, created_at::text
-    FROM pr_reviews
-    WHERE image_sha IS NOT NULL AND image_sha <> '' AND image_sha <> 'unknown'
+    SELECT image_sha, created_at::text FROM (
+      SELECT image_sha, created_at FROM pr_reviews
+      WHERE image_sha IS NOT NULL AND image_sha <> '' AND image_sha <> 'unknown'
+      UNION ALL
+      SELECT image_sha, created_at FROM reflection_proposals
+      WHERE image_sha IS NOT NULL AND image_sha <> '' AND image_sha <> 'unknown'
+    ) AS spawned
     ORDER BY created_at DESC
     LIMIT 1
   `;

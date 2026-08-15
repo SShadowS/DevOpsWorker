@@ -50,7 +50,7 @@ export class PgReflectionStore implements IReflectionStore {
         INSERT INTO reflection_proposals (
           cycle_date, window_days, coverage, adjudications, clusters, proposed_changes,
           watch_ledger, classifier_notes, expected_effects, log_entry_draft,
-          cost_usd, session_id, error
+          cost_usd, session_id, error, image_sha
         )
         VALUES (
           ${p.cycleDate}, ${p.windowDays},
@@ -62,7 +62,7 @@ export class PgReflectionStore implements IReflectionStore {
           ${p.classifierNotes === null ? null : tx.json(p.classifierNotes as unknown as postgres.JSONValue)},
           ${p.expectedEffects === null ? null : tx.json(p.expectedEffects as unknown as postgres.JSONValue)},
           ${p.logEntryDraft},
-          ${p.costUsd}, ${p.sessionId}, ${p.error}
+          ${p.costUsd}, ${p.sessionId}, ${p.error}, ${p.imageSha}
         )
         RETURNING id
       `;
@@ -74,7 +74,7 @@ export class PgReflectionStore implements IReflectionStore {
     const rows = await this.sql`
       SELECT id, cycle_date, window_days, coverage, adjudications, clusters, proposed_changes,
              watch_ledger, classifier_notes, expected_effects, log_entry_draft, status,
-             decided_by, decided_at, applied_at, applied_commits, cost_usd, session_id, error,
+             decided_by, decided_at, applied_at, applied_commits, cost_usd, session_id, error, image_sha,
              created_at
       FROM reflection_proposals
       ORDER BY created_at DESC
@@ -87,7 +87,7 @@ export class PgReflectionStore implements IReflectionStore {
     const rows = await this.sql`
       SELECT id, cycle_date, window_days, coverage, adjudications, clusters, proposed_changes,
              watch_ledger, classifier_notes, expected_effects, log_entry_draft, status,
-             decided_by, decided_at, applied_at, applied_commits, cost_usd, session_id, error,
+             decided_by, decided_at, applied_at, applied_commits, cost_usd, session_id, error, image_sha,
              created_at
       FROM reflection_proposals
       WHERE id = ${id}
@@ -100,7 +100,7 @@ export class PgReflectionStore implements IReflectionStore {
     const rows = await this.sql`
       SELECT id, cycle_date, window_days, coverage, adjudications, clusters, proposed_changes,
              watch_ledger, classifier_notes, expected_effects, log_entry_draft, status,
-             decided_by, decided_at, applied_at, applied_commits, cost_usd, session_id, error,
+             decided_by, decided_at, applied_at, applied_commits, cost_usd, session_id, error, image_sha,
              created_at
       FROM reflection_proposals
       WHERE cycle_date = ${cycleDate} AND status != 'superseded'
