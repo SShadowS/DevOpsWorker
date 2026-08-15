@@ -132,5 +132,26 @@ unmeasurable batch happens.
    NO-POST mode) and confirm the finding is now absent, downgraded, or evidence-gated.
 3. Next cycle starts by comparing this cycle's expected effects against what happened.
 
+## Apply mode — executing an approved proposal
+
+When asked to "apply reflection proposal N": load the row (`reflection_proposals`),
+and refuse anything whose status is not `approved` — a pending proposal is undecided
+and a rejected one is settled.
+
+1. Adjudications marked `needs-measurement` that back a shipping change: run the
+   stated measurement first (`bc-measure` for BC runtime behaviour). A verification
+   that fails drops that change; record the drop in the log entry.
+2. `git apply --check` each unified diff; apply on success. On drift, hand-apply from
+   the rationale and say so in the log entry.
+3. Commit core and overlay separately per the repo-routing rules; append the
+   proposal's `log_entry_draft` (amended to what actually shipped) to the tuning log.
+4. Rebuild the container image and run the acceptance replay, as the earlier steps of
+   this skill describe.
+5. Mark the row applied with both commit SHAs (`markApplied` transition — via a small
+   SQL UPDATE or the dashboard's future apply endpoint; today, SQL:
+   `UPDATE reflection_proposals SET status='applied', applied_at=now(),
+   applied_commits='{"core":"<sha>","overlay":"<sha>"}' WHERE id=N AND
+   status='approved'`).
+
 Cadence: monthly, manually or scheduled. Expect ~10–20 disputed findings per month —
 sized for real adjudication, not for skimming.
