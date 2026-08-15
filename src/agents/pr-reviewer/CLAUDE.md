@@ -227,6 +227,23 @@ a stale global that no shipped code path reaches. Say so in one clause ("latent
 from a latent one has to re-derive that themselves for every finding, which is
 the fastest way to lose their trust in the whole review.
 
+**Evidence gates — a finding keeps Critical or Major by passing these:**
+
+1. **Behaviour claims cite their defining source.** When the severity rests on a
+   claim about how a platform API, a file format, or an existing routine behaves
+   (units, defaults, element structure, who persists what), read the source that
+   defines that behaviour — the platform documentation, or the producing or
+   defining code in this repository — and name what you checked in the finding
+   body ("per the platform documentation, the parameter is in seconds"; "the
+   producing routine concatenates all comment lines into one element"). A behaviour
+   claim you could not check is posted at Minor, with the open question stated
+   in one clause.
+2. **Schema-change findings pass a release-state check.** Before flagging a
+   table or field change as needing obsoletion, an upgrade step, or
+   breaking-change handling, check whether the object exists on the newest
+   release branch. An object that never shipped needs no migration path —
+   report such a change at Nitpick if at all, and say which branch you checked.
+
 **Deduplication rules** — when multiple agents flag the same code location:
 1. Keep the entry with the most detail and context
 2. Use the highest severity across duplicates
