@@ -594,11 +594,17 @@ function OverlaySection({ overlay }: { overlay: OverlayReport }) {
   );
 }
 
-/** Collapsed by default (constraint from task-7-brief.md). The summary row
+/** Expanded by default. The original collapsed-by-default constraint
+ *  (task-7-brief.md) belonged to the stacked layout, where Config was one of
+ *  seven panels on a single page and collapsing kept the page short. Under
+ *  the section switcher, Config is the only panel in its section — arriving
+ *  here IS the request for the details, and a mandatory "Show details" click
+ *  on every visit was the friction that prompted the change. The toggle
+ *  stays for anyone who wants just the one-line headline. The summary row
  *  IS the disclosure control — a real `<button>` with `aria-expanded` /
  *  `aria-controls`, not a decorative chevron with no ARIA behind it. */
 function ConfigPanelBody({ report }: { report: ConfigReport }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const headline = buildConfigHeadlineSummary(report);
   return (
     <div class="config-panel">
