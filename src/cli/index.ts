@@ -101,6 +101,12 @@ async function main() {
       await reviewPR(args.slice(1));
       break;
     }
+    case 'reflect': {
+      const { runReflect } = await import('./reflect.ts');
+      const exitCode = await runReflect(args.slice(1));
+      process.exit(exitCode);
+      break;
+    }
     case 'admin': {
       const { admin } = await import('./admin.ts');
       await admin(args.slice(1));
@@ -121,6 +127,8 @@ Usage:
   pipeline learn-rules --pr <pr-id>                        Learn review patterns from PR comments
   pipeline webhook-server [--port <n>]                     Start webhook receiver
   pipeline review-pr     --pr-id <id> --repo-id <guid>    Review a pull request
+  pipeline reflect       [--window-days <n>] [--dry-run] [--no-notify] [--cycle-date <date>]
+                                                             Monthly reflection on human responses to reviewer findings
   pipeline subagent-stats [--limit <n>] [--repo <key>]     Per-sub-agent cost/turns across reviews + pipeline runs
   pipeline admin create-user  --email <x> [--role admin|operator] [--display-name <n>] [--password-stdin]
   pipeline admin set-password --email <x> [--password-stdin]
