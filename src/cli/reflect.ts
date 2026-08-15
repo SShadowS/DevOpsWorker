@@ -58,16 +58,43 @@ export interface LearningSetRow {
   saidEvidence: string | null;
 }
 
+/** Total findings in the window vs. how many carry a human label. See `buildLearningSetBlock`. */
+export interface LearningSetCoverage {
+  total: number;
+  withSaid: number;
+  pct: number;
+}
+
 /**
  * Pure — render the disputed-findings learning set the reflection agent adjudicates.
  * `bodies` maps a finding's `findingKey` (see `src/sdk/ado/finding-key.ts`) to the full
  * body the reviewer originally posted, recovered from `pr_reviews.findings_list`. A
  * missing body is said so plainly — the agent's adjudication of that row is then based
  * on the quote alone, and a reader of its output should know that.
+ *
+ * `coverage`, when given, is prepended as a plain-English summary line. The reflection
+ * agent's CLAUDE.md instructs it to repeat these numbers in `output.coverage` — this is
+ * the only channel that carries them into the prompt (the CLI computes them from SQL;
+ * the agent has no database access), so a run that omits it leaves the agent inventing
+ * the numbers it repeats back. Optional so the existing two-argument call sites (and
+ * their tests) still work unchanged.
  */
-export function buildLearningSetBlock(rows: LearningSetRow[], bodies: Map<string, string>): string {
+export function buildLearningSetBlock(
+  rows: LearningSetRow[],
+  bodies: Map<string, string>,
+  coverage?: LearningSetCoverage,
+): string {
+  const sections: string[] = [];
+  if (coverage) {
+    sections.push(
+      `This window holds ${coverage.total} critical+major finding(s); ${coverage.withSaid} ` +
+      `(${coverage.pct}%) carry a team response. Everything below is the labelled slice.`,
+    );
+  }
+
   if (rows.length === 0) {
-    return ['## Learning set', '', 'No disputed findings fell inside this window.'].join('\n');
+    sections.push('## Learning set', 'No disputed findings fell inside this window.');
+    return sections.join('\n\n');
   }
 
   const entries = rows.map((row, i) => {
@@ -86,11 +113,11 @@ export function buildLearningSetBlock(rows: LearningSetRow[], bodies: Map<string
     ].join('\n');
   });
 
-  return [
+  sections.push(
     `## Learning set — ${rows.length} disputed finding(s) in this window`,
-    ``,
     entries.join('\n\n---\n\n'),
-  ].join('\n');
+  );
+  return sections.join('\n\n');
 }
 
 /**
@@ -161,146 +188,157 @@ export async function runReflect(argv: string[]): Promise<number> {
   }
   const { sql, reflectionStore } = stores;
 
-  // --- 1. Disputed rows + coverage, both anchored at cycleDate (the Step-1 SQL from
-  // the review-feedback-reflection skill, parameterised on window and anchor). ---
-  const disputedRowsRaw = await sql`
-    SELECT pr_id, repo_key, finding_key, severity, title, file, said, said_quote, said_evidence
-    FROM finding_outcomes
-    WHERE first_raised_at >= (${cycleDate}::date - (${windowDays}::int * interval '1 day'))
-      AND first_raised_at < (${cycleDate}::date + interval '1 day')
-      AND said IN ('rejected-wrong', 'rejected-wontfix', 'deferred')
-      AND said_model_verified IS NOT FALSE
-    ORDER BY said, first_raised_at DESC
-  `;
+  // Set once the coverage query (step 1, below) succeeds; stays null if this run fails
+  // before then, so the catch block's error row can still say "coverage: null" rather
+  // than crash on a not-yet-assigned variable.
+  let coverage: LearningSetCoverage | null = null;
 
-  const disputedRows = disputedRowsRaw.map((r: Record<string, unknown>) => ({
-    prId: Number(r['pr_id']),
-    repoKey: String(r['repo_key']),
-    findingKey: String(r['finding_key']),
-    severity: String(r['severity']),
-    title: String(r['title']),
-    file: r['file'] == null ? null : String(r['file']),
-    said: String(r['said']),
-    saidQuote: r['said_quote'] == null ? null : String(r['said_quote']),
-    saidEvidence: r['said_evidence'] == null ? null : String(r['said_evidence']),
-  }));
+  // Everything from here on — the disputed-rows/coverage/body-recovery queries AND the
+  // agent run — shares one try/catch (mirrors review-pr.ts's outer try). Previously only
+  // the agent run was guarded: a query failure above it escaped runReflect entirely,
+  // never wrote the error row the scheduler guard depends on to see the cycle as
+  // attempted, and exited 1 via index.ts's main().catch instead of this function's own
+  // exit-code contract.
+  try {
+    // --- 1. Disputed rows + coverage, both anchored at cycleDate (the Step-1 SQL from
+    // the review-feedback-reflection skill, parameterised on window and anchor). ---
+    const disputedRowsRaw = await sql`
+      SELECT pr_id, repo_key, finding_key, severity, title, file, said, said_quote, said_evidence
+      FROM finding_outcomes
+      WHERE first_raised_at >= (${cycleDate}::date - (${windowDays}::int * interval '1 day'))
+        AND first_raised_at < (${cycleDate}::date + interval '1 day')
+        AND said IN ('rejected-wrong', 'rejected-wontfix', 'deferred')
+        AND said_model_verified IS NOT FALSE
+      ORDER BY said, first_raised_at DESC
+    `;
 
-  const [coverageRow] = await sql`
-    SELECT count(*)::text AS total, count(*) FILTER (WHERE said IS NOT NULL)::text AS with_said
-    FROM finding_outcomes
-    WHERE first_raised_at >= (${cycleDate}::date - (${windowDays}::int * interval '1 day'))
-      AND first_raised_at < (${cycleDate}::date + interval '1 day')
-  `;
-  const total = Number((coverageRow as Record<string, unknown> | undefined)?.['total'] ?? 0);
-  const withSaid = Number((coverageRow as Record<string, unknown> | undefined)?.['with_said'] ?? 0);
-  const pct = total > 0 ? Math.round((withSaid / total) * 1000) / 10 : 0;
-  const coverage = { total, withSaid, pct };
+    const disputedRows = disputedRowsRaw.map((r: Record<string, unknown>) => ({
+      prId: Number(r['pr_id']),
+      repoKey: String(r['repo_key']),
+      findingKey: String(r['finding_key']),
+      severity: String(r['severity']),
+      title: String(r['title']),
+      file: r['file'] == null ? null : String(r['file']),
+      said: String(r['said']),
+      saidQuote: r['said_quote'] == null ? null : String(r['said_quote']),
+      saidEvidence: r['said_evidence'] == null ? null : String(r['said_evidence']),
+    }));
 
-  console.log(`[reflect] coverage: ${withSaid}/${total} (${pct}%) labelled, ${disputedRows.length} disputed`);
+    const [coverageRow] = await sql`
+      SELECT count(*)::text AS total, count(*) FILTER (WHERE said IS NOT NULL)::text AS with_said
+      FROM finding_outcomes
+      WHERE first_raised_at >= (${cycleDate}::date - (${windowDays}::int * interval '1 day'))
+        AND first_raised_at < (${cycleDate}::date + interval '1 day')
+    `;
+    const total = Number((coverageRow as Record<string, unknown> | undefined)?.['total'] ?? 0);
+    const withSaid = Number((coverageRow as Record<string, unknown> | undefined)?.['with_said'] ?? 0);
+    const pct = total > 0 ? Math.round((withSaid / total) * 1000) / 10 : 0;
+    coverage = { total, withSaid, pct };
 
-  // --- 2. Coverage floor — too little labelled data to adjudicate. ---
-  if (disputedRows.length < MIN_DISPUTED_ROWS) {
-    const errorMsg = `insufficient data: ${disputedRows.length} disputed rows`;
-    console.log(`[reflect] ${errorMsg} (floor is ${MIN_DISPUTED_ROWS}) — writing an insufficient-data row, no agent run`);
+    console.log(`[reflect] coverage: ${withSaid}/${total} (${pct}%) labelled, ${disputedRows.length} disputed`);
 
-    const proposalRow = {
-      cycleDate, windowDays, coverage,
-      adjudications: [], clusters: [], proposedChanges: [],
-      watchLedger: [], classifierNotes: [], expectedEffects: [],
-      logEntryDraft: null, costUsd: null, sessionId: null, error: errorMsg,
-    };
+    // --- 2. Coverage floor — too little labelled data to adjudicate. ---
+    if (disputedRows.length < MIN_DISPUTED_ROWS) {
+      const errorMsg = `insufficient data: ${disputedRows.length} disputed rows`;
+      console.log(`[reflect] ${errorMsg} (floor is ${MIN_DISPUTED_ROWS}) — writing an insufficient-data row, no agent run`);
 
-    if (dryRun) {
-      console.log(JSON.stringify(proposalRow, null, 2));
-    } else {
-      try {
-        const id = await reflectionStore.save(proposalRow);
-        console.log(`[reflect] saved insufficient-data row id=${id}`);
-      } catch (saveErr) {
-        console.error(`[reflect] failed to persist insufficient-data row: ${saveErr}`);
+      const proposalRow = {
+        cycleDate, windowDays, coverage,
+        adjudications: [], clusters: [], proposedChanges: [],
+        watchLedger: [], classifierNotes: [], expectedEffects: [],
+        logEntryDraft: null, costUsd: null, sessionId: null, error: errorMsg,
+      };
+
+      if (dryRun) {
+        console.log(JSON.stringify(proposalRow, null, 2));
+      } else {
+        try {
+          const id = await reflectionStore.save(proposalRow);
+          console.log(`[reflect] saved insufficient-data row id=${id}`);
+        } catch (saveErr) {
+          console.error(`[reflect] failed to persist insufficient-data row: ${saveErr}`);
+        }
+      }
+
+      await maybeNotify(dryRun, noNotify, {
+        title: `Reflection cycle ${cycleDate}: insufficient data`,
+        description: `Only ${disputedRows.length} disputed finding(s) with a human label in the last ${windowDays} days — below the floor of ${MIN_DISPUTED_ROWS}. No proposal was produced this cycle.`,
+        severity: 'warning',
+        source: 'reflection-agent',
+        fields: [
+          { name: 'Cycle', value: cycleDate, inline: true },
+          { name: 'Window', value: `${windowDays}d`, inline: true },
+          { name: 'Disputed rows', value: String(disputedRows.length), inline: true },
+        ],
+      });
+
+      return 0;
+    }
+
+    // --- 3. Recover full finding bodies from pr_reviews.findings_list, matched by
+    // recomputed finding key. Scoped per repo_key: pr_id is not unique across repos. ---
+    const bodies = new Map<string, string>();
+    const repoKeys = [...new Set(disputedRows.map((r) => r.repoKey))];
+    for (const repoKey of repoKeys) {
+      const prIds = [...new Set(disputedRows.filter((r) => r.repoKey === repoKey).map((r) => r.prId))];
+      if (prIds.length === 0) continue;
+      const bodyRows = await sql`
+        SELECT f->>'file' AS file, f->>'title' AS title, f->>'body' AS body
+        FROM pr_reviews r, jsonb_array_elements(r.findings_list) f
+        WHERE r.repo_key = ${repoKey}
+          AND r.pr_id IN ${sql(prIds)}
+          AND r.findings_list IS NOT NULL
+          AND f->>'file' IS NOT NULL
+      `;
+      for (const br of bodyRows as Record<string, unknown>[]) {
+        const file = br['file'];
+        const title = br['title'];
+        const body = br['body'];
+        if (typeof file !== 'string' || typeof title !== 'string' || typeof body !== 'string') continue;
+        bodies.set(findingKey(file, title), body);
       }
     }
 
-    await maybeNotify(dryRun, noNotify, {
-      title: `Reflection cycle ${cycleDate}: insufficient data`,
-      description: `Only ${disputedRows.length} disputed finding(s) with a human label in the last ${windowDays} days — below the floor of ${MIN_DISPUTED_ROWS}. No proposal was produced this cycle.`,
-      severity: 'warning',
-      source: 'reflection-agent',
-      fields: [
-        { name: 'Cycle', value: cycleDate, inline: true },
-        { name: 'Window', value: `${windowDays}d`, inline: true },
-        { name: 'Disputed rows', value: String(disputedRows.length), inline: true },
-      ],
+    const learningSetBlock = buildLearningSetBlock(disputedRows, bodies, coverage);
+    const promptFilesBlock = buildPromptFilesBlock();
+
+    // --- 4. Prior proposals — a change a human already rejected must not be
+    // re-proposed unchanged. Best-effort: a failed read costs the agent that context,
+    // never the run. ---
+    let priorProposalsBlock: string | undefined;
+    try {
+      const prior = await reflectionStore.listRecent(10);
+      priorProposalsBlock = buildPriorProposalsBlock(prior);
+    } catch (err) {
+      console.log(`[reflect] could not load prior proposals, continuing without them: ${err}`);
+    }
+
+    // --- 5. Run the agent. ---
+    const sessionRoot = process.env['SESSION_ROOT'] ?? process.cwd();
+    const settings = await readAllSettingsSafely(stores.settingsStore);
+    const config = loadConfig(sessionRoot, settings);
+
+    const agentConfig = createReflectionConfig(config, {
+      learningSetBlock, promptFilesBlock, windowDays, cycleDate,
+      ...(priorProposalsBlock ? { priorProposalsBlock } : {}),
     });
 
-    return 0;
-  }
+    const context: PipelineContext = {
+      workItemId: 0,
+      workItem: {
+        id: 0,
+        title: `Reflection cycle ${cycleDate}`,
+        type: 'Task',
+        state: 'Active',
+        areaPath: config.azureDevOps.areaPath,
+        iterationPath: config.azureDevOps.iterationPath,
+        fields: {},
+      },
+      workItemType: 'Bug',
+      config,
+    };
+    const state = createInitialState('reflection');
 
-  // --- 3. Recover full finding bodies from pr_reviews.findings_list, matched by
-  // recomputed finding key. Scoped per repo_key: pr_id is not unique across repos. ---
-  const bodies = new Map<string, string>();
-  const repoKeys = [...new Set(disputedRows.map((r) => r.repoKey))];
-  for (const repoKey of repoKeys) {
-    const prIds = [...new Set(disputedRows.filter((r) => r.repoKey === repoKey).map((r) => r.prId))];
-    if (prIds.length === 0) continue;
-    const bodyRows = await sql`
-      SELECT f->>'file' AS file, f->>'title' AS title, f->>'body' AS body
-      FROM pr_reviews r, jsonb_array_elements(r.findings_list) f
-      WHERE r.repo_key = ${repoKey}
-        AND r.pr_id IN ${sql(prIds)}
-        AND r.findings_list IS NOT NULL
-        AND f->>'file' IS NOT NULL
-    `;
-    for (const br of bodyRows as Record<string, unknown>[]) {
-      const file = br['file'];
-      const title = br['title'];
-      const body = br['body'];
-      if (typeof file !== 'string' || typeof title !== 'string' || typeof body !== 'string') continue;
-      bodies.set(findingKey(file, title), body);
-    }
-  }
-
-  const learningSetBlock = buildLearningSetBlock(disputedRows, bodies);
-  const promptFilesBlock = buildPromptFilesBlock();
-
-  // --- 4. Prior proposals — a change a human already rejected must not be
-  // re-proposed unchanged. Best-effort: a failed read costs the agent that context,
-  // never the run. ---
-  let priorProposalsBlock: string | undefined;
-  try {
-    const prior = await reflectionStore.listRecent(10);
-    priorProposalsBlock = buildPriorProposalsBlock(prior);
-  } catch (err) {
-    console.log(`[reflect] could not load prior proposals, continuing without them: ${err}`);
-  }
-
-  // --- 5. Run the agent. ---
-  const sessionRoot = process.env['SESSION_ROOT'] ?? process.cwd();
-  const settings = await readAllSettingsSafely(stores.settingsStore);
-  const config = loadConfig(sessionRoot, settings);
-
-  const agentConfig = createReflectionConfig(config, {
-    learningSetBlock, promptFilesBlock, windowDays, cycleDate,
-    ...(priorProposalsBlock ? { priorProposalsBlock } : {}),
-  });
-
-  const context: PipelineContext = {
-    workItemId: 0,
-    workItem: {
-      id: 0,
-      title: `Reflection cycle ${cycleDate}`,
-      type: 'Task',
-      state: 'Active',
-      areaPath: config.azureDevOps.areaPath,
-      iterationPath: config.azureDevOps.iterationPath,
-      fields: {},
-    },
-    workItemType: 'Bug',
-    config,
-  };
-  const state = createInitialState('reflection');
-
-  try {
     const result = await runAgent(agentConfig, state, context);
     const output = result.output;
 
@@ -351,7 +389,7 @@ export async function runReflect(argv: string[]): Promise<number> {
     const errorMsg = err instanceof Error ? err.message : String(err);
     const errorType = (err as { type?: string })?.type ?? 'agent-error';
     const errorStage = (err as { stage?: string })?.stage ?? 'reflection';
-    console.error(`[reflect] agent run failed: ${errorMsg}`);
+    console.error(`[reflect] run failed: ${errorMsg}`);
 
     if (!dryRun) {
       try {

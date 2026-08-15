@@ -21,4 +21,17 @@ describe('buildLearningSetBlock', () => {
     const noBody = buildLearningSetBlock(rows as never, new Map());
     expect(noBody).toContain('(finding body not recovered');
   });
+
+  test('prepends the coverage summary when given, omits it when not', () => {
+    const rows = [{ prId: 52663, findingKey: 'k1', severity: 'critical', title: 'T', file: 'F',
+      said: 'rejected-wrong', saidQuote: 'accepts seconds', saidEvidence: 'pr-discussion' }];
+
+    const withCoverage = buildLearningSetBlock(rows as never, new Map(), { total: 42, withSaid: 18, pct: 42.9 });
+    expect(withCoverage).toContain('42 critical+major finding(s)');
+    expect(withCoverage).toContain('18');
+    expect(withCoverage).toContain('42.9%');
+
+    const withoutCoverage = buildLearningSetBlock(rows as never, new Map());
+    expect(withoutCoverage).not.toContain('critical+major finding(s)');
+  });
 });
