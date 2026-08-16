@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-16T00:00:00Z",
+  "title": "Design System: DevOpsWorker Dashboard",
+  "extensions": {
+    "colorMeta": {
+      "accent": { "role": "primary", "displayName": "Signal Amber", "canonical": "#e5a00d", "tonalRamp": ["#2b1d02", "#4a3204", "#6b4906", "#8d6008", "#b0790a", "#d1900c", "#e5a00d", "#f5c765"] },
+      "success": { "role": "secondary", "displayName": "Running Green", "canonical": "#22c55e", "tonalRamp": ["#052e16", "#08461f", "#0d6a2f", "#128b3e", "#17a94c", "#22c55e", "#5fd88b", "#a7ebc1"] },
+      "info": { "role": "secondary", "displayName": "In-Flight Blue", "canonical": "#3b82f6", "tonalRamp": ["#0a1a33", "#102a52", "#18407c", "#2058a6", "#2c6fd0", "#3b82f6", "#7aa9f9", "#c3d9fd"] },
+      "warning": { "role": "secondary", "displayName": "Stalled Amber", "canonical": "#f59e0b", "tonalRamp": ["#2b1d02", "#4a3204", "#6f4a06", "#946308", "#b97c0a", "#dc930b", "#f59e0b", "#fbc668"] },
+      "error": { "role": "secondary", "displayName": "Failure Red", "canonical": "#ef4444", "tonalRamp": ["#3a0b0b", "#571010", "#7d1818", "#a32020", "#c92c2c", "#ef4444", "#f78585", "#fbc0c0"] },
+      "error-text": { "role": "tertiary", "displayName": "Legible Red", "canonical": "#ff8a8a", "tonalRamp": ["#3a1414", "#5c1f1f", "#7f2c2c", "#a33c3c", "#c65454", "#e46f6f", "#ff8a8a", "#ffc0c0"] },
+      "info-text": { "role": "tertiary", "displayName": "Legible Blue", "canonical": "#93c5fd", "tonalRamp": ["#0f2743", "#173a63", "#215085", "#2d67a7", "#4a86c8", "#6da6e4", "#93c5fd", "#c9e2fe"] },
+      "bg-primary": { "role": "neutral", "displayName": "Deep Slate", "canonical": "#0f172a", "tonalRamp": ["#080d18", "#0f172a", "#1a2438", "#263548", "#334155", "#475569", "#64748b", "#94a3b8"] },
+      "bg-secondary": { "role": "neutral", "displayName": "Card Slate", "canonical": "#1e293b", "tonalRamp": ["#0f172a", "#1e293b", "#263548", "#334155", "#475569", "#64748b", "#94a3b8", "#e2e8f0"] },
+      "bg-tertiary": { "role": "neutral", "displayName": "Inset Slate", "canonical": "#263548", "tonalRamp": ["#0f172a", "#1e293b", "#263548", "#334155", "#475569", "#64748b", "#94a3b8", "#e2e8f0"] },
+      "text-primary": { "role": "neutral", "displayName": "Primary Ink", "canonical": "#e2e8f0", "tonalRamp": ["#334155", "#475569", "#64748b", "#94a3b8", "#b8c4d4", "#cbd5e1", "#e2e8f0", "#f8fafc"] },
+      "text-secondary": { "role": "neutral", "displayName": "Secondary Ink", "canonical": "#94a3b8", "tonalRamp": ["#1e293b", "#334155", "#475569", "#64748b", "#7d8ca3", "#94a3b8", "#b8c4d4", "#e2e8f0"] },
+      "text-muted": { "role": "neutral", "displayName": "Muted Ink", "canonical": "#64748b", "tonalRamp": ["#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#f1f5f9"] },
+      "border": { "role": "neutral", "displayName": "Rule", "canonical": "#334155", "tonalRamp": ["#0f172a", "#1e293b", "#263548", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"] },
+      "stage-pending": { "role": "neutral", "displayName": "Dormant", "canonical": "#475569", "tonalRamp": ["#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#f1f5f9"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Header wordmark and login/mobile titles. There is no hero type in this system." },
+      "title": { "displayName": "Title", "purpose": "A card's name." },
+      "body": { "displayName": "Body", "purpose": "Table cells and the dominant reading size." },
+      "prose": { "displayName": "Prose", "purpose": "The explanatory sentence under a panel heading — carries most of the meaning on stats surfaces." },
+      "label": { "displayName": "Label", "purpose": "Uppercase micro-labels: badges, table headers, section eyebrows." },
+      "mono": { "displayName": "Mono", "purpose": "Identifiers, shas, config keys, diffs, log output. Data and measurement only." }
+    },
+    "shadows": [
+      { "name": "menu-lift", "value": "0 4px 12px rgba(0, 0, 0, 0.3)", "purpose": "A dropdown that floats over content — the only conventional elevation in the system." },
+      { "name": "rewind-target", "value": "0 0 8px rgba(245, 158, 11, 0.4)", "purpose": "Hover response on the stage circle a rewind action would hit. State, not decoration." }
+    ],
+    "motion": [
+      { "name": "hover-quick", "value": "0.1s", "purpose": "Card hover background shift." },
+      { "name": "state-standard", "value": "0.15s-0.2s", "purpose": "Button opacity, border-colour, and colour transitions." },
+      { "name": "bar-progress", "value": "transform 0.3s ease", "purpose": "Progress bars animate transform, never width — they re-render on every telemetry tick and width would relayout the row each frame." },
+      { "name": "pulse", "value": "@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } } 1.5s infinite", "purpose": "In-flight and waiting states. A review phase deliberately does not pulse: it waits on a person, it is not working." },
+      { "name": "reduced-motion", "value": "animation-duration: 1ms; transition-duration: 1ms", "purpose": "Reduced motion collapses durations rather than removing animation — state changes must still land, they just land at once." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "767px" },
+      { "name": "cost-quality-stack", "value": "1100px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "The default control: inset ground, rule border, dims on hover.",
+      "html": "<button class=\"ds-btn\">Continue</button>",
+      "css": ".ds-btn { background: var(--color-bg-tertiary, #263548); color: var(--color-text-primary, #e2e8f0); border: 1px solid var(--color-border, #334155); border-radius: 6px; padding: 6px 16px; font-size: 0.875rem; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; cursor: pointer; transition: opacity .15s, border-color .2s, color .2s, background .2s; } .ds-btn:hover { opacity: 0.85; } .ds-btn:focus-visible { outline: 2px solid var(--color-accent, #e5a00d); outline-offset: 2px; } .ds-btn:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one action that starts or commits work. Green fill, dark ink.",
+      "html": "<button class=\"ds-btn-primary\">Start</button>",
+      "css": ".ds-btn-primary { background: var(--color-success, #22c55e); color: var(--color-bg-primary, #0f172a); border: 1px solid var(--color-success, #22c55e); border-radius: 6px; padding: 6px 16px; font-size: 0.875rem; font-weight: 600; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; cursor: pointer; transition: opacity .15s; } .ds-btn-primary:hover { opacity: 0.9; } .ds-btn-primary:focus-visible { outline: 2px solid var(--color-accent, #e5a00d); outline-offset: 2px; }"
+    },
+    {
+      "name": "Semantic Outline Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Announces its consequence in the border and text; ground stays neutral.",
+      "html": "<button class=\"ds-btn-warning\">Request changes</button>",
+      "css": ".ds-btn-warning { background: var(--color-bg-tertiary, #263548); color: var(--color-warning, #f59e0b); border: 1px solid var(--color-warning, #f59e0b); border-radius: 6px; padding: 6px 16px; font-size: 0.875rem; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; cursor: pointer; transition: opacity .15s; } .ds-btn-warning:hover { opacity: 0.85; } .ds-btn-warning:focus-visible { outline: 2px solid var(--color-accent, #e5a00d); outline-offset: 2px; }"
+    },
+    {
+      "name": "Severity Badge",
+      "kind": "chip",
+      "refersTo": "badge-severity",
+      "description": "A word in a faint tint of its state colour. A badge always contains a word.",
+      "html": "<span class=\"ds-badge-warning\">needs input</span>",
+      "css": ".ds-badge-warning { display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 3px; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background: color-mix(in srgb, var(--color-warning, #f59e0b) 18%, transparent); color: var(--color-warning, #f59e0b); }"
+    },
+    {
+      "name": "Panel Section",
+      "kind": "card",
+      "refersTo": "panel-section",
+      "description": "A block inside a panel. Leading stripe carries its state; 3px because it lives inside a card.",
+      "html": "<div class=\"ds-section\"><p class=\"ds-section-title\">Model integrity</p><p class=\"ds-section-note\">Every recorded run used the model it was configured with.</p></div>",
+      "css": ".ds-section { background: var(--color-bg-tertiary, #263548); border-left: 3px solid var(--color-stage-pending, #475569); border-radius: 4px; padding: 8px 16px; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-section-title { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; color: var(--color-text-primary, #e2e8f0); margin: 0 0 4px 0; } .ds-section-note { font-size: 0.82rem; color: var(--color-text-secondary, #94a3b8); margin: 0; }"
+    },
+    {
+      "name": "Panel Slot",
+      "kind": "card",
+      "refersTo": "panel-slot",
+      "description": "A thing that is its own row. 4px stripe, 1px rule, card ground.",
+      "html": "<div class=\"ds-slot\"><p class=\"ds-slot-title\">Cost &amp; quality</p></div>",
+      "css": ".ds-slot { background: var(--color-bg-secondary, #1e293b); border: 1px solid var(--color-border, #334155); border-left: 4px solid var(--color-stage-pending, #475569); border-radius: 6px; padding: 16px; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-slot-title { font-size: 1rem; font-weight: 600; color: var(--color-text-primary, #e2e8f0); margin: 0; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Focus shifts the border to in-flight blue; native fields take the border treatment, not the global ring.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Work item id\" />",
+      "css": ".ds-input { background: var(--color-bg-tertiary, #263548); color: var(--color-text-primary, #e2e8f0); border: 1px solid var(--color-border, #334155); border-radius: 4px; padding: 6px 10px; font-size: 0.85rem; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-input::placeholder { color: var(--color-text-secondary, #94a3b8); } .ds-input:focus { border-color: var(--color-info, #3b82f6); outline: none; }"
+    },
+    {
+      "name": "Scope Selector",
+      "kind": "nav",
+      "refersTo": "button",
+      "description": "Segmented pill picking a SCOPE. Active is background and weight — never colour, because scope is not an attention state.",
+      "html": "<div class=\"ds-scope\"><button class=\"ds-scope-btn ds-scope-btn--active\">7d</button><button class=\"ds-scope-btn\">30d</button><button class=\"ds-scope-btn\">90d</button></div>",
+      "css": ".ds-scope { display: inline-flex; gap: 2px; background: var(--color-bg-secondary, #1e293b); border: 1px solid var(--color-border, #334155); border-radius: 6px; padding: 2px; } .ds-scope-btn { background: none; border: none; color: var(--color-text-secondary, #94a3b8); font-size: 0.8rem; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; padding: 6px 14px; border-radius: 4px; cursor: pointer; } .ds-scope-btn:hover { color: var(--color-text-primary, #e2e8f0); } .ds-scope-btn--active { background: var(--color-bg-tertiary, #263548); color: var(--color-text-primary, #e2e8f0); font-weight: 600; } .ds-scope-btn:focus-visible { outline: 2px solid var(--color-accent, #e5a00d); outline-offset: 2px; }"
+    },
+    {
+      "name": "Section Tabs",
+      "kind": "nav",
+      "refersTo": "button",
+      "description": "Underline tabs picking a PLACE. The one sanctioned use of the accent for selection.",
+      "html": "<div class=\"ds-tabs\"><button class=\"ds-tab ds-tab--active\">Health<span class=\"ds-tab-badge\">2</span></button><button class=\"ds-tab\">Config</button></div>",
+      "css": ".ds-tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--color-border, #334155); } .ds-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--color-text-secondary, #94a3b8); font-size: 0.9rem; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; padding: 4px 2px 6px 2px; margin-bottom: -1px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; } .ds-tab:hover { color: var(--color-text-primary, #e2e8f0); } .ds-tab--active { color: var(--color-text-primary, #e2e8f0); font-weight: 600; border-bottom-color: var(--color-accent, #e5a00d); } .ds-tab:focus-visible { outline: 2px solid var(--color-accent, #e5a00d); outline-offset: 2px; border-radius: 2px; } .ds-tab-badge { font-size: 0.7rem; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 3px; background: color-mix(in srgb, var(--color-warning, #f59e0b) 18%, transparent); color: var(--color-warning, #f59e0b); }"
+    },
+    {
+      "name": "Diff View",
+      "kind": "custom",
+      "refersTo": "panel-section",
+      "description": "Per-line coloured unified diff. Tints stay faint: the text colour carries the meaning, the tint only groups runs.",
+      "html": "<pre class=\"ds-diff\"><span class=\"ds-diff-line ds-diff-file\">--- a/CLAUDE.md\n</span><span class=\"ds-diff-line ds-diff-hunk\">@@ -227,6 +227,23 @@\n</span><span class=\"ds-diff-line ds-diff-add\">+Evidence gates keep the finding honest.\n</span><span class=\"ds-diff-line ds-diff-del\">-Old line.</span></pre>",
+      "css": ".ds-diff { white-space: pre-wrap; word-break: break-word; max-height: 24rem; overflow: auto; font-size: 0.85rem; font-family: 'Cascadia Code', 'Fira Code', monospace; background: var(--color-bg-primary, #0f172a); border: 1px solid var(--color-border, #334155); border-radius: 4px; padding: 8px 0; color: var(--color-text-secondary, #94a3b8); margin: 0; } .ds-diff-line { display: block; padding: 0 12px; } .ds-diff-add { color: var(--color-success, #22c55e); background: color-mix(in srgb, var(--color-success, #22c55e) 10%, transparent); } .ds-diff-del { color: var(--color-error-text, #ff8a8a); background: color-mix(in srgb, var(--color-error, #ef4444) 12%, transparent); } .ds-diff-hunk { color: var(--color-info-text, #93c5fd); } .ds-diff-file { color: var(--color-text-secondary, #94a3b8); font-weight: 600; }"
+    },
+    {
+      "name": "Stage Node",
+      "kind": "custom",
+      "refersTo": "panel-section",
+      "description": "A pipeline stage. Ring colour is state; in-flight pulses, a review phase does not.",
+      "html": "<div class=\"ds-stage\"><div class=\"ds-stage-circle ds-stage-circle--active\">3</div><span class=\"ds-stage-label\">Coder</span></div>",
+      "css": ".ds-stage { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-stage-circle { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--color-stage-pending, #475569); display: flex; align-items: center; justify-content: center; font-size: 0.6rem; font-weight: 600; color: var(--color-text-primary, #e2e8f0); } .ds-stage-circle--active { border-color: var(--color-info, #3b82f6); background: color-mix(in srgb, var(--color-info, #3b82f6) 15%, transparent); animation: ds-pulse 1.5s infinite; } .ds-stage-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-secondary, #94a3b8); } @keyframes ds-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Instrument Panel",
+    "overview": "This is a cockpit read at a glance by the person responsible for the machine. Density is not clutter here, it is respect for the operator's time: they came to answer a question (is anything wrong, what did that cost, what needs me) and every row they have to scroll past is a row that delayed the answer. The interface is calm until something genuinely needs a hand, and then exactly one colour says so.\n\nThe system earns its character semantically rather than decoratively. In roughly 3,200 lines of CSS there are two shadows, one gradient, no blur, and no web fonts — the sophistication is entirely in what colour, stripe width, and shape are allowed to mean. A reading is either trustworthy or explicitly absent; \"no data yet\", \"not recorded\", and \"still loading\" are drawn states, never blank space. That refusal to guess is the product's own discipline made visible.\n\nConfirmed anti-reference: nothing here is a marketing surface. No hero metrics, no decorative gradients, no ornamental motion. When a choice is genuinely 50/50, the tie-breaker is dense and legible — pack the real information in, then earn readability through rhythm and hierarchy rather than by spending whitespace.",
+    "keyCharacteristics": [
+      "Flat and tonally layered; depth comes from a three-step background ladder, not shadow",
+      "One protected accent (amber) meaning \"a person must act\", and nothing else",
+      "Colour always paired with words — colour is never the only signal",
+      "Uppercase micro-labels over dense tables; prose sentences carry the meaning",
+      "System fonts only; the interface loads nothing it does not need",
+      "Contrast is audited in the stylesheet itself, with measured ratios in the comments"
+    ],
+    "rules": [
+      { "name": "The Reserved Accent Rule", "body": "Signal Amber means \"a person must act\" and nothing else. Not \"currently selected\", not \"this is a test run\", not \"this is important\". A label that wants attention gets a badge with words in it; the accent has one slot and human action has first claim.", "section": "colors" },
+      { "name": "The Colour-Plus-Words Rule", "body": "Colour is never the only carrier of a fact. An attention state renders its colour and a sentence naming what needs attention. A provenance bar is aria-hidden precisely because every fact it draws also exists as text beside it.", "section": "colors" },
+      { "name": "The Text-Tier Rule", "body": "Prose is Secondary Ink. Muted Ink is for timestamps and inert marks, never for a sentence someone is expected to read — measured at 2.6-3.1:1 on these grounds, it fails AA exactly where reading matters.", "section": "colors" },
+      { "name": "The Tabular Figures Rule", "body": "A number that updates in place sets font-variant-numeric: tabular-nums, so digits changing never make the layout twitch.", "section": "typography" },
+      { "name": "The No-Hero-Number Rule", "body": "The largest figure on a stats card is 1.05rem. A metric earns attention by being first and explained, not by being enormous.", "section": "typography" },
+      { "name": "The One Breakpoint Rule", "body": "Mobile is one decision at 767px, not a cascade of tuned widths. If a new surface needs a second breakpoint, that is a signal the desktop layout is doing too much.", "section": "layout" },
+      { "name": "The Flat-At-Rest Rule", "body": "Surfaces are flat at rest. A shadow appears only as a response — hover, focus, or an overlay escaping its container. A resting card that needs to feel separate steps one rung down the tonal ladder instead.", "section": "elevation" },
+      { "name": "The Stripe Grammar Rule", "body": "A coloured left edge encodes two things at once. Width is the size of the thing: 4px for a card that is its own row, 3px for a block inside a card, 2px for an inline mark. Colour is the state. Never invert this — a thicker stripe never means \"more important\".", "section": "shapes" },
+      { "name": "The Radius-By-Role Rule", "body": "Radius names what kind of object something is (chip / control / card). A new component adopts the radius of the role it plays; it does not pick a new value, and nothing in this system is a pill.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do reserve #e5a00d for \"a person must act\", and reach for a worded badge when something merely needs labelling.",
+      "Do pair every colour signal with words that say the same thing.",
+      "Do write prose in Secondary Ink (#94a3b8), and keep Muted Ink for timestamps and inert marks.",
+      "Do step down the tonal ladder to separate a resting surface; save shadow for hover, focus, and things that float.",
+      "Do follow the stripe grammar exactly: width for size-of-thing, colour for state.",
+      "Do render loading, empty, error, and \"not recorded\" as designed states with sentences — never a blank panel or a silently stale number.",
+      "Do name the thing in every user-facing string (\"the team disputed the finding\"), never the database field or enum value.",
+      "Do give a new panel family its own class namespace, even if its shell is identical to an existing one.",
+      "Do check contrast against the AA 4.5:1 bar and record the measured ratio in a comment when a choice is close."
+    ],
+    "donts": [
+      "Don't introduce a web font. Both stacks are the operator's own system fonts, and that is the choice.",
+      "Don't add gradients, glass, blur, or ambient glow. The two shadows and one gradient in this system are each functional and specific.",
+      "Don't use a pill radius (999px) for anything; chips are 3px in this system.",
+      "Don't grow a metric to hero size to make it matter. Put it first and explain it.",
+      "Don't dress a scope control and a navigation control the same way; the shape is carrying meaning.",
+      "Don't use raw rgba() for a state tint when the token exists — color-mix(in srgb, var(--color-X) N%, transparent) is the house idiom.",
+      "Don't use dashed borders for decoration; they mean skipped or estimated.",
+      "Don't let a colour convey a fact that no text repeats."
+    ]
+  }
+}
