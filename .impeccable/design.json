@@ -75,7 +75,7 @@
       "refersTo": "badge-severity",
       "description": "A word in a faint tint of its state colour. A badge always contains a word.",
       "html": "<span class=\"ds-badge-warning\">needs input</span>",
-      "css": ".ds-badge-warning { display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 3px; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background: color-mix(in srgb, var(--color-warning, #f59e0b) 18%, transparent); color: var(--color-warning, #f59e0b); }"
+      "css": ".ds-badge-warning { display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 10px; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background: color-mix(in srgb, var(--color-warning, #f59e0b) 18%, transparent); color: var(--color-warning, #f59e0b); }"
     },
     {
       "name": "Panel Section",
@@ -154,7 +154,7 @@
       { "name": "The One Breakpoint Rule", "body": "Mobile is one decision at 767px, not a cascade of tuned widths. If a new surface needs a second breakpoint, that is a signal the desktop layout is doing too much.", "section": "layout" },
       { "name": "The Flat-At-Rest Rule", "body": "Surfaces are flat at rest. A shadow appears only as a response — hover, focus, or an overlay escaping its container. A resting card that needs to feel separate steps one rung down the tonal ladder instead.", "section": "elevation" },
       { "name": "The Stripe Grammar Rule", "body": "A coloured left edge encodes two things at once. Width is the size of the thing: 4px for a card that is its own row, 3px for a block inside a card, 2px for an inline mark. Colour is the state. Never invert this — a thicker stripe never means \"more important\".", "section": "shapes" },
-      { "name": "The Radius-By-Role Rule", "body": "Radius names what kind of object something is (chip / control / card). A new component adopts the radius of the role it plays; it does not pick a new value, and nothing in this system is a pill.", "section": "shapes" }
+      { "name": "The Radius-By-Role Rule", "body": "Radius names what kind of object something is (mark / control / card / badge). A new component adopts the radius of the role it plays rather than picking a new value. Badges are the one rounded family, at 10px; nothing goes fully pilled (999px).", "section": "shapes" }
     ],
     "dos": [
       "Do reserve #e5a00d for \"a person must act\", and reach for a worded badge when something merely needs labelling.",
@@ -170,7 +170,7 @@
     "donts": [
       "Don't introduce a web font. Both stacks are the operator's own system fonts, and that is the choice.",
       "Don't add gradients, glass, blur, or ambient glow. The two shadows and one gradient in this system are each functional and specific.",
-      "Don't use a pill radius (999px) for anything; chips are 3px in this system.",
+      "Don't use a fully-pilled radius (999px) for anything; badges round to 10px and everything else sits at 3-6px by role.",
       "Don't grow a metric to hero size to make it matter. Put it first and explain it.",
       "Don't dress a scope control and a navigation control the same way; the shape is carrying meaning.",
       "Don't use raw rgba() for a state tint when the token exists — color-mix(in srgb, var(--color-X) N%, transparent) is the house idiom.",

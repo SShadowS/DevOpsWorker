@@ -50,9 +50,10 @@ typography:
     fontSize: "0.8rem"
     fontWeight: 400
 rounded:
-  chip: "3px"
+  mark: "3px"
   control: "4px"
   card: "6px"
+  badge: "10px"
   dot: "50%"
 spacing:
   xs: "4px"
@@ -80,8 +81,8 @@ components:
   badge-severity:
     textColor: "{colors.warning}"
     typography: "{typography.label}"
-    rounded: "{rounded.chip}"
-    padding: "2px 8px"
+    rounded: "{rounded.badge}"
+    padding: "1px 8px"
   panel-section:
     backgroundColor: "{colors.bg-tertiary}"
     textColor: "{colors.text-primary}"
@@ -214,6 +215,13 @@ not on lettering.
 - **Mono** (0.8rem): identifiers, shas, config keys, diffs, log output. Monospace is
   used for data and measurement only, never as a costume for "technical".
 
+This hierarchy names **roles, not the complete set of values**. The implementation carries
+intermediate steps between these anchors (0.65, 0.68, 0.72, 0.78, 0.85, 0.9rem and a few
+others) where a specific component needed a specific optical fit. That is accepted: pick
+the role you are filling and use its anchor, and reach for an in-between value only when
+the anchor genuinely does not fit. A tooling scan comparing literal sizes against this
+list will report those intermediates — they are known, not drift.
+
 ### Named Rules
 
 **The Tabular Figures Rule.** A number that updates in place (a tool count, a headline
@@ -271,11 +279,11 @@ separate steps one rung down the tonal ladder instead.
 
 ## Shapes
 
-Corners are small and role-assigned, not a single global radius: `3px` for a chip or
-badge, `4px` for a control or an inset section, `6px` for a card or panel, `50%` for a
-status dot. Two asymmetric radii exist and both are meaningful — `0 4px 4px 0` on a log
-entry that carries a leading stripe, `1px 1px 0 0` on a chart bar that rises from a
-baseline.
+Corners are small and role-assigned, not a single global radius: `3px` for a small inline
+mark, `4px` for a control or an inset section, `6px` for a card or panel, `10px` for a
+badge, `50%` for a status dot. Two asymmetric radii exist and both are meaningful —
+`0 4px 4px 0` on a log entry that carries a leading stripe, `1px 1px 0 0` on a chart bar
+that rises from a baseline.
 
 Borders are 1px almost everywhere. Widths above that belong to the stripe grammar below.
 Dashed borders have exactly two meanings and no others: *this step was skipped*, and
@@ -288,9 +296,10 @@ the size of the thing:** 4px for a card that is its own row, 3px for a block ins
 card, 2px for an inline mark. **Colour is the state**, from the semantic vocabulary
 above. Never invert this — a thicker stripe never means "more important."
 
-**The Radius-By-Role Rule.** Radius names what kind of object something is (chip /
-control / card). A new component adopts the radius of the role it plays; it does not
-pick a new value, and nothing in this system is a pill.
+**The Radius-By-Role Rule.** Radius names what kind of object something is (mark /
+control / card / badge). A new component adopts the radius of the role it plays rather
+than picking a new value. Badges are the one rounded family, at 10px; nothing goes fully
+pilled (999px).
 
 ## Components
 
@@ -309,7 +318,7 @@ pick a new value, and nothing in this system is a pill.
 - **Ghost:** transparent, secondary ink, for the least consequential action in a group.
 
 ### Badges and pills
-Small uppercase words in a 18% tint of their state colour at chip radius. Several
+Small uppercase words in a 18% tint of their state colour at badge radius (10px). Several
 independent families exist (outcome, verdict, severity count, mobile status, section
 attention) and each is namespaced to its own surface rather than sharing one base class.
 A badge always contains a word — a colour alone is never a badge.
@@ -391,7 +400,8 @@ cards inventing five definitions of the same word.
   that is the choice.
 - **Don't** add gradients, glass, blur, or ambient glow. The two shadows and one gradient
   in this system are each functional and specific.
-- **Don't** use a pill radius (999px) for anything; chips are 3px in this system.
+- **Don't** use a fully-pilled radius (999px) for anything; badges round to 10px and
+  everything else sits at 3-6px by role.
 - **Don't** grow a metric to hero size to make it matter. Put it first and explain it.
 - **Don't** dress a scope control and a navigation control the same way; the shape is
   carrying meaning.
