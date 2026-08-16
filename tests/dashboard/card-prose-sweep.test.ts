@@ -48,6 +48,7 @@ const FILES = [
   'components/stats-operational.tsx',
   'components/stats-view.tsx',
   'components/stats-ribbon.tsx',
+  'components/stats-config.tsx',
   'components/telemetry-table.tsx',
   'components/tool-usage.tsx',
   'components/card-glossary.tsx',
@@ -63,15 +64,12 @@ const FILES = [
  * Nothing enforces this list (a test that asserted the file still leaks would
  * pin the leak in place, which is backwards). It is documentation, and the fix
  * is to make the wording decision and move the entry into FILES.
+ *
+ * Currently empty: stats-config.tsx, the last holdout, joined FILES when the
+ * readability fix round retitled "PR-review credential" to "Pull-request
+ * review credential" — the one wording decision its entry was waiting on.
  */
-const NOT_SWEPT: ReadonlyArray<{ file: string; why: string }> = [
-  {
-    file: 'components/stats-config.tsx',
-    why: 'Renders the section title "PR-review credential", which needs a wording decision ' +
-      'before the sweep can pass — "PR" is denied and no replacement has been agreed. ' +
-      'Everything else in the file scans clean, so this is one phrase, not a file-sized gap.',
-  },
-];
+const NOT_SWEPT: ReadonlyArray<{ file: string; why: string }> = [];
 
 const read = (f: string) =>
   readFileSync(fileURLToPath(new URL(`../../src/dashboard/client/${f}`, import.meta.url)), 'utf8');

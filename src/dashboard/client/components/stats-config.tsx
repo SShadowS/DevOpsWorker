@@ -8,6 +8,7 @@ import type {
 import { assessLevers } from '../assessors.ts';
 import type { PanelSectionStatuses } from '../assessors.ts';
 import { getRouteParams } from '../url-route.ts';
+import { countOf } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
 // Config panel (Task 7) — "what settings are actually in effect right now."
@@ -204,11 +205,30 @@ export function buildPerAgentRow(a: PerAgentReport): PerAgentRowView {
  *  server-side — this is prose on top of an already-computed value, never a
  *  second judgment of set/unset. Never renders the credential itself or a
  *  prefix of it, only its length, per the brief's "a length is the maximum
- *  detail" instruction. */
+ *  detail" instruction. The billing consequence is said in words, not as the
+ *  server's `mode` enum value — `mode: oauth-subscription` was exactly the
+ *  `said = 'rejected-wrong'` shape the house writing rule forbids. */
 export function describeCredential(c: CredentialResolution): string {
-  if (!c.set) return 'unset — mode: oauth-subscription';
-  return `set (${c.length} char${c.length === 1 ? '' : 's'}) — mode: pay-per-token`;
+  if (!c.set) return 'Not set — reviews run on the Claude subscription login instead of a per-token API key.';
+  return `Set (${c.length} character${c.length === 1 ? '' : 's'}) — reviews bill per token through this key.`;
 }
+
+/**
+ * The one sentence on this panel that must not be "simplified" into a lie
+ * (readability review §5): `allowedTools` is an AUTO-APPROVE list, not an
+ * availability restriction. Agents run with the permission layer bypassed
+ * (`runAgent` passes `permissionMode: 'bypassPermissions'`), so a tool left
+ * off the list stays fully callable — telemetry has recorded an agent calling
+ * a tool it never listed. Only `disallowedTools` removes a tool. A shorter
+ * "tools overridden" would claim the override changes what the agent can use;
+ * it does not. Rendered wherever the override phrase appears (the per-agent
+ * table and the overlay table), from this one constant so the two cannot
+ * drift apart.
+ */
+export const AUTO_APPROVE_OVERRIDE_NOTE =
+  'An auto-approve override changes which tool calls are approved to run without asking first — it '
+  + 'does not change which tools the agent can use. A tool left off the list stays callable; only a '
+  + 'tool in the disallowed list is removed.';
 
 export interface LeverRowView {
   stateText: string;
@@ -292,10 +312,10 @@ export function configSectionStatuses(state: FetchState<ConfigReport>): PanelSec
   if (view.status !== 'ready') return [];
   const r = view.report!;
   return [
-    builderComparisonSectionStatus(r.orchestratorModel.agree), // Orchestrator model & effort — two independent builders
-    'neutral',                                                 // PR-review credential
+    builderComparisonSectionStatus(r.orchestratorModel.agree), // Orchestrator model & effort — two independent readings
+    'neutral',                                                 // Pull-request review credential
     'neutral',                                                 // rule-learner
-    'neutral',                                                 // Per-agent resolved knobs
+    'neutral',                                                 // Per-agent settings, as actually resolved
     'neutral',                                                 // Sub-agent frontmatter pins
     evalLeversSectionStatus(r.evalLevers),                     // Eval levers
     'neutral',                                                 // Overlay agent overrides
@@ -375,7 +395,8 @@ function OverlayOverrideCell({ o }: { o: OverlayOverrideSummary }) {
       {o.maxTurns != null && (
         <>maxTurns: {o.maxTurns}{o.toolsOverridden ? ', ' : ''}</>
       )}
-      {o.toolsOverridden && 'allowedTools overridden'}
+      {/* NEVER shorten this to "tools overridden" — see AUTO_APPROVE_OVERRIDE_NOTE. */}
+      {o.toolsOverridden && <>auto-approve list (<code class="config-mono">allowedTools</code>) overridden</>}
     </>
   );
 }
@@ -401,43 +422,58 @@ function EffortResolutionValue({ e }: { e: EffortResolution }) {
 }
 
 /** The one-line collapsed summary. `disagreement` (when set) renders FIRST
- *  and carries its own "Needs attention: " tag — see buildConfigHeadlineSummary. */
+ *  and carries its own "Needs attention: " tag — see buildConfigHeadlineSummary.
+ *  The two mono values carry the words "model" and "effort" in front of them
+ *  (readability review §5, runner-up finding): without a noun, the most-read
+ *  line on this panel was two unlabeled identifiers. The disagreement clause
+ *  names the two resolution paths by role, not by function name — the model
+ *  ids stay mono (they are billable artifacts), the internal function names
+ *  do not reach the screen. */
 function ConfigHeadline({ headline }: { headline: ConfigHeadlineSummary }) {
   return (
     <span class={`config-panel__summary ${headline.attention ? 'config-panel__summary--attention' : ''}`}>
       {headline.attention && headline.disagreement && (
         <>
           <strong class="config-tag config-tag--attention">Needs attention: </strong>
-          builders disagree — loadConfig <code class="config-mono">{headline.disagreement.loadModel}</code>
-          {' vs buildConfigFromRepo '}
+          {'two independent readings of the orchestrator model disagree — the path reviews actually run through resolved '}
+          <code class="config-mono">{headline.disagreement.loadModel}</code>
+          {', the repo-registry path resolved '}
           <code class="config-mono">{headline.disagreement.repoModel}</code>
-          {' · '}
+          {'; one may be stale · '}
         </>
       )}
+      {'model '}
       <code class="config-mono">{headline.model.mono}</code>
       {headline.model.qualifier && <span class="config-panel__qualifier"> ({headline.model.qualifier})</span>}
-      {' · '}
+      {' · effort '}
       <code class="config-mono">{headline.effort.mono}</code>
       {headline.effort.qualifier && <span class="config-panel__qualifier"> ({headline.effort.qualifier})</span>}
     </span>
   );
 }
 
+// The two resolution paths are named by ROLE here, not by function name
+// (readability review §3): `loadConfig` is the path reviews and the watcher
+// actually run through, `buildConfigFromRepo` the path spawned pipeline
+// containers reach through the repo registry. The function names live only in
+// the TypeScript source, so they fail the artifact test — a reader of this
+// card cannot act on them — while the roles say which side of a disagreement
+// is whose.
 function BuilderComparisonSection({ report }: { report: ConfigReport }) {
   const om = report.orchestratorModel;
   const status = builderComparisonSectionStatus(om.agree);
   return (
-    <ConfigSection title="Orchestrator model &amp; effort — two independent builders" status={status}>
+    <ConfigSection title="Orchestrator model &amp; effort — two independent readings" status={status}>
       <dl class="config-dl">
-        <dt><code class="config-mono">loadConfig</code> — model</dt>
+        <dt>Reviews' own path — model</dt>
         <dd><ModelResolutionValue b={om.loadConfig} /></dd>
-        <dt><code class="config-mono">loadConfig</code> — effort</dt>
+        <dt>Reviews' own path — effort</dt>
         <dd><EffortResolutionValue e={om.loadConfig.effort} /></dd>
-        <dt><code class="config-mono">buildConfigFromRepo</code> — model</dt>
+        <dt>Repo-registry path — model</dt>
         <dd><ModelResolutionValue b={om.buildConfigFromRepo} /></dd>
-        <dt><code class="config-mono">buildConfigFromRepo</code> — effort</dt>
+        <dt>Repo-registry path — effort</dt>
         <dd><EffortResolutionValue e={om.buildConfigFromRepo.effort} /></dd>
-        <dt>Builders agree?</dt>
+        <dt>Do the two readings agree?</dt>
         <dd>
           {om.agree ? 'yes' : (
             <>
@@ -455,7 +491,7 @@ function BuilderComparisonSection({ report }: { report: ConfigReport }) {
 function CredentialSection({ credential }: { credential: ConfigReport['credential'] }) {
   const c = credential.prReview;
   return (
-    <ConfigSection title="PR-review credential" status="neutral">
+    <ConfigSection title="Pull-request review credential" status="neutral">
       <dl class="config-dl">
         <dt><code class="config-mono">{c.envVar}</code></dt>
         <dd>{describeCredential(c)}</dd>
@@ -483,7 +519,7 @@ function RuleLearnerSection({ ruleLearner }: { ruleLearner: RuleLearnerReport })
 function PerAgentSection({ perAgent }: { perAgent: PerAgentReport[] }) {
   const rows = perAgent.map(buildPerAgentRow);
   return (
-    <ConfigSection title={`Per-agent resolved knobs (${rows.length} agents via resolveAgentKnobs)`} status="neutral">
+    <ConfigSection title={`Per-agent settings, as actually resolved (${countOf(rows.length, 'agent')})`} status="neutral">
       <table class="config-table">
         <thead>
           <tr><th>Agent</th><th>Builder</th><th>Model</th><th>Max turns</th><th>Disallowed tools</th><th>Overlay override</th></tr>
@@ -503,8 +539,14 @@ function PerAgentSection({ perAgent }: { perAgent: PerAgentReport[] }) {
       </table>
       <p class="config-section__note">
         Model / max turns show "declared → effective" only when they differ — a single value means
-        resolveAgentKnobs made no change from what the agent's own config declares.
+        the setting in effect is exactly what the agent's own config declares.
       </p>
+      {/* Definitional, so rendered only while the phrase it defines is on
+          screen — an always-on methodology note would be noise on the common
+          no-override day. */}
+      {rows.some((r) => r.overlay.toolsOverridden) && (
+        <p class="config-section__note">{AUTO_APPROVE_OVERRIDE_NOTE}</p>
+      )}
     </ConfigSection>
   );
 }
@@ -634,19 +676,26 @@ function OverlaySection({ overlay }: { overlay: OverlayReport }) {
       {entries.length === 0 ? (
         <p class="config-section__empty">No overlay agent overrides in effect.</p>
       ) : (
-        <table class="config-table">
-          <thead><tr><th>Agent</th><th>Model override</th><th>Max turns override</th><th>allowedTools overridden</th></tr></thead>
-          <tbody>
-            {entries.map(([name, o]) => (
-              <tr key={name}>
-                <td class="config-table__mono">{name}</td>
-                <td>{o.model ? <code class="config-mono">{o.model}</code> : <NoneValue text="no" />}</td>
-                <td>{o.maxTurns ?? <NoneValue text="no" />}</td>
-                <td>{o.allowedTools ? 'yes' : 'no'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <table class="config-table">
+            <thead><tr><th>Agent</th><th>Model override</th><th>Max turns override</th><th>Auto-approve list overridden</th></tr></thead>
+            <tbody>
+              {entries.map(([name, o]) => (
+                <tr key={name}>
+                  <td class="config-table__mono">{name}</td>
+                  <td>{o.model ? <code class="config-mono">{o.model}</code> : <NoneValue text="no" />}</td>
+                  <td>{o.maxTurns ?? <NoneValue text="no" />}</td>
+                  <td>{o.allowedTools ? 'yes' : 'no'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {/* Same conditional-definition rule as PerAgentSection: the note
+              renders only when a "yes" exists in the column it explains. */}
+          {entries.some(([, o]) => Boolean(o.allowedTools)) && (
+            <p class="config-section__note">{AUTO_APPROVE_OVERRIDE_NOTE}</p>
+          )}
+        </>
       )}
     </ConfigSection>
   );

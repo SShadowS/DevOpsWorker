@@ -532,3 +532,46 @@ describe('Task 8 — integrity prose: schema names gone, shared constants import
     expect(note).toBeGreaterThan(table);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Readability fix round 2 (rank #4): the Integrity card gets a glossary for
+// its three recurring product nouns. Source-scan secondary net, mirroring
+// stats-costquality.test.ts's glossary pin — no value assertion can reach JSX
+// render position.
+// ---------------------------------------------------------------------------
+
+describe('integrity card glossary — secondary net', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../../src/dashboard/client/components/stats-integrity.tsx', import.meta.url)),
+    'utf-8',
+  );
+
+  test('declares and renders a three-term glossary for declared pin / dispatch / roster', () => {
+    expect(src).toContain("term: 'a declared pin'");
+    expect(src).toContain("term: 'a dispatch'");
+    expect(src).toContain("term: 'the roster'");
+    expect(src).toContain('<CardGlossary terms={TERMS} />');
+  });
+
+  // Rendered under the header — BEFORE the six sections — so on this
+  // six-section card the definitions come before the jargon, not several
+  // screens below it (the foot-position concern the readability review
+  // raised for exactly this card).
+  test('the glossary renders above the panel body, not at the card foot', () => {
+    const glossary = src.indexOf('<CardGlossary terms={TERMS} />');
+    const body = src.indexOf('<div class="integrity-panel">');
+    expect(glossary).toBeGreaterThan(-1);
+    expect(body).toBeGreaterThan(-1);
+    expect(glossary).toBeLessThan(body);
+  });
+
+  // Every defined term must still be a word the card actually uses — a
+  // glossary defining a word no sentence renders is stale (the same rule
+  // stats-review-value.tsx's TERMS comment states for "settled").
+  test('each glossary term appears in the card outside its own definition', () => {
+    expect(src).toContain('Declared pin');            // contamination table header
+    expect(src).toContain('declared pin vs observed'); // contamination section title
+    expect(src).toContain('Dispatch (recorded tool activity vs. the agent roster)');
+    expect(src).toContain('roster mismatch');
+  });
+});

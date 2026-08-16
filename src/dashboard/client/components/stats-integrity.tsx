@@ -8,6 +8,23 @@ import type { PanelSectionStatuses } from '../assessors.ts';
 import { buildContaminationAvailability, formatObservedBreakdown } from '../model-contamination.ts';
 import type { AgentModelRow } from '../model-contamination.ts';
 import { countOf } from '../../count-phrase.ts';
+import { CardGlossary } from './card-glossary.tsx';
+import type { GlossaryTerm } from './card-glossary.tsx';
+
+// This card's own short vocabulary — the three nouns that recur across the
+// contamination and dispatch sections and cannot be reworded away without
+// bloating every sentence that uses them (readability review, rank #4:
+// Integrity's jargon is recurring product nouns, so a glossary is the right
+// tool here — unlike Config, whose fix was rewriting the sentences). Rendered
+// directly under the card header like every other glossary on this tab, so
+// the definitions come before the sections that use the words. Capped at
+// three terms on purpose: past that, the one-sentence format degrades and
+// the card's prose needs rewriting instead.
+const TERMS: readonly GlossaryTerm[] = [
+  { term: 'a declared pin', plain: "the model a sub-agent's configuration says it should run on" },
+  { term: 'a dispatch', plain: 'one occasion of a sub-agent being sent off to work' },
+  { term: 'the roster', plain: 'the list of sub-agents a run recorded by name' },
+];
 
 // ---------------------------------------------------------------------------
 // Integrity panel (Task 6, fix round 1) — "is the machinery reporting the
@@ -613,6 +630,7 @@ export function StatsIntegrityPanel() {
         <h3 class="stats-slot__title">Integrity</h3>
         <span class="stats-slot__window" title="Time window this section reads">{window}</span>
       </div>
+      <CardGlossary terms={TERMS} />
       {view.status !== 'ready' ? (
         <p class={`stats-slot__status-text ${view.status === 'error' ? 'stats-slot__status-text--error' : ''}`}>
           {view.message}

@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   classifyModelConfigState,
   describeModelResolution,
@@ -11,6 +13,7 @@ import {
   describeCredential,
   describeLeverRow,
   buildConfigPanelView,
+  AUTO_APPROVE_OVERRIDE_NOTE,
 } from '../../src/dashboard/client/components/stats-config.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type {
@@ -282,23 +285,28 @@ describe('buildOverlayOverrideSummary / buildPerAgentRow', () => {
 // ---------------------------------------------------------------------------
 
 describe('describeCredential', () => {
-  test('unset -> oauth-subscription, no length mentioned', () => {
+  // Readability fix round 2 (rank #3): the `mode:` enum values
+  // ('oauth-subscription' / 'pay-per-token') were internal identifiers doing a
+  // sentence's job — the rewrites below say the billing consequence in words.
+  test('unset -> names the subscription-login consequence in words, no length, no enum value', () => {
     const text = describeCredential({ envVar: 'PR_REVIEW_ANTHROPIC_API_KEY', set: false, length: null, mode: 'oauth-subscription' });
-    expect(text).toContain('oauth-subscription');
-    expect(text).toContain('unset');
+    expect(text).toBe('Not set — reviews run on the Claude subscription login instead of a per-token API key.');
+    expect(text).not.toContain('mode:');
+    expect(text).not.toContain('oauth-subscription');
   });
 
-  test('set -> pay-per-token, length shown, value never present', () => {
+  test('set -> names the per-token billing consequence, length shown, value never present', () => {
     const text = describeCredential({ envVar: 'PR_REVIEW_ANTHROPIC_API_KEY', set: true, length: 108, mode: 'pay-per-token' });
-    expect(text).toContain('pay-per-token');
-    expect(text).toContain('108');
+    expect(text).toBe('Set (108 characters) — reviews bill per token through this key.');
+    expect(text).not.toContain('mode:');
+    expect(text).not.toContain('pay-per-token');
     expect(text).not.toContain('sk-ant');
   });
 
-  test('singular "char" for length 1', () => {
+  test('singular "character" for length 1', () => {
     const text = describeCredential({ envVar: 'PR_REVIEW_ANTHROPIC_API_KEY', set: true, length: 1, mode: 'pay-per-token' });
-    expect(text).toContain('1 char)');
-    expect(text).not.toContain('1 chars)');
+    expect(text).toContain('1 character)');
+    expect(text).not.toContain('1 characters)');
   });
 });
 
@@ -329,6 +337,78 @@ describe('describeLeverRow', () => {
 // ---------------------------------------------------------------------------
 // buildConfigPanelView — the loading/error/empty/ready wrapper
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Readability fix round 2 (rank #3) — Config speaks in role words, not code.
+// No value assertion can reach JSX text, so this is a source-scan secondary
+// net, mirroring stats-costquality.test.ts's "cost card structure" block.
+// ---------------------------------------------------------------------------
+
+describe('config panel prose — secondary net', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../../src/dashboard/client/components/stats-config.tsx', import.meta.url)),
+    'utf-8',
+  );
+
+  // THE load-bearing sentence of the rewrite: `allowedTools` is an
+  // auto-approve list, not an availability restriction — agents run with the
+  // permission layer bypassed, so a tool left off the list stays callable
+  // (proven by telemetry 2026-07-31: an agent called a tool it never listed).
+  // "Tools overridden" would be a FALSE claim. Pinned verbatim so a future
+  // "simplification" cannot quietly restore the lie.
+  test('the auto-approve note states auto-approval, not availability — verbatim', () => {
+    expect(AUTO_APPROVE_OVERRIDE_NOTE).toBe(
+      'An auto-approve override changes which tool calls are approved to run without asking first — it '
+      + 'does not change which tools the agent can use. A tool left off the list stays callable; only a '
+      + 'tool in the disallowed list is removed.',
+    );
+  });
+
+  test('the auto-approve note renders in BOTH tables that show the override, from the one constant', () => {
+    const occurrences = src.split('{AUTO_APPROVE_OVERRIDE_NOTE}').length - 1;
+    expect(occurrences).toBe(2);
+  });
+
+  test('no cell or header claims "tools overridden" bare — the phrase always names the auto-approve list', () => {
+    expect(src).toContain('auto-approve list (<code class="config-mono">allowedTools</code>) overridden');
+    expect(src).toContain('<th>Auto-approve list overridden</th>');
+    expect(src).not.toContain("'allowedTools overridden'");
+    expect(src).not.toContain('>allowedTools overridden<');
+  });
+
+  // The most-read line on the panel: the healthy headline now labels its two
+  // mono values ("model X · effort Y") instead of rendering two bare tokens.
+  test('the collapsed headline labels its two values with nouns', () => {
+    expect(src).toContain("{'model '}");
+    expect(src).toContain("{' · effort '}");
+  });
+
+  // The 2am string: the builders-disagree alarm names the two resolution
+  // paths by role. The internal function names stay out of rendered text.
+  test('the disagreement alarm speaks in roles, and the function names never render', () => {
+    expect(src).toContain('two independent readings of the orchestrator model disagree');
+    expect(src).toContain("Reviews' own path — model");
+    expect(src).toContain('Repo-registry path — model');
+    expect(src).not.toContain('>loadConfig</code>');
+    expect(src).not.toContain('>buildConfigFromRepo</code>');
+    // The old rendered clause, exactly — comments may still SAY the builders
+    // disagree (developer documentation), but no reader-facing string may.
+    expect(src).not.toContain('builders disagree — ');
+  });
+
+  test('the per-agent section title and note carry no internal function name', () => {
+    expect(src).toContain('Per-agent settings, as actually resolved');
+    expect(src).not.toContain('via resolveAgentKnobs');
+    expect(src).not.toContain('resolveAgentKnobs made no change');
+  });
+
+  // The wording decision card-prose-sweep.test.ts's NOT_SWEPT entry was
+  // waiting for — "PR" never reaches a reader (see that file's deny list).
+  test('the credential section title spells out "pull request"', () => {
+    expect(src).toContain('Pull-request review credential');
+    expect(src).not.toContain('PR-review credential');
+  });
+});
 
 describe('buildConfigPanelView', () => {
   test('loading', () => {
