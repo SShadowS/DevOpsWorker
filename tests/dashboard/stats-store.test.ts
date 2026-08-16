@@ -2,6 +2,7 @@ import { describe, test, expect, afterEach } from 'bun:test';
 import {
   classifyWindowedResponse, classifyDriftResponse,
   loadStatsForWindow, loadConfigReport, statsPopulation,
+  parseStatsSection, parseStatsWindow, parseStatsPopulation,
 } from '../../src/dashboard/client/stats-store.ts';
 import type { DriftStats } from '../../src/dashboard/stats.ts';
 
@@ -125,5 +126,61 @@ describe('loadStatsForWindow — population query string', () => {
     const configUrl = urls.find((u) => u.startsWith('/api/config'));
     expect(configUrl).toBe('/api/config');
     expect(configUrl).not.toContain('population');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// URL-route parsers (arrival-efficiency fix) — pure, total. Each must return
+// `null` for an absent OR unrecognised param rather than a hardcoded
+// default, so a caller can tell "the URL said nothing" from "the URL said
+// something" and fall back accordingly (see stats-view.tsx's `initialSection`
+// for the one case that actually branches on this: URL wins, then
+// localStorage, then a hardcoded default).
+// ---------------------------------------------------------------------------
+
+describe('parseStatsSection', () => {
+  test('a valid section round-trips', () => {
+    expect(parseStatsSection(new URLSearchParams('section=reflection'))).toBe('reflection');
+  });
+
+  test('absent -> null', () => {
+    expect(parseStatsSection(new URLSearchParams(''))).toBeNull();
+  });
+
+  test('unrecognised value -> null, never a thrown error', () => {
+    expect(parseStatsSection(new URLSearchParams('section=bogus'))).toBeNull();
+  });
+});
+
+describe('parseStatsWindow', () => {
+  test('every real window value round-trips', () => {
+    expect(parseStatsWindow(new URLSearchParams('window=7d'))).toBe('7d');
+    expect(parseStatsWindow(new URLSearchParams('window=30d'))).toBe('30d');
+    expect(parseStatsWindow(new URLSearchParams('window=90d'))).toBe('90d');
+  });
+
+  test('absent -> null', () => {
+    expect(parseStatsWindow(new URLSearchParams(''))).toBeNull();
+  });
+
+  test('a garbage window -> null, not a silent fallback to 30d here', () => {
+    // The 30d fallback is the CALLER's decision (stats-store.ts's hardcoded
+    // signal default) — this function only reports what the URL said.
+    expect(parseStatsWindow(new URLSearchParams('window=next-quarter'))).toBeNull();
+  });
+});
+
+describe('parseStatsPopulation', () => {
+  test('both real population values round-trip', () => {
+    expect(parseStatsPopulation(new URLSearchParams('population=prod'))).toBe('prod');
+    expect(parseStatsPopulation(new URLSearchParams('population=test'))).toBe('test');
+  });
+
+  test('absent -> null', () => {
+    expect(parseStatsPopulation(new URLSearchParams(''))).toBeNull();
+  });
+
+  test('an unrecognised population -> null', () => {
+    expect(parseStatsPopulation(new URLSearchParams('population=staging'))).toBeNull();
   });
 });

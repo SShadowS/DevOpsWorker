@@ -1689,6 +1689,34 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   color: var(--color-text-secondary);
 }
 
+/* Tab-level refresh + "as of" stamp (arrival-efficiency fix, design-critique
+   finding) — sits above the section switcher so it applies whichever
+   section is open, since Refresh re-runs every fetch the tab makes (the
+   windowed panels, Config, AND Reflection), not just the windowed ones the
+   .stats-view__toolbar selectors above scope. Chrome, not a finding: never
+   spends --color-accent. The Refresh button reuses the shared .btn/
+   .btn--ghost/.btn--pending vocabulary (DESIGN.md Buttons) rather than a
+   new button family. The stamp is a timestamp, not a sentence read for its
+   content, so it takes Muted Ink per the Text-Tier Rule — Secondary Ink,
+   the house default for prose, is reserved for text someone reads. */
+.stats-view__tab-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.stats-view__as-of {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-view__refresh-btn {
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+
 /* Placeholder slot — one per Task 5-9. Each later task replaces the
    `__sources` list + placeholder note with its real panel body; the
    loading/empty/error branching that produces `--loading|--error|--empty|--ready`

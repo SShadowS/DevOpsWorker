@@ -1,13 +1,16 @@
-import { useEffect } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { signal } from '@preact/signals';
 import {
   statsWindow, statsPopulation, costStats, qualityStats, integrityStats, operationalStats,
-  reviewValueStats, configReport,
+  reviewValueStats, configReport, statsLastLoadedAt, statsRefreshing,
   setStatsWindow, setStatsPopulation, loadAllStats, STATS_WINDOWS, STATS_POPULATIONS,
+  STATS_SECTIONS, parseStatsSection, parseStatsWindow, parseStatsPopulation,
 } from '../stats-store.ts';
-import type { FetchState } from '../stats-store.ts';
+import type { FetchState, StatsSection } from '../stats-store.ts';
 import type { Population, PopulationMeta, IntegrityStats, OperationalStats, CostStats, QualityStats, ReviewValueStats } from '../../stats.ts';
 import type { ConfigReport } from '../../config-report.ts';
+import { getRouteParams, updateRouteParams } from '../url-route.ts';
+import { formatRelativeTime } from '../format.ts';
 import { StatsRibbon } from './stats-ribbon.tsx';
 import { StatsIntegrityPanel, integritySectionStatuses } from './stats-integrity.tsx';
 import { ConfigPanel, configSectionStatuses } from './stats-config.tsx';
@@ -114,8 +117,7 @@ export function pickPopulationMeta(...states: FetchState<PopulationMeta>[]): Pop
 // WHERE to click, not just that something is off.
 // ---------------------------------------------------------------------------
 
-const STATS_SECTIONS = ['health', 'value', 'reflection', 'config'] as const;
-export type StatsSection = (typeof STATS_SECTIONS)[number];
+export type { StatsSection };
 
 const SECTION_LABEL: Record<StatsSection, string> = {
   health: 'Health',
@@ -126,7 +128,16 @@ const SECTION_LABEL: Record<StatsSection, string> = {
 
 const SECTION_STORAGE_KEY = 'stats-section';
 
+/** Deep link wins on arrival; the remembered (localStorage) choice is the
+ *  fallback when the URL says nothing — per the arrival-efficiency finding,
+ *  a pasted link must reproduce the section it points at rather than the
+ *  reader's last visit silently overriding it. `parseStatsSection` already
+ *  returns `null` for both an absent `section` param and an unrecognised
+ *  one, so garbage in the URL degrades to "as if the URL said nothing"
+ *  automatically. */
 function initialSection(): StatsSection {
+  const fromUrl = parseStatsSection(getRouteParams());
+  if (fromUrl) return fromUrl;
   try {
     const saved = localStorage.getItem(SECTION_STORAGE_KEY);
     if (saved && (STATS_SECTIONS as readonly string[]).includes(saved)) return saved as StatsSection;
@@ -139,6 +150,10 @@ const activeSection = signal<StatsSection>(initialSection());
 function setSection(s: StatsSection): void {
   activeSection.value = s;
   try { localStorage.setItem(SECTION_STORAGE_KEY, s); } catch { /* best effort */ }
+  // replaceState, not push: a section click is a scope change, not a new
+  // page — see url-route.ts's doc comment for why every control in this tab
+  // makes the same choice, so the back button never fills up with clicks.
+  updateRouteParams({ section: s });
 }
 
 /**
@@ -316,15 +331,102 @@ function PopulationDisclosure() {
   return <p class="stats-view__population-disclosure">{describePopulationExclusion(meta.population, meta.otherPopulationCount)}</p>;
 }
 
+// ---------------------------------------------------------------------------
+// Refresh (arrival-efficiency fix) — the tab's manual Refresh button re-runs
+// the exact fetches the tab does on mount (`loadAllStats` + `loadReflections`,
+// the same pair the mount effect below now calls through this one function).
+// `statsRefreshing` guards a double-fire (the button also disables itself,
+// and this function no-ops if already running, covering the mount effect
+// and a click racing each other). The "as of" stamp itself is NOT set here:
+// `loadStatsForWindow` (stats-store.ts) stamps `statsLastLoadedAt` as soon
+// as the windowed batch it fetches lands, so a plain window/population
+// switch keeps the stamp honest too, not only a full Refresh — see that
+// function's doc comment for why the stamp is scoped to the windowed data
+// specifically rather than to this wrapper's config/reflections calls.
+// ---------------------------------------------------------------------------
+
+async function refreshStatsTab(): Promise<void> {
+  if (statsRefreshing.value) return;
+  statsRefreshing.value = true;
+  try {
+    await Promise.all([loadAllStats(), loadReflections()]);
+  } finally {
+    statsRefreshing.value = false;
+  }
+}
+
+/** Forces a re-render every 30s purely so the as-of stamp's relative time
+ *  keeps counting up on a long-open tab — without this, `formatRelativeTime`
+ *  would only ever recompute when some OTHER state changed, and the stamp
+ *  would freeze at whatever it read after the last actual fetch: a smaller
+ *  copy of the exact "silently ages" bug this whole feature exists to close. */
+function useRelativeTimeTick(intervalMs: number): void {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((t) => t + 1), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+}
+
+/** Chrome, not a finding — reuses the shared `.btn`/`.btn--ghost` vocabulary
+ *  (DESIGN.md's Buttons component) for the control and Muted Ink for the
+ *  stamp (Text-Tier Rule: a timestamp, not a sentence someone reads for its
+ *  content), so neither spends `--color-accent`. */
+function TabToolbar() {
+  useRelativeTimeTick(30_000);
+  const refreshing = statsRefreshing.value;
+  const at = statsLastLoadedAt.value;
+  return (
+    <div class="stats-view__tab-toolbar">
+      {at != null && (
+        <span class="stats-view__as-of">
+          {refreshing && 'Refreshing. '}
+          Data as of {formatRelativeTime(at)}.
+        </span>
+      )}
+      {/* aria-live: the button's own visible text already changes between
+          "Refresh" and "Refreshing…" — this is a second, redundant
+          announcement for readers that don't surface a same-element text
+          change, mirroring the reflection decision gate's precedent
+          (reflection-card.tsx's `.reflection-decision__buttons`). */}
+      <div aria-live="polite">
+        <button
+          type="button"
+          class={`btn btn--ghost stats-view__refresh-btn${refreshing ? ' btn--pending' : ''}`}
+          disabled={refreshing}
+          aria-busy={refreshing}
+          onClick={() => { void refreshStatsTab(); }}
+        >
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function StatsView() {
   // Refetch every time the tab is opened rather than caching across mounts:
   // this is an operate-mode dashboard, and a stale number with no visible
   // "stale" marker is worse than a brief loading flash. All sections'
   // signals load up front (not lazily per section) so the section badges
-  // are honest from the first paint and switching is instant.
-  // `loadReflections` joins the same policy: its badge and the card share
-  // one signal, so a decision made inside the card updates the badge too.
-  useEffect(() => { loadAllStats(); void loadReflections(); }, []);
+  // are honest from the first paint and switching is instant. Runs through
+  // `refreshStatsTab` — the SAME function the manual Refresh button calls —
+  // so mount and refresh share one busy flag and one as-of stamp.
+  //
+  // Before that: seed the shared window/population signals from the URL
+  // (arrival-efficiency fix) so a pasted deep link reproduces the window and
+  // population it points at instead of the hardcoded 30d/prod defaults.
+  // Plain signal writes, not `setStatsWindow`/`setStatsPopulation` — those
+  // no-op on an unchanged value and exist to trigger their OWN refetch,
+  // which `refreshStatsTab` below is about to do anyway.
+  useEffect(() => {
+    const params = getRouteParams();
+    const urlWindow = parseStatsWindow(params);
+    const urlPopulation = parseStatsPopulation(params);
+    if (urlWindow) statsWindow.value = urlWindow;
+    if (urlPopulation) statsPopulation.value = urlPopulation;
+    void refreshStatsTab();
+  }, []);
 
   const section = activeSection.value;
   // The Prod|Test and window controls scope only the four windowed stats
@@ -346,6 +448,8 @@ export function StatsView() {
           always-production signal (`ribbonIntegrityStats`) and is NOT
           affected by the Prod|Test control — see stats-ribbon.tsx. */}
       <StatsRibbon />
+
+      <TabToolbar />
 
       <SectionNav />
 

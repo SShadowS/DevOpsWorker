@@ -10,6 +10,7 @@ import { StatsView } from './components/stats-view.tsx';
 import { AdminView } from './components/admin-view.tsx';
 import { forcePull } from './sse.ts';
 import { logout } from './auth-client.ts';
+import { getRouteParams, parseEnumParam, updateRouteParams } from './url-route.ts';
 
 const editingConcurrency = signal(false);
 const concurrencyInput = signal('');
@@ -23,7 +24,34 @@ async function handleForcePull() {
     pulling.value = false;
   }
 }
-const activeView = signal<'sessions' | 'pr-reviews' | 'stats' | 'admin'>('sessions');
+
+// ---------------------------------------------------------------------------
+// App-tab routing (arrival-efficiency fix) — which top-level tab is open is
+// part of "a pasted link must reproduce the exact view", alongside the
+// Stats & Config tab's own section/window/population (stats-view.tsx,
+// stats-store.ts). `parseView` is total: an absent or unrecognised `view`
+// param both fall back to 'sessions' rather than throwing or leaving the
+// view undefined.
+// ---------------------------------------------------------------------------
+
+const VIEW_NAMES = ['sessions', 'pr-reviews', 'stats', 'admin'] as const;
+type ViewName = (typeof VIEW_NAMES)[number];
+
+function parseView(params: URLSearchParams): ViewName {
+  return parseEnumParam(params, 'view', VIEW_NAMES) ?? 'sessions';
+}
+
+const activeView = signal<ViewName>(parseView(getRouteParams()));
+
+/** Switches the tab and patches the URL's `view` param via `replaceState` —
+ *  a tab click is a scope change, not a new page, so it must not spend a
+ *  back-button step (see url-route.ts's doc comment). Leaves any
+ *  `section`/`window`/`population` params already in the hash untouched,
+ *  so switching away from and back to Stats keeps that tab's own state. */
+function setActiveView(v: ViewName): void {
+  activeView.value = v;
+  updateRouteParams({ view: v });
+}
 
 async function updateConcurrency() {
   const val = parseInt(concurrencyInput.value, 10);
@@ -44,6 +72,14 @@ export function App() {
   const selected = selectedSession.value;
   const r = runners.value;
   const mobile = isMobile.value;
+  const isAdmin = currentUser.value?.role === 'admin';
+  // Defence in depth, not the control (see the Admin tab button's and panel's
+  // own comments below): a non-admin whose `activeView` signal is somehow
+  // 'admin' — a role change mid-session, or a `view=admin` deep link typed
+  // by a non-admin — falls back to Sessions rather than rendering no tab as
+  // active and no panel at all, which is what `activeView.value === 'admin'`
+  // failing every branch below would otherwise produce.
+  const view = activeView.value === 'admin' && !isAdmin ? 'sessions' : activeView.value;
 
   return (
     <div class="dashboard">
@@ -121,10 +157,10 @@ export function App() {
             type="button"
             role="tab"
             id="tab-sessions"
-            aria-selected={activeView.value === 'sessions'}
+            aria-selected={view === 'sessions'}
             aria-controls="panel-sessions"
-            class={`view-tabs__tab ${activeView.value === 'sessions' ? 'view-tabs__tab--active' : ''}`}
-            onClick={() => { activeView.value = 'sessions'; }}
+            class={`view-tabs__tab ${view === 'sessions' ? 'view-tabs__tab--active' : ''}`}
+            onClick={() => setActiveView('sessions')}
           >
             Sessions
           </button>
@@ -132,10 +168,10 @@ export function App() {
             type="button"
             role="tab"
             id="tab-pr-reviews"
-            aria-selected={activeView.value === 'pr-reviews'}
+            aria-selected={view === 'pr-reviews'}
             aria-controls="panel-pr-reviews"
-            class={`view-tabs__tab ${activeView.value === 'pr-reviews' ? 'view-tabs__tab--active' : ''}`}
-            onClick={() => { activeView.value = 'pr-reviews'; }}
+            class={`view-tabs__tab ${view === 'pr-reviews' ? 'view-tabs__tab--active' : ''}`}
+            onClick={() => setActiveView('pr-reviews')}
           >
             PR Reviews
           </button>
@@ -143,10 +179,10 @@ export function App() {
             type="button"
             role="tab"
             id="tab-stats"
-            aria-selected={activeView.value === 'stats'}
+            aria-selected={view === 'stats'}
             aria-controls="panel-stats"
-            class={`view-tabs__tab ${activeView.value === 'stats' ? 'view-tabs__tab--active' : ''}`}
-            onClick={() => { activeView.value = 'stats'; }}
+            class={`view-tabs__tab ${view === 'stats' ? 'view-tabs__tab--active' : ''}`}
+            onClick={() => setActiveView('stats')}
           >
             Stats & Config
           </button>
@@ -155,21 +191,21 @@ export function App() {
               (server.ts's requiredAccess() gate) regardless of what this
               button does. This just keeps an operator from opening a screen
               every request from which would come back 403. */}
-          {currentUser.value?.role === 'admin' && (
+          {isAdmin && (
             <button
               type="button"
               role="tab"
               id="tab-admin"
-              aria-selected={activeView.value === 'admin'}
+              aria-selected={view === 'admin'}
               aria-controls="panel-admin"
-              class={`view-tabs__tab ${activeView.value === 'admin' ? 'view-tabs__tab--active' : ''}`}
-              onClick={() => { activeView.value = 'admin'; }}
+              class={`view-tabs__tab ${view === 'admin' ? 'view-tabs__tab--active' : ''}`}
+              onClick={() => setActiveView('admin')}
             >
               Admin
             </button>
           )}
         </div>
-        {activeView.value === 'sessions' ? (
+        {view === 'sessions' ? (
           <div id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions">
             {mobile && mobileDetailId.value != null ? (
               <MobileSessionDetail />
@@ -194,22 +230,21 @@ export function App() {
               </div>
             )}
           </div>
-        ) : activeView.value === 'pr-reviews' ? (
+        ) : view === 'pr-reviews' ? (
           <div id="panel-pr-reviews" role="tabpanel" aria-labelledby="tab-pr-reviews">
             <PRReviewList />
           </div>
-        ) : activeView.value === 'stats' ? (
+        ) : view === 'stats' ? (
           <div id="panel-stats" role="tabpanel" aria-labelledby="tab-stats">
             <StatsView />
           </div>
-        ) : activeView.value === 'admin' && currentUser.value?.role === 'admin' ? (
+        ) : view === 'admin' ? (
           // Defence in depth, not the control: the server rejects every
           // /api/admin/* request from a non-admin regardless (see the tab
-          // button's own comment above). This just stops the panel from
-          // rendering admin content at all if activeView is ever 'admin'
-          // for a non-admin session — e.g. a role change mid-session, or a
-          // future caller that sets activeView without going through the
-          // (already role-gated) tab button.
+          // button's own comment above). `view` above already clamps 'admin'
+          // to 'sessions' for a non-admin session — e.g. a role change
+          // mid-session, or a `view=admin` deep link typed by a non-admin —
+          // so reaching this branch already implies `isAdmin`.
           <div id="panel-admin" role="tabpanel" aria-labelledby="tab-admin">
             <AdminView />
           </div>

@@ -1,11 +1,41 @@
 import { signal } from '@preact/signals';
 import type { StatsWindow, CostStats, QualityStats, IntegrityStats, OperationalStats, ReviewValueStats, DriftStats, Population } from '../stats.ts';
 import type { ConfigReport } from '../config-report.ts';
+import { parseEnumParam, updateRouteParams } from './url-route.ts';
 
 export type { StatsWindow, Population };
 
 export const STATS_WINDOWS: readonly StatsWindow[] = ['7d', '30d', '90d'];
 export const STATS_POPULATIONS: readonly Population[] = ['prod', 'test'];
+
+/** The Stats & Config tab's four sections (moved here from stats-view.tsx
+ *  so the URL-route parsers below and the section signal in stats-view.tsx
+ *  can both reach it without stats-view.tsx and url-route.ts importing each
+ *  other). */
+export const STATS_SECTIONS = ['health', 'value', 'reflection', 'config'] as const;
+export type StatsSection = (typeof STATS_SECTIONS)[number];
+
+// ---------------------------------------------------------------------------
+// URL-route parsers (arrival-efficiency fix) — pure, total, unit-tested.
+// Each returns `null` for an absent or unrecognised param rather than a
+// hardcoded default: "the URL said nothing" and "the URL said something
+// invalid" both mean the same thing to a caller (fall back to whatever it
+// otherwise would have used — a remembered choice, or a hardcoded default),
+// and collapsing them here keeps that fallback decision at the call site
+// instead of guessing a default a caller didn't ask for.
+// ---------------------------------------------------------------------------
+
+export function parseStatsSection(params: URLSearchParams): StatsSection | null {
+  return parseEnumParam(params, 'section', STATS_SECTIONS);
+}
+
+export function parseStatsWindow(params: URLSearchParams): StatsWindow | null {
+  return parseEnumParam(params, 'window', STATS_WINDOWS);
+}
+
+export function parseStatsPopulation(params: URLSearchParams): Population | null {
+  return parseEnumParam(params, 'population', STATS_POPULATIONS);
+}
 
 /**
  * Fetch lifecycle for one stats/config panel. `'empty'` is deliberately
@@ -75,6 +105,29 @@ export const driftStats = signal<FetchState<DriftStats>>({ status: 'loading' });
 /** Not windowed — `/api/config` reports resolved configuration, not a time-series stat. */
 export const configReport = signal<FetchState<ConfigReport>>({ status: 'loading' });
 
+/** When the windowed data currently on screen (cost/quality/integrity/
+ *  operational/review-value/drift) was last fetched — the tab-level "as of"
+ *  stamp (stats-view.tsx's `TabToolbar`) reads this. Set inside
+ *  `loadStatsForWindow` once its batch actually lands (after the
+ *  supersede-token check, never on a discarded response), so a plain
+ *  window or population switch keeps the stamp honest, not only the manual
+ *  Refresh button. Deliberately NOT updated by Config or Reflection: Config
+ *  already shows its own `generatedAt` (stats-config.tsx) and Reflection is
+ *  unwindowed, so folding either in here would make the stamp describe data
+ *  it does not own. `null` before the first load completes, so the stamp
+ *  can render nothing rather than a fabricated time. */
+export const statsLastLoadedAt = signal<string | null>(null);
+
+/** True while a refresh cycle (the tab's initial mount load, or the manual
+ *  Refresh button — see `refreshStatsTab` in stats-view.tsx) is in flight.
+ *  The Refresh button reads this for its disabled/pending state and to
+ *  guard against a double-fire. Deliberately NOT set by `setStatsWindow`/
+ *  `setStatsPopulation`: those already have their own visible feedback (the
+ *  panels' own `FetchState: 'loading'` rendering), so tying the Refresh
+ *  button's busy state to every scope-picker click would just be a second,
+ *  redundant loading indicator for the same fetch. */
+export const statsRefreshing = signal(false);
+
 /**
  * The status ribbon (stats-ribbon.tsx) must always describe PRODUCTION,
  * never whatever population `statsPopulation` currently selects — the
@@ -137,6 +190,15 @@ export async function loadStatsForWindow(window: StatsWindow): Promise<void> {
   ]);
   if (token !== statsRequestToken) return; // superseded by a later window/population switch
 
+  // The tab-level "as of" stamp (stats-view.tsx's TabToolbar) describes THIS
+  // windowed batch specifically — Config already shows its own `generatedAt`
+  // (stats-config.tsx) and Reflection is "the last few cycles, full stop",
+  // neither scoped by window/population the way this batch is. Stamping
+  // here, not in `refreshStatsTab`'s wrapper, means a plain window or
+  // population switch (not just the manual Refresh button) also keeps the
+  // stamp honest — the data on screen just changed, so the stamp must too.
+  statsLastLoadedAt.value = new Date().toISOString();
+
   costStats.value = cost.ok ? classifyWindowedResponse(cost.data) : { status: 'error', message: cost.message };
   qualityStats.value = quality.ok ? classifyWindowedResponse(quality.data) : { status: 'error', message: quality.message };
   const integrityResult: FetchState<IntegrityStats> =
@@ -161,29 +223,39 @@ export async function loadConfigReport(): Promise<void> {
 }
 
 /** Switch the shared window and refetch every windowed endpoint. No-op if
- *  already on that window (guards a redundant click re-triggering 6 fetches). */
+ *  already on that window (guards a redundant click re-triggering 6 fetches).
+ *  Patches the URL's `window` param via `replaceState` (arrival-efficiency
+ *  fix) — a scope-picker click must not spend a back-button step, matching
+ *  the population selector below and the section switcher in stats-view.tsx. */
 export function setStatsWindow(next: StatsWindow): void {
   if (statsWindow.value === next) return;
   statsWindow.value = next;
+  updateRouteParams({ window: next });
   void loadStatsForWindow(next);
 }
 
 /** Switch the shared population and refetch the five population-aware
- *  endpoints — mirrors `setStatsWindow` exactly, including its no-op guard.
- *  Deliberately routed through the SAME `loadStatsForWindow` path the window
- *  signal already uses rather than a second fetch effect: switching
- *  population re-runs the identical fetch-and-classify sequence, which reads
- *  `statsPopulation.value` for the query string on its own. */
+ *  endpoints — mirrors `setStatsWindow` exactly, including its no-op guard
+ *  and its URL patch. Deliberately routed through the SAME
+ *  `loadStatsForWindow` path the window signal already uses rather than a
+ *  second fetch effect: switching population re-runs the identical
+ *  fetch-and-classify sequence, which reads `statsPopulation.value` for the
+ *  query string on its own. */
 export function setStatsPopulation(next: Population): void {
   if (statsPopulation.value === next) return;
   statsPopulation.value = next;
+  updateRouteParams({ population: next });
   void loadStatsForWindow(statsWindow.value);
 }
 
 /** Load everything the Stats & Config tab needs. Called once when the tab
- *  mounts. Config has no window dependency and is fetched once here;
- *  `setStatsWindow` alone drives windowed refetches thereafter. */
-export function loadAllStats(): void {
-  void loadStatsForWindow(statsWindow.value);
-  void loadConfigReport();
+ *  mounts, and again by the manual Refresh button (`refreshStatsTab` in
+ *  stats-view.tsx, which also re-runs reflections — a concern this file
+ *  does not own). Config has no window dependency and is fetched once here;
+ *  `setStatsWindow` alone drives windowed refetches thereafter. Returns its
+ *  Promise (rather than firing-and-forgetting, as it did before the
+ *  arrival-efficiency fix) so a caller can await both fetches settling
+ *  before recording the "as of" timestamp. */
+export async function loadAllStats(): Promise<void> {
+  await Promise.all([loadStatsForWindow(statsWindow.value), loadConfigReport()]);
 }
