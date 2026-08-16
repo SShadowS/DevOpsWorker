@@ -211,3 +211,58 @@ const STATUS_RANK: Record<SlotStatus, number> = { error: 0, loading: 1, empty: 2
 export function worstStatus(sources: SlotSourceInfo[]): SlotStatus {
   return sources.reduce<SlotStatus>((worst, s) => (STATUS_RANK[s.status] < STATUS_RANK[worst] ? s.status : worst), 'ready');
 }
+
+// ---------------------------------------------------------------------------
+// Section-badge fold — attention routing for the section switcher.
+//
+// The section buttons hide five of seven panels, so each button carries a
+// badge saying whether the panels behind it are asking for a person. The
+// badge used to be built from a hand-picked pair of assessors, which silently
+// missed every other attention state a hidden panel could render (findings
+// integrity, tool mix, rate limits, flagged model cost, the danger-zone
+// gauge, builder disagreement). The fix is structural: each panel exports the
+// list of section statuses its ready body renders — computed by the SAME pure
+// view builders its own JSX renders with — and the badge is nothing but this
+// fold over those lists. A new attention state inside any existing panel
+// section is then routed to its badge with no registration step.
+// ---------------------------------------------------------------------------
+
+/** The cross-panel section-status vocabulary the badge folds over — the
+ *  three-state scoring stats-integrity.tsx defines and every panel family
+ *  shares: 'ok' = evaluated, healthy; 'attention' = evaluated, a genuine
+ *  finding — A PERSON MUST ACT (the accent's one meaning); 'neutral' = not
+ *  scored against a pass/fail bar (instrument caveats, inferred values,
+ *  plain reports). A panel whose LOCAL styling spends 'attention' on a
+ *  different meaning must translate before contributing — see
+ *  `reviewValueSectionStatuses` in stats-review-value.tsx, whose local
+ *  attention marks an unsettled measurement and therefore folds as
+ *  'neutral', the instrument-caveat state. */
+export type PanelSectionStatus = 'ok' | 'attention' | 'neutral';
+
+/** One panel's contribution to a section badge: the statuses of the sections
+ *  its body renders, in render order — or `null` while the panel cannot yet
+ *  know them (a fetch still in flight). `null` is deliberately distinct from
+ *  `[]`: a panel whose fetch has SETTLED without data (failed or empty)
+ *  renders no sections, so it contributes an empty list and the fold carries
+ *  on — hiding another panel's live attention behind one panel's failed
+ *  fetch would recreate the invisible-alarm problem the badges exist to
+ *  solve. */
+export type PanelSectionStatuses = readonly PanelSectionStatus[] | null;
+
+/**
+ * The fold itself: how many section statuses across a section's panels ask
+ * for a person right now, or `null` when that count cannot honestly be
+ * stated yet. Any `null` contribution nulls the whole count — a badge drawn
+ * from the settled panels alone could grow when the in-flight fetch lands,
+ * and a number that can silently grow is a guessed number (same reasoning as
+ * `buildModelIntegrityCard` holding the whole ribbon card at loading until
+ * both its fetches settle). Pure — exported for unit testing.
+ */
+export function sectionAttentionCount(panels: readonly PanelSectionStatuses[]): number | null {
+  let count = 0;
+  for (const statuses of panels) {
+    if (statuses == null) return null;
+    count += statuses.filter((s) => s === 'attention').length;
+  }
+  return count;
+}

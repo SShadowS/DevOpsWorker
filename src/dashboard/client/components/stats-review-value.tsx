@@ -3,6 +3,7 @@ import type { FetchState } from '../stats-store.ts';
 import type { ReviewValueStats, ReviewValueOutcome, ReviewValueEngagement, ReviewValueDisputed, ReviewValueLeadTime, ReviewValueSpend } from '../../stats.ts';
 import { formatCost, formatPct } from '../format.ts';
 import { countOf, agree, itThem } from '../../count-phrase.ts';
+import type { PanelSectionStatuses } from '../assessors.ts';
 import { CardGlossary } from './card-glossary.tsx';
 import type { GlossaryTerm } from './card-glossary.tsx';
 
@@ -589,6 +590,43 @@ export function buildReviewValuePanelView(state: FetchState<ReviewValueStats>): 
     case 'ready':
       return { status: 'ready', message: null, data: state.data };
   }
+}
+
+/**
+ * This panel's contribution to the Cost & value section badge (see
+ * `attentionBySection` in stats-view.tsx): the statuses of the four sections
+ * `ReviewValueBody` renders, IN RENDER ORDER — translated, not copied.
+ *
+ * TRANSLATION, NOT OMISSION: this panel's own `--attention` styling does not
+ * mean what the badge's vocabulary means. On every other panel family,
+ * 'attention' is "evaluated, a genuine finding — a person must act"
+ * (stats-integrity.tsx's three-state definition). On THIS card it is
+ * documented — in `SpendSection`'s own comment, in `ScorecardFigure`'s, and
+ * in the stylesheet's `.review-value-figure--attention` note — as the mark
+ * for "something here is unsettled" / "a figure that is not a measurement at
+ * all": a floor-not-exact spend total, judged coverage that will grow, a
+ * dispute line not yet measured. In the cross-panel vocabulary the badge
+ * folds (`PanelSectionStatus`, assessors.ts), that epistemic state is
+ * `'neutral'` — the instrument-caveat state Dispatch established — so every
+ * section here folds as neutral, and the badge never converts a chronic
+ * "coverage will grow" disclosure into a standing person-must-act alarm that
+ * would drown the episodic ones (a flagged model, the danger zone). A future
+ * section on this card that DOES mean "a person must act" belongs in this
+ * list as `'attention'`.
+ *
+ * `null` while the fetch is in flight; a settled non-ready panel renders no
+ * sections and contributes an empty list (see `PanelSectionStatuses`).
+ */
+export function reviewValueSectionStatuses(state: FetchState<ReviewValueStats>): PanelSectionStatuses {
+  const view = buildReviewValuePanelView(state);
+  if (view.status === 'loading') return null;
+  if (view.status !== 'ready') return [];
+  return [
+    'neutral', // Findings raised, and what happened to them
+    'neutral', // What the team said
+    'neutral', // Spend — locally 'attention' when unsettled; that means "unsettled", not "act" (see above)
+    'neutral', // Lead time
+  ];
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import { formatCost, formatPct } from '../format.ts';
 import { MIN_RELIABLE_COVERAGE_PCT } from '../../coverage-thresholds.ts';
 import { countOf } from '../../count-phrase.ts';
 import { worstStatus, NO_MODEL_ACTIVITY_TEXT, FLAGGED_MODEL_KEY_TOOLTIP } from '../assessors.ts';
+import type { PanelSectionStatuses } from '../assessors.ts';
 
 // ---------------------------------------------------------------------------
 // Cost + Quality cards (Task 8) — Sections B and C. Replaces the
@@ -186,6 +187,16 @@ export function classifyReadBandLevel(avgReadBandItems: number | null): ReadBand
   if (avgReadBandItems < READ_BAND_DANGER_MAX) return 'danger';
   if (avgReadBandItems < READ_BAND_HEALTHY_RANGE[0]) return 'watch';
   return 'healthy';
+}
+
+/** The section status the gauge's `<QualitySection>` renders for each level:
+ *  only `'danger'` is a scored finding ("reviews are surfacing too few
+ *  critical or major findings"); `'watch'`, `'healthy'` and `'unknown'` all
+ *  draw the unscored neutral stripe. One function, two consumers — the
+ *  gauge's own JSX and the section-badge fold (`qualitySectionStatuses`) —
+ *  so the Cost & value badge counts exactly what the gauge draws. */
+export function readBandSectionStatus(level: ReadBandLevel): 'attention' | 'neutral' {
+  return level === 'danger' ? 'attention' : 'neutral';
 }
 
 /** 0..100 marker position on the gauge track. Clamped to the scale's bounds
@@ -387,6 +398,51 @@ export function buildQualityPanelView(state: FetchState<QualityStats>): QualityP
     case 'ready':
       return { status: 'ready', message: null, data: state.data };
   }
+}
+
+/**
+ * The Cost card's contribution to the Cost & value section badge (see
+ * `attentionBySection` in stats-view.tsx): the statuses of the five sections
+ * `CostCardBody` renders, IN RENDER ORDER, the one scored section computed
+ * by the same `assessModelBreakdownCost` its JSX renders with — so a flagged
+ * `[1m]` model's cost reaches the badge the moment the card draws it. The
+ * `'neutral'` entries mirror the literal `status="neutral"` the
+ * corresponding sections hard-code; keep this list in lockstep with
+ * `CostCardBody`. `null` while the fetch is in flight; a settled non-ready
+ * card renders no sections and contributes an empty list (see
+ * `PanelSectionStatuses`, assessors.ts).
+ */
+export function costSectionStatuses(state: FetchState<CostStats>): PanelSectionStatuses {
+  const view = buildCostPanelView(state);
+  if (view.status === 'loading') return null;
+  if (view.status !== 'ready') return [];
+  return [
+    'neutral',                                                // Orchestrator vs sub-agent split
+    'neutral',                                                // Cost overview
+    'neutral',                                                // Cost per critical or major item
+    assessModelBreakdownCost(view.data!.modelBreakdown).status, // Cost by model
+    'neutral',                                                // Cost by repo
+  ];
+}
+
+/**
+ * The Quality card's contribution to the Cost & value section badge —
+ * `costSectionStatuses`'s mirror for `QualityCardBody`'s four sections. The
+ * one scored section is the read-band gauge, whose status comes from the
+ * same `readBandSectionStatus`/`buildReadBandGaugeView` pair its JSX renders
+ * with, so the danger-zone finding reaches the badge the moment the gauge
+ * draws it.
+ */
+export function qualitySectionStatuses(state: FetchState<QualityStats>): PanelSectionStatuses {
+  const view = buildQualityPanelView(state);
+  if (view.status === 'loading') return null;
+  if (view.status !== 'ready') return [];
+  return [
+    readBandSectionStatus(buildReadBandGaugeView(view.data!).level), // Critical or major findings per review
+    'neutral',                                                       // Findings by severity
+    'neutral',                                                       // Reviews with zero critical or major findings
+    'neutral',                                                       // Recommendation distribution
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -662,7 +718,7 @@ function QualitySection({ title, status, children }: { title: string; status: Se
 function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
   const lowCoverageHeadline = buildReadBandLowCoverageHeadline(view.coverage);
   return (
-    <QualitySection title="Critical or major findings per review" status={view.level === 'danger' ? 'attention' : 'neutral'}>
+    <QualitySection title="Critical or major findings per review" status={readBandSectionStatus(view.level)}>
       {view.value == null ? (
         <p class="quality-section__empty">No findings data recorded in this window.</p>
       ) : (

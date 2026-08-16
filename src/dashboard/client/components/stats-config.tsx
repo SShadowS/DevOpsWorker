@@ -6,6 +6,7 @@ import type {
   CredentialResolution, SubAgentGroupReport, InlineSubAgentReport, RuleLearnerReport, OverlayReport,
 } from '../../config-report.ts';
 import { assessLevers } from '../assessors.ts';
+import type { PanelSectionStatuses } from '../assessors.ts';
 
 // ---------------------------------------------------------------------------
 // Config panel (Task 7) — "what settings are actually in effect right now."
@@ -257,6 +258,49 @@ export function buildConfigPanelView(state: FetchState<ConfigReport>): ConfigPan
   }
 }
 
+/** The builder-comparison section's status — the "config may be inert" bug
+ *  class this tab was built after. One function, two consumers
+ *  (`BuilderComparisonSection`'s JSX and `configSectionStatuses`), so the
+ *  Config badge counts exactly what the section draws. */
+export function builderComparisonSectionStatus(agree: boolean): ConfigSectionStatus {
+  return agree ? 'ok' : 'attention';
+}
+
+/** The eval-levers section's status — wraps the shared `assessLevers`
+ *  verdict the section's own summary line renders. Same two-consumer
+ *  contract as `builderComparisonSectionStatus`. */
+export function evalLeversSectionStatus(levers: LeverStatus[]): ConfigSectionStatus {
+  return assessLevers(levers).severity === 'attention' ? 'attention' : 'ok';
+}
+
+/**
+ * This panel's contribution to the Config section badge (see
+ * `attentionBySection` in stats-view.tsx): the statuses of the seven
+ * sections `ConfigPanelBody` renders, IN RENDER ORDER, the two scored ones
+ * computed by the same functions their sections render with — so a builder
+ * disagreement or an active eval lever is visible on the Config button while
+ * an operator sits on another section. The `'neutral'` entries mirror the
+ * literal `status="neutral"` the corresponding sections hard-code; keep this
+ * list in lockstep with `ConfigPanelBody`. `null` while the fetch is in
+ * flight; a settled non-ready panel renders no sections and contributes an
+ * empty list (see `PanelSectionStatuses`, assessors.ts).
+ */
+export function configSectionStatuses(state: FetchState<ConfigReport>): PanelSectionStatuses {
+  const view = buildConfigPanelView(state);
+  if (view.status === 'loading') return null;
+  if (view.status !== 'ready') return [];
+  const r = view.report!;
+  return [
+    builderComparisonSectionStatus(r.orchestratorModel.agree), // Orchestrator model & effort — two independent builders
+    'neutral',                                                 // PR-review credential
+    'neutral',                                                 // rule-learner
+    'neutral',                                                 // Per-agent resolved knobs
+    'neutral',                                                 // Sub-agent frontmatter pins
+    evalLeversSectionStatus(r.evalLevers),                     // Eval levers
+    'neutral',                                                 // Overlay agent overrides
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
@@ -380,7 +424,7 @@ function ConfigHeadline({ headline }: { headline: ConfigHeadlineSummary }) {
 
 function BuilderComparisonSection({ report }: { report: ConfigReport }) {
   const om = report.orchestratorModel;
-  const status: ConfigSectionStatus = om.agree ? 'ok' : 'attention';
+  const status = builderComparisonSectionStatus(om.agree);
   return (
     <ConfigSection title="Orchestrator model &amp; effort — two independent builders" status={status}>
       <dl class="config-dl">
@@ -553,7 +597,7 @@ function EvalLeversTable({ levers }: { levers: LeverStatus[] }) {
 
 function EvalLeversSection({ levers }: { levers: LeverStatus[] }) {
   const a = assessLevers(levers);
-  const status: ConfigSectionStatus = a.severity === 'attention' ? 'attention' : 'ok';
+  const status = evalLeversSectionStatus(levers);
   return (
     <ConfigSection title="Eval levers" status={status}>
       <p class="config-section__summary">

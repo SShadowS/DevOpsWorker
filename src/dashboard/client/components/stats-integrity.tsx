@@ -4,6 +4,7 @@ import type { IntegrityStats, ModelUsageEntry, EffortMix, SubAgentModelAttributi
 import type { ConfigReport } from '../../config-report.ts';
 import { formatPct, formatCost } from '../format.ts';
 import { assessFlaggedModelKeys, assessErrorRate, NO_MODEL_ACTIVITY_TEXT, FLAGGED_MODEL_KEY_TOOLTIP } from '../assessors.ts';
+import type { PanelSectionStatuses } from '../assessors.ts';
 import { buildContaminationAvailability, formatObservedBreakdown } from '../model-contamination.ts';
 import type { AgentModelRow } from '../model-contamination.ts';
 import { countOf } from '../../count-phrase.ts';
@@ -106,6 +107,22 @@ export function buildModelUsageSectionView(data: IntegrityStats): ModelUsageSect
  *  errored even while `integrityStats` (which gates the rest of the panel)
  *  is ready. */
 export type ContaminationSectionStatus = 'loading' | 'error' | 'ok' | 'attention';
+
+/** The generic three-state `SectionStatus` the contamination section DRAWS
+ *  for each of its own four states: `'error'` renders as `'attention'`
+ *  (unverifiable is not probably-fine — the "Cannot verify: " branch keeps
+ *  the accent, see `ContaminationSection`), `'loading'` as `'neutral'`
+ *  chrome. One function, two consumers: the section's own JSX and the
+ *  section-badge fold (`integritySectionStatuses`), so the badge counts
+ *  exactly what the section draws. */
+export function contaminationDisplayStatus(status: ContaminationSectionStatus): SectionStatus {
+  switch (status) {
+    case 'loading': return 'neutral';
+    case 'error': return 'attention';
+    case 'ok': return 'ok';
+    case 'attention': return 'attention';
+  }
+}
 
 export interface ContaminationSectionView {
   status: ContaminationSectionStatus;
@@ -330,6 +347,41 @@ export function buildIntegrityPanelView(
   }
 }
 
+/**
+ * This panel's contribution to the Health section badge (see
+ * `attentionBySection` in stats-view.tsx): the statuses of the six sections
+ * `StatsIntegrityPanel`'s ready body renders, IN RENDER ORDER, computed by
+ * the same view builder the body renders with — so the badge can never claim
+ * a status the panel does not draw. Keep this list in lockstep with the
+ * section list at the bottom of this file: a new section's status belongs
+ * here the moment its `<IntegritySection>` exists.
+ *
+ * `null` (statuses not knowable yet) in exactly two cases, both fetches in
+ * flight: the panel's own gating fetch, or the contamination section's
+ * second fetch (`configReport`) — the same hold-until-settled rule
+ * `buildModelIntegrityCard` (stats-ribbon.tsx) applies, so a badge count
+ * never grows when a late fetch lands. A SETTLED non-ready panel (failed or
+ * empty) renders no sections and contributes an empty list instead — see
+ * `PanelSectionStatuses` (assessors.ts) for why that distinction matters.
+ */
+export function integritySectionStatuses(
+  integrityState: FetchState<IntegrityStats>,
+  configState: FetchState<ConfigReport>,
+): PanelSectionStatuses {
+  const view = buildIntegrityPanelView(integrityState, configState);
+  if (view.status === 'loading') return null;
+  if (view.status !== 'ready') return [];
+  if (view.contamination!.status === 'loading') return null;
+  return [
+    view.modelUsage!.status,
+    contaminationDisplayStatus(view.contamination!.status),
+    view.dispatch!.status,
+    view.effortDrift!.status,
+    view.findingsIntegrity!.status,
+    view.errorRate!.status,
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
@@ -442,7 +494,7 @@ function ContaminationTable({ rows }: { rows: AgentModelRow[] }) {
 function ContaminationSection({ view }: { view: ContaminationSectionView }) {
   if (view.status === 'loading' || view.status === 'error') {
     return (
-      <IntegritySection title="Model contamination (declared pin vs observed)" status={view.status === 'error' ? 'attention' : 'neutral'}>
+      <IntegritySection title="Model contamination (declared pin vs observed)" status={contaminationDisplayStatus(view.status)}>
         <p class="integrity-section__summary">
           {/* Fix round 2, Finding 1: this branch is NOT a confirmed deviation —
               it means the declared-pin side could not be fetched at all, so
@@ -460,7 +512,7 @@ function ContaminationSection({ view }: { view: ContaminationSectionView }) {
   }
   const prefix = attentionPrefix(view.status);
   return (
-    <IntegritySection title="Model contamination (declared pin vs observed)" status={view.status}>
+    <IntegritySection title="Model contamination (declared pin vs observed)" status={contaminationDisplayStatus(view.status)}>
       <p class="integrity-section__summary">
         {prefix && <strong class={`integrity-section__tag ${prefix.class}`}>{prefix.tag}</strong>}
         {view.summary}

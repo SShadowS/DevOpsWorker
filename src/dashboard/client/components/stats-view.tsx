@@ -2,18 +2,20 @@ import { useEffect } from 'preact/hooks';
 import { signal } from '@preact/signals';
 import {
   statsWindow, statsPopulation, costStats, qualityStats, integrityStats, operationalStats,
+  reviewValueStats, configReport,
   setStatsWindow, setStatsPopulation, loadAllStats, STATS_WINDOWS, STATS_POPULATIONS,
 } from '../stats-store.ts';
 import type { FetchState } from '../stats-store.ts';
-import type { Population, PopulationMeta } from '../../stats.ts';
+import type { Population, PopulationMeta, IntegrityStats, OperationalStats, CostStats, QualityStats, ReviewValueStats } from '../../stats.ts';
+import type { ConfigReport } from '../../config-report.ts';
 import { StatsRibbon } from './stats-ribbon.tsx';
-import { StatsIntegrityPanel } from './stats-integrity.tsx';
-import { ConfigPanel } from './stats-config.tsx';
-import { CostQualityPanel } from './stats-costquality.tsx';
-import { ReviewValuePanel } from './stats-review-value.tsx';
-import { OperationalPanel } from './stats-operational.tsx';
+import { StatsIntegrityPanel, integritySectionStatuses } from './stats-integrity.tsx';
+import { ConfigPanel, configSectionStatuses } from './stats-config.tsx';
+import { CostQualityPanel, costSectionStatuses, qualitySectionStatuses } from './stats-costquality.tsx';
+import { ReviewValuePanel, reviewValueSectionStatuses } from './stats-review-value.tsx';
+import { OperationalPanel, operationalSectionStatuses } from './stats-operational.tsx';
 import { ReflectionCard, listState as reflectionListState, loadReflections } from './reflection-card.tsx';
-import { assessFlaggedModelKeys, assessErrorRate } from '../assessors.ts';
+import { sectionAttentionCount } from '../assessors.ts';
 import { countOf } from '../../count-phrase.ts';
 
 // ---------------------------------------------------------------------------
@@ -102,11 +104,14 @@ export function pickPopulationMeta(...states: FetchState<PopulationMeta>[]): Pop
 // ---------------------------------------------------------------------------
 // Section sub-navigation — the tab grew to seven stacked panels (~4 screens
 // of scroll), so the panels are grouped into four sections behind a
-// segmented switcher. The ribbon stays global above it: it is already the
-// "worst signal wins" summary for the whole tab, which is exactly what makes
-// hiding five of seven panels safe — an alarm is visible before any
-// switching. Each section button additionally carries its own attention
-// marker so a reader knows WHERE to click, not just that something is off.
+// segmented switcher. The ribbon stays global above it, but the ribbon alone
+// is NOT what makes hiding five of seven panels safe: it covers four
+// indicators (drift, model integrity, levers, error rate), not every
+// attention state a hidden panel can render. What closes that gap is the
+// badges: every section button carries a badge folded from the SAME section
+// statuses its panels render (`attentionBySection` below), so an alarm in a
+// hidden panel is visible on the button that reaches it — the reader knows
+// WHERE to click, not just that something is off.
 // ---------------------------------------------------------------------------
 
 const STATS_SECTIONS = ['health', 'value', 'reflection', 'config'] as const;
@@ -136,19 +141,57 @@ function setSection(s: StatsSection): void {
   try { localStorage.setItem(SECTION_STORAGE_KEY, s); } catch { /* best effort */ }
 }
 
-/** How many of the integrity readings ask for attention right now. Reuses
- *  the SAME assessors the Integrity panel itself renders with — the badge
- *  must never disagree with the panel it points at. Only the two assessors
- *  that need nothing beyond IntegrityStats run here; the contamination
- *  reading needs its own fetch and stays the panel's business. Null while
- *  the signal has not settled — no guessed badge. */
-export function healthAttentionCount(integrity: FetchState<Parameters<typeof assessFlaggedModelKeys>[0]>): number | null {
-  if (integrity.status !== 'ready') return null;
-  const readings = [
-    assessFlaggedModelKeys(integrity.data),
-    assessErrorRate(integrity.data.errorRate, integrity.data.lowSample),
-  ];
-  return readings.filter((r) => r.severity === 'attention').length;
+/**
+ * The per-section attention counts behind the section buttons' badges.
+ *
+ * Structural, not editorial: each panel exports the list of section statuses
+ * its ready body renders (`integritySectionStatuses` and friends), each
+ * computed by the SAME pure view builders that panel's own JSX renders with
+ * — the badge must never disagree with the panels it points at, and can
+ * never claim a status no panel draws. This function only groups those
+ * lists by section — the one place the section-to-panels mapping exists,
+ * matching the JSX below — and folds them with `sectionAttentionCount`
+ * (assessors.ts). A new attention state inside any existing panel section is
+ * therefore routed to its badge with no change here. (The earlier version
+ * hand-picked two assessors instead, which silently missed the
+ * findings-integrity, tool-mix, rate-limit, flagged-model-cost, danger-zone
+ * and builders-disagree attention states while their panels were hidden.)
+ *
+ * `null` for a section means at least one of its panels cannot know its
+ * statuses yet (a fetch still in flight) — the badge renders nothing rather
+ * than a count that could grow when the fetch lands. A panel whose fetch has
+ * SETTLED without data (failed or empty) contributes an empty list instead:
+ * it renders no sections, so it has nothing to count, and hiding another
+ * panel's live attention behind one panel's failed fetch would recreate the
+ * invisible-alarm problem the badges exist to solve.
+ *
+ * Reflection is absent on purpose: its badge counts proposals waiting on a
+ * human decision (`reflectionPendingCount` below), and its one attention
+ * section — a failed run — is by construction one of those pending rows, so
+ * a second badge would say the same thing twice.
+ */
+export function attentionBySection(states: {
+  integrity: FetchState<IntegrityStats>;
+  operational: FetchState<OperationalStats>;
+  cost: FetchState<CostStats>;
+  quality: FetchState<QualityStats>;
+  reviewValue: FetchState<ReviewValueStats>;
+  config: FetchState<ConfigReport>;
+}): Record<'health' | 'value' | 'config', number | null> {
+  return {
+    health: sectionAttentionCount([
+      integritySectionStatuses(states.integrity, states.config),
+      operationalSectionStatuses(states.operational),
+    ]),
+    value: sectionAttentionCount([
+      costSectionStatuses(states.cost),
+      qualitySectionStatuses(states.quality),
+      reviewValueSectionStatuses(states.reviewValue),
+    ]),
+    config: sectionAttentionCount([
+      configSectionStatuses(states.config),
+    ]),
+  };
 }
 
 /** True when a proposal is waiting on a human decision — the reflection
@@ -161,21 +204,43 @@ export function reflectionPendingCount(state: typeof reflectionListState.value):
   return state.proposals.filter((p) => p.status === 'pending').length;
 }
 
+/** The worded chip on a section button. Both kinds spend the accent (each is
+ *  "a person must act" — the same fact the panels behind the button render
+ *  in the accent), so the KIND is carried by the words on the chip — "to
+ *  check" points at readings the panels mark "Needs attention", "to decide"
+ *  at proposals awaiting a human decision — never by colour alone
+ *  (Colour-Plus-Words). The fuller sentence rides on `title`/`aria-label`.
+ *  Renders nothing at zero AND at null, and the two absences mean different
+ *  things: zero is a real all-clear on a settled section; null means the
+ *  count is not yet knowable, and drawing a number for either would guess. */
 function SectionBadge({ count, kind }: { count: number | null; kind: 'attention' | 'pending' }) {
   if (count == null || count === 0) return null;
   const label = kind === 'attention'
     ? `${countOf(count, 'reading')} asking for attention`
     : `${countOf(count, 'proposal')} waiting for a decision`;
-  return <span class={`stats-subnav__badge stats-subnav__badge--${kind}`} title={label} aria-label={label}>{count}</span>;
+  return (
+    <span class={`stats-subnav__badge stats-subnav__badge--${kind}`} title={label} aria-label={label}>
+      {count} {kind === 'attention' ? 'to check' : 'to decide'}
+    </span>
+  );
 }
 
 /** Same `role="group"` + per-button `aria-pressed` convention as the window
  *  and population selectors below it — deliberately NOT a nested
  *  `role="tablist"` inside the app's real tab bar, for the same reason the
- *  window selector isn't one. */
+ *  window selector isn't one. Every button carries a badge: the three stats
+ *  sections fold their panels' own attention statuses (`attentionBySection`),
+ *  Reflection counts proposals waiting on a decision. */
 function SectionNav() {
   const current = activeSection.value;
-  const health = healthAttentionCount(integrityStats.value);
+  const attention = attentionBySection({
+    integrity: integrityStats.value,
+    operational: operationalStats.value,
+    cost: costStats.value,
+    quality: qualityStats.value,
+    reviewValue: reviewValueStats.value,
+    config: configReport.value,
+  });
   const pending = reflectionPendingCount(reflectionListState.value);
   return (
     <div class="stats-subnav" role="group" aria-label="Section">
@@ -188,8 +253,9 @@ function SectionNav() {
           onClick={() => setSection(s)}
         >
           {SECTION_LABEL[s]}
-          {s === 'health' && <SectionBadge count={health} kind="attention" />}
-          {s === 'reflection' && <SectionBadge count={pending} kind="pending" />}
+          {s === 'reflection'
+            ? <SectionBadge count={pending} kind="pending" />
+            : <SectionBadge count={attention[s]} kind="attention" />}
         </button>
       ))}
     </div>
@@ -271,12 +337,14 @@ export function StatsView() {
   return (
     <div class="stats-view">
       {/* Ribbon is "directly under the tabs, above everything else" per Task
-          5's brief — and it is what makes the section switcher below safe:
-          it summarizes the worst signal across ALL sections, so nothing
-          alarming is invisible while another section is open. The ribbon
-          reads its own always-production signal (`ribbonIntegrityStats`)
-          and is NOT affected by the Prod|Test control — see
-          stats-ribbon.tsx. */}
+          5's brief — four glance-level indicators (drift, model integrity,
+          levers, error rate) that stay visible whichever section is open.
+          It is deliberately NOT a summary of every section's worst signal;
+          the badges on the section switcher carry that per-section fold
+          (`attentionBySection`), so nothing alarming is invisible while
+          another section is open. The ribbon reads its own
+          always-production signal (`ribbonIntegrityStats`) and is NOT
+          affected by the Prod|Test control — see stats-ribbon.tsx. */}
       <StatsRibbon />
 
       <SectionNav />

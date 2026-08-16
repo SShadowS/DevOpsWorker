@@ -3,6 +3,7 @@ import type { FetchState } from '../stats-store.ts';
 import type { OperationalStats, ToolMixEntry, ErrorCategory, ErrorClassificationSummary } from '../../stats.ts';
 import { formatDurationDetailed } from '../format.ts';
 import { countOf } from '../../count-phrase.ts';
+import type { PanelSectionStatuses } from '../assessors.ts';
 import { CardGlossary } from './card-glossary.tsx';
 import type { GlossaryTerm } from './card-glossary.tsx';
 
@@ -426,6 +427,33 @@ export function buildOperationalPanelView(state: FetchState<OperationalStats>): 
     case 'ready':
       return { status: 'ready', message: null, data: state.data };
   }
+}
+
+/**
+ * This panel's contribution to the Health section badge (see
+ * `attentionBySection` in stats-view.tsx): the statuses of the five sections
+ * `OperationalPanel`'s ready body renders, IN RENDER ORDER, the two scored
+ * ones computed by the same builders the sections render with — so the tool
+ * mix's zero-call finding and the error breakdown's rate-limit finding reach
+ * the badge the moment the panel draws them. The `'neutral'` entries mirror
+ * the literal `status="neutral"` the corresponding sections hard-code; keep
+ * this list in lockstep with the section list in `OperationalPanel`'s body.
+ * `null` while the fetch is in flight; a settled non-ready panel renders no
+ * sections and contributes an empty list (see `PanelSectionStatuses`,
+ * assessors.ts).
+ */
+export function operationalSectionStatuses(state: FetchState<OperationalStats>): PanelSectionStatuses {
+  const view = buildOperationalPanelView(state);
+  if (view.status === 'loading') return null;
+  if (view.status !== 'ready') return [];
+  const d = view.data!;
+  return [
+    'neutral',                                                     // Reviews per day
+    'neutral',                                                     // Duration & turns per review
+    buildToolMixSectionView(d.toolMix).status,                     // Tool mix
+    'neutral',                                                     // Repo breakdown
+    buildErrorBreakdownSectionView(d.errorClassification).status,  // Error breakdown
+  ];
 }
 
 // ---------------------------------------------------------------------------
