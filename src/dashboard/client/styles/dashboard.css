@@ -2865,7 +2865,29 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   gap: var(--space-xs);
   margin-top: var(--space-sm);
 }
-.reflection-decision__buttons { display: flex; gap: var(--space-sm); }
+
+.reflection-decision__notice {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+/* Wider than the house `--space-sm` gap used elsewhere between adjacent
+   buttons: Approve/Reject is the one pair on this dashboard where a mis-click
+   is unrecoverable, so the two-step confirm (component doc comment) is
+   backed by literal distance between the targets too. */
+.reflection-decision__buttons { display: flex; gap: var(--space-md); align-items: center; }
+
+/* The armed (about to send) button outweighs its "Cancel" sibling: bolder
+   text plus an 18% tint of its own state colour — the same tint percentage
+   the badge vocabulary uses elsewhere in this system, not a new value. */
+.reflection-decision__btn--armed { font-weight: 600; }
+.reflection-decision__buttons .btn--success.reflection-decision__btn--armed {
+  background: color-mix(in srgb, var(--color-success) 18%, var(--color-bg-tertiary));
+}
+.reflection-decision__buttons .btn--error.reflection-decision__btn--armed {
+  background: color-mix(in srgb, var(--color-error) 18%, var(--color-bg-tertiary));
+}
 
 /* ---- Login page ---- */
 .login-page {

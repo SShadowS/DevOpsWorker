@@ -61,16 +61,34 @@ type ReflectionListState =
 
 export const listState = signal<ReflectionListState>({ status: 'loading' });
 
+/** Approve/Reject share this shape everywhere they're threaded through —
+ *  the decision itself, which button is mid-request, and which button is
+ *  armed for a second click. */
+export type Decision = 'approved' | 'rejected';
+
 /** Which decision is in flight, or null. Drives per-button "Approving…" /
  *  "Rejecting…" labels and disables both buttons while either is running —
  *  a proposal can only ever be decided once (the server enforces this with a
  *  409), so a double-click racing the same row is exactly what disabling
  *  both buttons during either request prevents. */
-const decisionBusy = signal<'approved' | 'rejected' | null>(null);
+const decisionBusy = signal<Decision | null>(null);
 const decisionError = signal<string | null>(null);
+
+/** Two-step confirm for the gate: this is the single highest-stakes click on
+ *  the dashboard (it locks what the reflection agent's proposal decided, and
+ *  a slip is not recoverable through the UI — a retry just 409s). A first
+ *  click on Approve or Reject arms it here instead of sending anything; the
+ *  clicked button turns into an explicit "Confirm approve/reject — this is
+ *  final", and the OTHER button turns into "Cancel" so arming is reversible
+ *  with no request in flight. A second click on the now-armed button is what
+ *  actually calls `decide`. Reset to null the moment a decision is sent (see
+ *  `decide` below) and on every fresh fetch (see `loadReflections`), so a
+ *  stale arm never survives past the request it was arming for. */
+const decisionArmed = signal<Decision | null>(null);
 
 export async function loadReflections(): Promise<void> {
   listState.value = { status: 'loading' };
+  decisionArmed.value = null;
   try {
     const res = await fetch('/api/reflections?limit=5');
     if (!res.ok) {
@@ -96,7 +114,8 @@ function extractErrorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-async function decide(id: number, decision: 'approved' | 'rejected'): Promise<void> {
+async function decide(id: number, decision: Decision): Promise<void> {
+  decisionArmed.value = null;
   decisionBusy.value = decision;
   decisionError.value = null;
   try {
@@ -403,39 +422,120 @@ function AppliedCommits({ commits }: { commits: ReflectionProposal['appliedCommi
   );
 }
 
+const DECISION_LABEL: Record<Decision, string> = { approved: 'Approve', rejected: 'Reject' };
+const DECISION_BUSY_LABEL: Record<Decision, string> = { approved: 'Approving…', rejected: 'Rejecting…' };
+const DECISION_VARIANT: Record<Decision, string> = { approved: 'btn--success', rejected: 'btn--error' };
+
+/** The armed label repeats the finality sentence at the point of the second
+ *  click, not just above the buttons — a person skimming straight to the
+ *  button they're about to press still sees the consequence written on it. */
+const DECISION_CONFIRM_LABEL: Record<Decision, string> = {
+  approved: 'Confirm approve — this is final',
+  rejected: 'Confirm reject — this is final',
+};
+const DECISION_CANCEL_TITLE: Record<Decision, string> = {
+  approved: 'Cancel — do not approve this proposal',
+  rejected: 'Cancel — do not reject this proposal',
+};
+
+/** What one side of the Approve/Reject pair looks like, given which decision
+ *  (if any) is currently armed — pure and exported so the state machine
+ *  behind the two-step confirm has a regression test that does not need a
+ *  DOM harness (see reflection-decision-gate.test.ts):
+ *  - 'cancel': the OTHER decision is armed, so this button is the escape
+ *    hatch instead of its own action.
+ *  - 'armed': THIS decision is armed — the next click on this button sends
+ *    it.
+ *  - 'plain': neither decision is armed — the ordinary first click. */
+export type DecisionButtonState = 'plain' | 'armed' | 'cancel';
+
+export function decisionButtonState(armed: Decision | null, decision: Decision): DecisionButtonState {
+  if (armed !== null && armed !== decision) return 'cancel';
+  if (armed === decision) return 'armed';
+  return 'plain';
+}
+
+/** One side of the Approve/Reject pair, rendered from `decisionButtonState`.
+ *  A 'cancel' button is ghost-styled (the least-consequential action in the
+ *  group, per the button vocabulary) and disarms with no request sent. An
+ *  'armed' button keeps its usual state colour but gets an 18% tint of it
+ *  (matching the badge tint percentage elsewhere in this system) and bolder
+ *  text, so the button about to fire a request visibly outweighs its
+ *  neighbour. A proposal can only ever be decided once, so `busy` still wins
+ *  over all three and disables both buttons exactly as before. */
+function DecisionButton({ proposal, decision, armed, busy }: {
+  proposal: ReflectionProposal;
+  decision: Decision;
+  armed: Decision | null;
+  busy: Decision | null;
+}) {
+  const disabled = busy !== null;
+  const buttonState = decisionButtonState(armed, decision);
+
+  if (buttonState === 'cancel') {
+    return (
+      <button
+        type="button"
+        class="btn btn--ghost"
+        disabled={disabled}
+        title={DECISION_CANCEL_TITLE[decision]}
+        onClick={() => { decisionArmed.value = null; }}
+      >
+        Cancel
+      </button>
+    );
+  }
+
+  const isArmed = buttonState === 'armed';
+  return (
+    <button
+      type="button"
+      class={`btn ${DECISION_VARIANT[decision]}${isArmed ? ' reflection-decision__btn--armed' : ''}`}
+      disabled={disabled}
+      onClick={() => {
+        if (isArmed) { void decide(proposal.id, decision); } else { decisionArmed.value = decision; }
+      }}
+    >
+      {busy === decision ? DECISION_BUSY_LABEL[decision] : isArmed ? DECISION_CONFIRM_LABEL[decision] : DECISION_LABEL[decision]}
+    </button>
+  );
+}
+
 /**
  * The decision gate. Exactly one of the branches below renders, chosen by
  * `proposal.error` first and `proposal.status` second (see the module doc
  * comment). The literal approved-state sentence is pinned by the brief —
  * "apply reflection proposal N" is the exact phrase a person types into a
  * session, so the id is substituted into that sentence and nowhere else.
+ *
+ * The buttons themselves are a two-step confirm rather than a single click
+ * (see `decisionArmed`'s doc comment) — this is the one control on the
+ * dashboard that permanently locks what the AI is allowed to say next, and
+ * the finality is stated in plain words twice: once as a standing sentence
+ * before either button is touched, and again on the armed button itself.
  */
 function ReflectionDecisionArea({ proposal }: { proposal: ReflectionProposal }) {
   const busy = decisionBusy.value;
+  const armed = decisionArmed.value;
   const error = decisionError.value;
   const canDecide = !proposal.error && proposal.status === 'pending';
 
   return (
     <div class="reflection-decision">
       {canDecide && (
-        <div class="reflection-decision__buttons">
-          <button
-            type="button"
-            class="btn btn--success"
-            disabled={busy !== null}
-            onClick={() => void decide(proposal.id, 'approved')}
-          >
-            {busy === 'approved' ? 'Approving…' : 'Approve'}
-          </button>
-          <button
-            type="button"
-            class="btn btn--error"
-            disabled={busy !== null}
-            onClick={() => void decide(proposal.id, 'rejected')}
-          >
-            {busy === 'rejected' ? 'Rejecting…' : 'Reject'}
-          </button>
-        </div>
+        <>
+          <p class="reflection-decision__notice">
+            This decision is final. Once you approve or reject, there is no way to change it from this screen.
+          </p>
+          {/* aria-live: a button's own text is its accessible name, so arming
+              already changes what a screen reader reports for the focused
+              control — this adds a second, redundant announcement covering
+              readers that don't surface a same-element name change. */}
+          <div class="reflection-decision__buttons" aria-live="polite">
+            <DecisionButton proposal={proposal} decision="approved" armed={armed} busy={busy} />
+            <DecisionButton proposal={proposal} decision="rejected" armed={armed} busy={busy} />
+          </div>
+        </>
       )}
       {!proposal.error && proposal.status === 'approved' && (
         <p class="reflection-section__summary">
