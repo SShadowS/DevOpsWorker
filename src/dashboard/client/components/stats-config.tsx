@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { configReport } from '../stats-store.ts';
+import { configReport, buildPanelHref, navigateToPanel } from '../stats-store.ts';
 import type { FetchState } from '../stats-store.ts';
 import type {
   ConfigReport, BuilderResolution, EffortResolution, PerAgentReport, LeverStatus,
@@ -7,6 +7,7 @@ import type {
 } from '../../config-report.ts';
 import { assessLevers } from '../assessors.ts';
 import type { PanelSectionStatuses } from '../assessors.ts';
+import { getRouteParams } from '../url-route.ts';
 
 // ---------------------------------------------------------------------------
 // Config panel (Task 7) — "what settings are actually in effect right now."
@@ -553,6 +554,13 @@ function InlineSubAgentBlock({ inline }: { inline: InlineSubAgentReport }) {
   );
 }
 
+// Rank #2 fix, readability review: this link used to be a plain
+// `<a href="#stats-slot-integrity">` — dead, because Integrity is not in the
+// DOM while Config is the active section, so a reader clicking it while
+// verifying a model-contamination claim got nothing. `buildPanelHref`/
+// `navigateToPanel` (stats-store.ts) make it a real link: a genuine href for
+// middle-click/copy, and an `onClick` that switches to Health and scrolls
+// there directly for the common in-page case.
 function SubAgentPinsSection({ subAgents }: { subAgents: ConfigReport['subAgents'] }) {
   return (
     <ConfigSection title="Sub-agent frontmatter pins" status="neutral">
@@ -567,7 +575,13 @@ function SubAgentPinsSection({ subAgents }: { subAgents: ConfigReport['subAgents
         <strong class="config-tag config-tag--caveat">Declared, not guaranteed: </strong>
         a <code class="config-mono">model:</code> frontmatter line is what a sub-agent SHOULD run on, not proof of what it
         DID run on. Pins are known to be silently ignored in production — see the{' '}
-        <a class="config-section__link" href="#stats-slot-integrity">Integrity panel's "Model contamination" section</a>{' '}
+        <a
+          class="config-section__link"
+          href={buildPanelHref(getRouteParams(), 'health', 'stats-slot-integrity')}
+          onClick={(e: MouseEvent) => { e.preventDefault(); navigateToPanel('health', 'stats-slot-integrity'); }}
+        >
+          Integrity panel's "Model contamination" section
+        </a>{' '}
         for the observed-vs-declared cross-check.
       </p>
     </ConfigSection>

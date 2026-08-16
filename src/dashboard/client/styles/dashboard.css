@@ -2235,8 +2235,8 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 
 /* Task 10: was --color-info as link TEXT (3.39:1 on this section's
    background — fails WCAG AA's 4.5:1 for normal-size text). See
-   .operational-section__link (Operational panel block, below) for the full
-   reasoning — both are the only two links this feature introduces. */
+   .operational-section__link and .cost-section__link (below) for the same
+   reasoning applied to their own panels — three link classes total. */
 .config-section__link { color: var(--color-text-secondary); text-decoration: underline; }
 
 .config-subagent-group { margin-top: var(--space-sm); }
@@ -2392,6 +2392,14 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .cost-tag, .quality-tag { font-weight: 600; }
 .cost-tag--attention, .quality-tag--attention { color: var(--color-accent); }
 .cost-tag--caveat, .quality-tag--caveat       { color: var(--color-text-secondary); }
+
+/* Readability review, rank #2: the Cost card's two references to the
+   Integrity panel's "Model usage" table are now real cross-section links
+   (stats-costquality.tsx's `IntegrityModelUsageLink`), not plain text.
+   Mirrors .config-section__link / .operational-section__link exactly —
+   --color-text-secondary passes WCAG AA (4.86:1) as link text where the
+   default --color-info would not; underline made explicit. */
+.cost-section__link { color: var(--color-text-secondary); text-decoration: underline; }
 
 /* ---- Cost split — ONE stacked bar (chart B1). Total width is exact; the
    dashed line at the segment boundary is the ONLY dashed element on this
@@ -2611,8 +2619,8 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
    reset exists in this file, is a separate, already-satisfied requirement
    for distinguishing links from prose, not a substitute for text contrast).
    --color-text-secondary passes (4.86:1); underline made explicit rather
-   than relying on the UA default. Mirrors .config-section__link, the only
-   other link this feature introduces. */
+   than relying on the UA default. Mirrors .config-section__link and
+   .cost-section__link (Cost + Quality block, below). */
 .operational-section__link { color: var(--color-text-secondary); text-decoration: underline; }
 
 .operational-tag { font-weight: 600; }

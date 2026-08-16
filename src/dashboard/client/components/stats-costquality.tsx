@@ -1,4 +1,4 @@
-import { costStats, qualityStats, statsWindow } from '../stats-store.ts';
+import { costStats, qualityStats, statsWindow, buildPanelHref, navigateToPanel } from '../stats-store.ts';
 import type { FetchState } from '../stats-store.ts';
 import type { CostStats, QualityStats, SubAgentCoverage, CostPerReadBandItem, ModelUsageEntry } from '../../stats.ts';
 import { formatCost, formatPct } from '../format.ts';
@@ -6,6 +6,19 @@ import { MIN_RELIABLE_COVERAGE_PCT } from '../../coverage-thresholds.ts';
 import { countOf } from '../../count-phrase.ts';
 import { worstStatus, NO_MODEL_ACTIVITY_TEXT, FLAGGED_MODEL_KEY_TOOLTIP } from '../assessors.ts';
 import type { PanelSectionStatuses } from '../assessors.ts';
+import { getRouteParams } from '../url-route.ts';
+import { CardGlossary } from './card-glossary.tsx';
+import type { GlossaryTerm } from './card-glossary.tsx';
+
+// This card's own short vocabulary — the two nouns the cost-checking visitor
+// (PRODUCT.md's "check what it costs" secondary-user job) hits first, at the
+// very top of the split section below. Readability review, rank #1 item 2:
+// the total these visitors come for used to render below this split with no
+// definition of either noun in it.
+const TERMS: readonly GlossaryTerm[] = [
+  { term: 'orchestrator', plain: 'the main review agent that coordinates a run' },
+  { term: 'sub-agent', plain: 'a helper agent the orchestrator sends off' },
+];
 
 // ---------------------------------------------------------------------------
 // Cost + Quality cards (Task 8) — Sections B and C. Replaces the
@@ -135,7 +148,16 @@ export interface ModelCostAssessment {
 /** Reuses the SAME `flagged` field the Integrity panel's "Model usage"
  *  section reads (server-computed via the `[1m]` pattern in stats.ts) —
  *  this does not re-derive contamination detection, only re-presents it
- *  through a cost lens ("how much did the flagged key cost"). */
+ *  through a cost lens ("how much did the flagged key cost").
+ *
+ *  `text` deliberately stops short of "— see the Integrity panel's Model
+ *  usage section": that clause used to be baked in here as a plain string,
+ *  which meant it could only ever render as dead prose, never a working
+ *  link. This is a pure function with no JSX access, so the readability
+ *  review's rank #2 fix (route every cross-section reference through
+ *  `navigateToPanel`) adds the link at the JSX call site instead —
+ *  `ModelBreakdownSection`, below — and leaves this function returning only
+ *  the fact it can state on its own. */
 export function assessModelBreakdownCost(modelBreakdown: ModelUsageEntry[]): ModelCostAssessment {
   const flagged = modelBreakdown.filter((m) => m.flagged);
   if (flagged.length === 0) {
@@ -144,7 +166,7 @@ export function assessModelBreakdownCost(modelBreakdown: ModelUsageEntry[]): Mod
   const flaggedCost = flagged.reduce((s, m) => s + m.totalCostUsd, 0);
   return {
     status: 'attention',
-    text: `${countOf(flagged.length, 'flagged model')} costing ${formatCost(flaggedCost)}: ${flagged.map((m) => m.model).join(', ')} — see the Integrity panel's Model usage section`,
+    text: `${countOf(flagged.length, 'flagged model')} costing ${formatCost(flaggedCost)}: ${flagged.map((m) => m.model).join(', ')}`,
   };
 }
 
@@ -411,14 +433,20 @@ export function buildQualityPanelView(state: FetchState<QualityStats>): QualityP
  * `CostCardBody`. `null` while the fetch is in flight; a settled non-ready
  * card renders no sections and contributes an empty list (see
  * `PanelSectionStatuses`, assessors.ts).
+ *
+ * Readability review, rank #1 item 1: `CostCardBody` now renders the
+ * overview before the split (the number the cost-checking visitor came for,
+ * ahead of the orchestrator/sub-agent breakdown) — this list's order was
+ * updated to match; both entries are `'neutral'` so the badge itself is
+ * unaffected, only the render-order documentation below.
  */
 export function costSectionStatuses(state: FetchState<CostStats>): PanelSectionStatuses {
   const view = buildCostPanelView(state);
   if (view.status === 'loading') return null;
   if (view.status !== 'ready') return [];
   return [
-    'neutral',                                                // Orchestrator vs sub-agent split
     'neutral',                                                // Cost overview
+    'neutral',                                                // Orchestrator vs sub-agent split
     'neutral',                                                // Cost per critical or major item
     assessModelBreakdownCost(view.data!.modelBreakdown).status, // Cost by model
     'neutral',                                                // Cost by repo
@@ -605,6 +633,24 @@ function ModelCostTable({ rows }: { rows: ModelUsageEntry[] }) {
   );
 }
 
+/** Both of this section's references to the Integrity panel's "Model usage"
+ *  table, routed through the same cross-section navigation
+ *  (`navigateToPanel`/`buildPanelHref`, stats-store.ts) the Config panel's
+ *  matching link uses — readability review, rank #2: a reader following
+ *  either reference to check the underlying model data now actually lands
+ *  there, rather than reading a plain, unreachable phrase. */
+function IntegrityModelUsageLink({ children }: { children: any }) {
+  return (
+    <a
+      class="cost-section__link"
+      href={buildPanelHref(getRouteParams(), 'health', 'stats-slot-integrity')}
+      onClick={(e: MouseEvent) => { e.preventDefault(); navigateToPanel('health', 'stats-slot-integrity'); }}
+    >
+      {children}
+    </a>
+  );
+}
+
 function ModelBreakdownSection({ data }: { data: CostStats }) {
   const a = assessModelBreakdownCost(data.modelBreakdown);
   return (
@@ -612,6 +658,12 @@ function ModelBreakdownSection({ data }: { data: CostStats }) {
       <p class="cost-section__summary">
         {a.status === 'attention' && <strong class="cost-tag cost-tag--attention">Needs attention: </strong>}
         {a.text}
+        {a.status === 'attention' && (
+          <>
+            {' — see the '}
+            <IntegrityModelUsageLink>Integrity panel's Model usage section</IntegrityModelUsageLink>
+          </>
+        )}
       </p>
       <ModelCostTable rows={data.modelBreakdown} />
       {/* I-2: this table and the Integrity panel's "Model usage" table are
@@ -621,8 +673,9 @@ function ModelBreakdownSection({ data }: { data: CostStats }) {
           measurements; the page would otherwise assert the same `[1m]`
           finding three times without ever saying so. */}
       <p class="cost-section__note">
-        Same model-cost breakdown as the Integrity panel's "Model usage" table — shown here through a cost lens,
-        not a second, independent measurement.
+        Same model-cost breakdown as the{' '}
+        <IntegrityModelUsageLink>Integrity panel's "Model usage" table</IntegrityModelUsageLink>{' '}
+        — shown here through a cost lens, not a second, independent measurement.
       </p>
     </CostSection>
   );
@@ -672,6 +725,14 @@ function PerRepoCostSection({ data }: { data: CostStats }) {
   );
 }
 
+// Readability review, rank #1 item 1: the overview (`Total this window` /
+// `Monthly projection`) renders BEFORE the orchestrator/sub-agent split now,
+// not after. That total is the answer PRODUCT.md's cost-checking visitor
+// came for; the split is analysis of it, not a prerequisite to reading it —
+// nothing in this file's header comment ever defended split-first as a
+// reading-order decision (B1/B2/C1 there is brief order, not priority
+// order). `costSectionStatuses` above documents the same order; keep both in
+// lockstep.
 function CostCardBody({ data }: { data: CostStats }) {
   return (
     <div class="cost-card__body">
@@ -680,8 +741,8 @@ function CostCardBody({ data }: { data: CostStats }) {
           Small sample: n={data.sampleSize} in this window — every statistic below is a small-sample reading.
         </p>
       )}
-      <CostSplitSection data={data} />
       <CostOverviewSection data={data} />
+      <CostSplitSection data={data} />
       <CostPerItemSection data={data} />
       <ModelBreakdownSection data={data} />
       <PerRepoCostSection data={data} />
@@ -693,6 +754,7 @@ function CostCard({ view }: { view: CostPanelView }) {
   return (
     <div class="cost-card">
       <h4 class="cost-card__title">Cost</h4>
+      <CardGlossary terms={TERMS} />
       {view.status !== 'ready' ? (
         <p class={`stats-slot__status-text ${view.status === 'error' ? 'stats-slot__status-text--error' : ''}`}>{view.message}</p>
       ) : (

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'preact/hooks';
-import { signal } from '@preact/signals';
 import {
   statsWindow, statsPopulation, costStats, qualityStats, integrityStats, operationalStats,
   reviewValueStats, configReport, statsLastLoadedAt, statsRefreshing,
   setStatsWindow, setStatsPopulation, loadAllStats, STATS_WINDOWS, STATS_POPULATIONS,
-  STATS_SECTIONS, parseStatsSection, parseStatsWindow, parseStatsPopulation,
+  STATS_SECTIONS, parseStatsWindow, parseStatsPopulation,
+  activeSection, setSection,
 } from '../stats-store.ts';
 import type { FetchState, StatsSection } from '../stats-store.ts';
 import type { Population, PopulationMeta, IntegrityStats, OperationalStats, CostStats, QualityStats, ReviewValueStats } from '../../stats.ts';
@@ -126,35 +126,12 @@ const SECTION_LABEL: Record<StatsSection, string> = {
   config: 'Config',
 };
 
-const SECTION_STORAGE_KEY = 'stats-section';
-
-/** Deep link wins on arrival; the remembered (localStorage) choice is the
- *  fallback when the URL says nothing — per the arrival-efficiency finding,
- *  a pasted link must reproduce the section it points at rather than the
- *  reader's last visit silently overriding it. `parseStatsSection` already
- *  returns `null` for both an absent `section` param and an unrecognised
- *  one, so garbage in the URL degrades to "as if the URL said nothing"
- *  automatically. */
-function initialSection(): StatsSection {
-  const fromUrl = parseStatsSection(getRouteParams());
-  if (fromUrl) return fromUrl;
-  try {
-    const saved = localStorage.getItem(SECTION_STORAGE_KEY);
-    if (saved && (STATS_SECTIONS as readonly string[]).includes(saved)) return saved as StatsSection;
-  } catch { /* storage unavailable — session default is fine */ }
-  return 'health';
-}
-
-const activeSection = signal<StatsSection>(initialSection());
-
-function setSection(s: StatsSection): void {
-  activeSection.value = s;
-  try { localStorage.setItem(SECTION_STORAGE_KEY, s); } catch { /* best effort */ }
-  // replaceState, not push: a section click is a scope change, not a new
-  // page — see url-route.ts's doc comment for why every control in this tab
-  // makes the same choice, so the back button never fills up with clicks.
-  updateRouteParams({ section: s });
-}
+// `activeSection`/`setSection` now live in stats-store.ts (imported above),
+// not here — a panel file (stats-config.tsx, stats-costquality.tsx) needs to
+// reach them for the cross-section "jump there" links, and this file already
+// imports every panel component, so the shared state had to move to the leaf
+// both sides can import without a cycle. See stats-store.ts's own comment at
+// their definition for the full reasoning.
 
 /**
  * The per-section attention counts behind the section buttons' badges.
@@ -426,6 +403,22 @@ export function StatsView() {
     if (urlWindow) statsWindow.value = urlWindow;
     if (urlPopulation) statsPopulation.value = urlPopulation;
     void refreshStatsTab();
+
+    // A cross-section link built with `buildPanelHref` (stats-store.ts) can
+    // carry an `anchor` param naming a DOM id to land on — the cold-load
+    // counterpart to `navigateToPanel`'s in-page scroll, for a link that was
+    // middle-clicked or pasted into a fresh tab rather than clicked in place.
+    // `section` (parsed above, via `activeSection`'s own init) already put
+    // the right panel on screen by the time this runs, so the id exists.
+    // Consumed once, then cleared, so a later refresh of this same tab does
+    // not keep re-scrolling to wherever an old link once pointed.
+    const anchorId = params.get('anchor');
+    if (anchorId && typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(() => {
+        document.getElementById(anchorId)?.scrollIntoView({ block: 'start' });
+      });
+      updateRouteParams({ anchor: undefined });
+    }
   }, []);
 
   const section = activeSection.value;

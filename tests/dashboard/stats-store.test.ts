@@ -3,6 +3,7 @@ import {
   classifyWindowedResponse, classifyDriftResponse,
   loadStatsForWindow, loadConfigReport, statsPopulation,
   parseStatsSection, parseStatsWindow, parseStatsPopulation,
+  buildPanelHref, navigateToPanel,
 } from '../../src/dashboard/client/stats-store.ts';
 import type { DriftStats } from '../../src/dashboard/stats.ts';
 
@@ -133,7 +134,7 @@ describe('loadStatsForWindow — population query string', () => {
 // URL-route parsers (arrival-efficiency fix) — pure, total. Each must return
 // `null` for an absent OR unrecognised param rather than a hardcoded
 // default, so a caller can tell "the URL said nothing" from "the URL said
-// something" and fall back accordingly (see stats-view.tsx's `initialSection`
+// something" and fall back accordingly (see this file's own `initialSection`
 // for the one case that actually branches on this: URL wins, then
 // localStorage, then a hardcoded default).
 // ---------------------------------------------------------------------------
@@ -182,5 +183,77 @@ describe('parseStatsPopulation', () => {
 
   test('an unrecognised population -> null', () => {
     expect(parseStatsPopulation(new URLSearchParams('population=staging'))).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPanelHref — the readability review's rank #2 fix (the dead
+// `#stats-slot-integrity` cross-section anchor). Pure: takes the current
+// params as an argument rather than reading `location` itself, so it is
+// testable the same way the parsers above are, with a plain URLSearchParams
+// fixture and no DOM.
+// ---------------------------------------------------------------------------
+
+describe('buildPanelHref', () => {
+  test('an empty current URL -> a hash carrying only section and anchor', () => {
+    const href = buildPanelHref(new URLSearchParams(''), 'health', 'stats-slot-integrity');
+    const params = new URLSearchParams(href.slice(1));
+    expect(params.get('section')).toBe('health');
+    expect(params.get('anchor')).toBe('stats-slot-integrity');
+  });
+
+  test('preserves every other param already on the URL (view, window, population)', () => {
+    const current = new URLSearchParams('view=stats&section=config&window=7d&population=test');
+    const href = buildPanelHref(current, 'health', 'stats-slot-integrity');
+    const params = new URLSearchParams(href.slice(1));
+    expect(params.get('view')).toBe('stats');
+    expect(params.get('window')).toBe('7d');
+    expect(params.get('population')).toBe('test');
+    // section is overwritten to the link's target, not left at the caller's
+    // current section — the whole point of the link is to change it.
+    expect(params.get('section')).toBe('health');
+  });
+
+  test('does not mutate the URLSearchParams handed to it', () => {
+    const current = new URLSearchParams('section=config');
+    buildPanelHref(current, 'health', 'stats-slot-integrity');
+    expect(current.get('section')).toBe('config');
+    expect(current.get('anchor')).toBeNull();
+  });
+
+  // Unknown-input fallback: a blank or whitespace-only anchor id degrades to
+  // a section-only link rather than an `anchor=` param pointing at nothing.
+  test('a blank anchor id -> no anchor param, not anchor=""', () => {
+    const href = buildPanelHref(new URLSearchParams(''), 'health', '');
+    const params = new URLSearchParams(href.slice(1));
+    expect(params.has('anchor')).toBe(false);
+    expect(params.get('section')).toBe('health');
+  });
+
+  test('a whitespace-only anchor id -> also no anchor param', () => {
+    const href = buildPanelHref(new URLSearchParams(''), 'health', '   ');
+    const params = new URLSearchParams(href.slice(1));
+    expect(params.has('anchor')).toBe(false);
+  });
+
+  test('a stale anchor already on the URL is replaced, not accumulated', () => {
+    const current = new URLSearchParams('section=value&anchor=stats-slot-old');
+    const href = buildPanelHref(current, 'health', 'stats-slot-integrity');
+    const params = new URLSearchParams(href.slice(1));
+    expect(params.getAll('anchor')).toEqual(['stats-slot-integrity']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// navigateToPanel — safe outside a browser. No DOM/history exists in this
+// test runtime (see url-route.test.ts's own guard tests), which is exactly
+// the environment `setSection`'s `updateRouteParams` call and the
+// `requestAnimationFrame`/`document` guards must degrade gracefully in.
+// ---------------------------------------------------------------------------
+
+describe('navigateToPanel — outside a browser', () => {
+  test('does not throw when document/requestAnimationFrame/location/history are all missing', () => {
+    expect(typeof document).toBe('undefined');
+    expect(() => navigateToPanel('health', 'stats-slot-integrity')).not.toThrow();
   });
 });

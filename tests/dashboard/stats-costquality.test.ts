@@ -266,7 +266,20 @@ describe('assessModelBreakdownCost', () => {
     ];
     const a = assessModelBreakdownCost(rows);
     expect(a.status).toBe('attention');
-    expect(a.text).toBe('1 flagged model costing $3.75: claude-opus-4-8[1m] — see the Integrity panel\'s Model usage section');
+    expect(a.text).toBe('1 flagged model costing $3.75: claude-opus-4-8[1m]');
+  });
+
+  // Readability review, rank #2: the "— see the Integrity panel's Model
+  // usage section" clause moved out of this pure function to the JSX call
+  // site (ModelBreakdownSection), where it can be a real link instead of
+  // dead prose. This function must not reintroduce it as a plain string.
+  test('the attention text no longer bakes in the cross-section reference as plain prose', () => {
+    const rows: ModelUsageEntry[] = [
+      { model: 'claude-opus-4-8[1m]', rows: 1, totalCostUsd: 3.75, totalOutputTokens: 500, flagged: true },
+    ];
+    const a = assessModelBreakdownCost(rows);
+    expect(a.text).not.toContain('Integrity panel');
+    expect(a.text).not.toContain('see the');
   });
 
   // Task 8: dropped "key" — a flagged row is a MODEL, and "key" risked
@@ -513,7 +526,12 @@ describe('Task 8 — cost/quality prose: schema names gone, shared constants imp
 
   test('the internal function name aggregateModelUsage no longer appears in the rendered cost-lens note', () => {
     expect(src).not.toMatch(/\(one query, aggregateModelUsage\)/);
-    expect(src).toMatch(/Same model-cost breakdown as the Integrity panel's "Model usage" table/);
+    // Readability review, rank #2: "Integrity panel's \"Model usage\" table"
+    // is now the text of a real link (IntegrityModelUsageLink), not a plain
+    // run of prose — so the phrase is split across a JSX element boundary
+    // rather than appearing as one contiguous string.
+    expect(src).toMatch(/Same model-cost breakdown as the\{' '\}/);
+    expect(src).toMatch(/Integrity panel's "Model usage" table<\/IntegrityModelUsageLink>/);
   });
 
   test('the severity legend divider names critical or major, not the bare "read-band" term', () => {
@@ -756,5 +774,53 @@ describe('buildQualityPanelView', () => {
     const view = buildQualityPanelView(state);
     expect(view.status).toBe('ready');
     expect(view.data).toBe(data);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Readability review — rank #1 (the cost-checker lands wrong) and rank #2
+// (the dead cross-section anchor). No value assertion can reach JSX render
+// order or which element wraps a link, so this is a source-scan secondary
+// net, mirroring stats-operational.test.ts's "operational card structure"
+// block and stats-review-value.test.ts's glossary-render check.
+// ---------------------------------------------------------------------------
+
+describe('cost card structure — secondary net', () => {
+  const cardSrc = readFileSync(
+    fileURLToPath(new URL('../../src/dashboard/client/components/stats-costquality.tsx', import.meta.url)),
+    'utf-8',
+  );
+  const bodySrc = cardSrc.slice(cardSrc.indexOf('function CostCardBody'), cardSrc.indexOf('function CostCard('));
+
+  // Rank #1 item 1: the overview PRODUCT.md's cost-checking visitor came for
+  // (`Total this window` / `Monthly projection`) must render before the
+  // orchestrator/sub-agent split, not after it.
+  test('CostCardBody renders the overview before the split', () => {
+    const overviewIndex = bodySrc.indexOf('<CostOverviewSection');
+    const splitIndex = bodySrc.indexOf('<CostSplitSection');
+    expect(overviewIndex).toBeGreaterThan(-1);
+    expect(splitIndex).toBeGreaterThan(-1);
+    expect(overviewIndex).toBeLessThan(splitIndex);
+  });
+
+  // Rank #1 item 2: a two-term glossary defining "orchestrator" and
+  // "sub-agent" — the two nouns the split section's own title uses — must
+  // exist and actually be rendered on the Cost card, not just declared.
+  test('the Cost card declares and renders a two-term glossary for orchestrator/sub-agent', () => {
+    expect(cardSrc).toContain("term: 'orchestrator'");
+    expect(cardSrc).toContain("term: 'sub-agent'");
+    expect(cardSrc).toContain('<CardGlossary terms={TERMS} />');
+  });
+
+  // Rank #2: the Cost card's two references to the Integrity panel's "Model
+  // usage" table must be real cross-section links, not plain text — the
+  // fix this file's own IntegrityModelUsageLink helper exists for.
+  test('both Integrity-panel references route through navigateToPanel, not plain text', () => {
+    const occurrences = cardSrc.split('<IntegrityModelUsageLink>').length - 1;
+    expect(occurrences).toBe(2);
+    // The old note was one contiguous, unlinked string; it must now be
+    // split around the <IntegrityModelUsageLink> element, not just re-typed.
+    expect(cardSrc).not.toContain('Same model-cost breakdown as the Integrity panel\'s "Model usage" table');
+    expect(cardSrc).toContain("navigateToPanel('health', 'stats-slot-integrity')");
   });
 });

@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals';
 import type { StatsWindow, CostStats, QualityStats, IntegrityStats, OperationalStats, ReviewValueStats, DriftStats, Population } from '../stats.ts';
 import type { ConfigReport } from '../config-report.ts';
-import { parseEnumParam, updateRouteParams } from './url-route.ts';
+import { getRouteParams, parseEnumParam, updateRouteParams } from './url-route.ts';
 
 export type { StatsWindow, Population };
 
@@ -35,6 +35,107 @@ export function parseStatsWindow(params: URLSearchParams): StatsWindow | null {
 
 export function parseStatsPopulation(params: URLSearchParams): Population | null {
   return parseEnumParam(params, 'population', STATS_POPULATIONS);
+}
+
+// ---------------------------------------------------------------------------
+// Section state and cross-section navigation (moved here from stats-view.tsx
+// so a panel file can jump to another section without importing
+// stats-view.tsx — stats-view.tsx already imports EVERY panel component
+// (ConfigPanel, CostQualityPanel, ...), so a panel importing anything back
+// from stats-view.tsx would close an import cycle. stats-store.ts is
+// already the leaf every panel imports its shared signals from
+// (costStats, statsWindow, ...), so it is the natural home for the
+// cross-section "jump there and scroll to this" helper too — see
+// `navigateToPanel`/`buildPanelHref` below, added for the dead-anchor fix
+// (readability review, rank #2): `stats-config.tsx` used to link to
+// `#stats-slot-integrity` with a plain `<a href="#stats-slot-integrity">`,
+// which does nothing while Integrity is not the mounted section.
+// ---------------------------------------------------------------------------
+
+const SECTION_STORAGE_KEY = 'stats-section';
+
+/** Deep link wins on arrival; the remembered (localStorage) choice is the
+ *  fallback when the URL says nothing — per the arrival-efficiency finding,
+ *  a pasted link must reproduce the section it points at rather than the
+ *  reader's last visit silently overriding it. `parseStatsSection` already
+ *  returns `null` for both an absent `section` param and an unrecognised
+ *  one, so garbage in the URL degrades to "as if the URL said nothing"
+ *  automatically. */
+function initialSection(): StatsSection {
+  const fromUrl = parseStatsSection(getRouteParams());
+  if (fromUrl) return fromUrl;
+  try {
+    const saved = localStorage.getItem(SECTION_STORAGE_KEY);
+    if (saved && (STATS_SECTIONS as readonly string[]).includes(saved)) return saved as StatsSection;
+  } catch { /* storage unavailable — session default is fine */ }
+  return 'health';
+}
+
+/** The Stats & Config tab's currently open section — read by `SectionNav`
+ *  and `StatsView` (stats-view.tsx) to decide which panels to mount. */
+export const activeSection = signal<StatsSection>(initialSection());
+
+export function setSection(s: StatsSection): void {
+  activeSection.value = s;
+  try { localStorage.setItem(SECTION_STORAGE_KEY, s); } catch { /* best effort */ }
+  // replaceState, not push: a section click is a scope change, not a new
+  // page — see url-route.ts's doc comment for why every control in this tab
+  // makes the same choice, so the back button never fills up with clicks.
+  updateRouteParams({ section: s });
+}
+
+/**
+ * Builds the href for a cross-section link — the Config panel's reference to
+ * the Integrity panel's "Model contamination" section, and the Cost card's
+ * two references to the Integrity panel's "Model usage" table.
+ *
+ * Patches `section` and `anchor` into the SAME hash param bag every other
+ * control on this tab reads and writes (`view`, `window`, `population` — see
+ * url-route.ts), preserving whatever else is already there, so the result is
+ * a genuine URL: a middle-click, a copied link, or a fresh paste in a new tab
+ * all arrive with `section` set correctly (`initialSection` above already
+ * parses it on load) — the part of the link's job `navigateToPanel`'s
+ * in-page `onClick` handler cannot do on its own, since that only runs for a
+ * plain in-page left-click.
+ *
+ * Pure — takes the current params as an argument instead of reading
+ * `location` itself, so it is unit-testable with a plain `URLSearchParams`
+ * fixture. Total: a blank or whitespace-only `anchorId` (the unknown-input
+ * case a caller could hand it) degrades to a section-only link rather than
+ * an `anchor=` param pointing at nothing, matching `parseEnumParam`'s own
+ * "never guess, never throw on bad input" contract.
+ */
+export function buildPanelHref(current: URLSearchParams, section: StatsSection, anchorId: string): string {
+  const params = new URLSearchParams(current);
+  params.set('section', section);
+  const trimmedAnchor = anchorId.trim();
+  if (trimmedAnchor) params.set('anchor', trimmedAnchor);
+  else params.delete('anchor');
+  const query = params.toString();
+  return query ? `#${query}` : '#';
+}
+
+/**
+ * Same-tab navigation for a cross-section link's `onClick` — the instant
+ * counterpart to `buildPanelHref`'s real-URL fallback: sets the active
+ * section (patching the URL exactly like a section-nav click already does,
+ * via `setSection`) and scrolls the named element into view once the new
+ * section has rendered.
+ *
+ * One `requestAnimationFrame` after the signal write, not a `setTimeout`:
+ * Preact's signal-triggered re-render for a `.value` read completes before
+ * the next paint in every browser this dashboard targets, so the element
+ * already exists in the DOM by the time the callback runs — "set the
+ * section, then scroll after render," per the readability review. Guarded
+ * for a non-browser runtime the same way `updateRouteParams` already is,
+ * so importing this module in a test never throws.
+ */
+export function navigateToPanel(section: StatsSection, anchorId: string): void {
+  setSection(section);
+  if (typeof requestAnimationFrame === 'undefined' || typeof document === 'undefined') return;
+  requestAnimationFrame(() => {
+    document.getElementById(anchorId)?.scrollIntoView({ block: 'start' });
+  });
 }
 
 /**
