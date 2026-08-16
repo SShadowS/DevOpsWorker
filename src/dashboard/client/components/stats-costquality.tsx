@@ -436,10 +436,15 @@ function CostSplitSection({ data }: { data: CostStats }) {
               {headline}
             </p>
           )}
-          <p class="cost-section__note">
-            <strong class="cost-tag cost-tag--caveat">Known instrument caveat: </strong>
-            {data.orchestratorSubAgentSplit.note}
-          </p>
+          {/* `orchestratorSubAgentSplit.note` explains WHY the split is
+              structurally biased (roster undercount + a telemetry-coverage
+              gap that predates the column) — true of every window, not a
+              condition of this one, so it stays untagged and quiet rather
+              than repeating the "Known instrument caveat:" hedge the
+              headline above already carries when THIS window's coverage is
+              actually low. Two tagged paragraphs back to back read as two
+              hedges instead of one; this keeps both facts and one hedge. */}
+          <p class="cost-section__note">{data.orchestratorSubAgentSplit.note}</p>
         </>
       )}
     </CostSection>

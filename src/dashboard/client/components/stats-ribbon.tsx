@@ -353,7 +353,17 @@ interface SimpleCardProps {
   window?: StatsWindow;
 }
 
+/** Some assessors (`assessModelIntegrity` is the one that actually reaches
+ *  this today) join more than one independent signal into `text` with ' · ',
+ *  the same delimiter used throughout this card family to mark a clause
+ *  boundary. At glance level, three such clauses chained with commas and
+ *  parentheses read as one dense compound sentence; splitting on that same
+ *  delimiter turns it back into the short, independently scannable facts it
+ *  was built from — the same shape `ProvenanceTable` already uses for
+ *  Deployment drift's own multi-fact rows — without dropping a single word.
+ *  A one-clause `text` (Active levers, Error rate) round-trips unchanged. */
 function SimpleCard({ label, view, window }: SimpleCardProps) {
+  const [headline, ...rest] = view.text.split(' · ');
   return (
     <div class={`status-ribbon__item status-ribbon__item--${view.status}`} role="group" aria-label={label}>
       <div class="status-ribbon__item-header">
@@ -362,8 +372,11 @@ function SimpleCard({ label, view, window }: SimpleCardProps) {
       </div>
       <p class="status-ribbon__item-text">
         {view.status === 'attention' && <strong class="status-ribbon__attention-tag">Needs attention: </strong>}
-        {view.text}
+        {headline}
       </p>
+      {rest.map((clause) => (
+        <p class="status-ribbon__item-text" key={clause}>{clause}</p>
+      ))}
     </div>
   );
 }

@@ -1832,6 +1832,10 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
   color: var(--color-text-secondary);
   margin: 0;
 }
+/* A card whose assessor joined more than one clause with ' · ' (stats-ribbon.tsx's
+   SimpleCard) renders each clause as its own paragraph instead of one run-on
+   sentence — a small gap keeps the stacked lines from reading as one block. */
+.status-ribbon__item-text + .status-ribbon__item-text { margin-top: 2px; }
 
 .status-ribbon__attention-tag { color: var(--color-accent); }
 

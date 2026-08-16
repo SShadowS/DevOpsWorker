@@ -668,10 +668,15 @@ function RaisedAndActedOnSection({ o }: { o: ReviewValueOutcome }) {
         </tbody>
       </table>
       <p class="review-value-section__note">{describeVerdictCaption(o)}</p>
-      <p class="review-value-section__note">
-        <strong class="review-value-tag review-value-tag--caveat">Known instrument caveat: </strong>
-        {o.reproducibilityNote}
-      </p>
+      {/* `reproducibilityNote` is a fact about how the judging process itself
+          works (one ballot flips on 33% of identical re-runs, always, on
+          every window) — not a condition of this window's data, so it stays
+          untagged. The traceability note above already carries this
+          section's one tagged hedge when there is something to hedge
+          (untraceable > 0); a second "Known instrument caveat:" here would
+          stack a permanent methodology fact on top of a window-specific one
+          under the same alarm, one section apart. */}
+      <p class="review-value-section__note">{o.reproducibilityNote}</p>
     </ReviewValueSection>
   );
 }
