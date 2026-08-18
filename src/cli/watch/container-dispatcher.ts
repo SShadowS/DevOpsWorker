@@ -489,7 +489,7 @@ const REFLECTION_LOCK_KEY = 0x52_45_46_4c; // 'REFL'
 /**
  * Cross-process mutual exclusion around the reflection guard+spawn.
  *
- * `runAtStart: true` (the overlay's `monthly-reflection` task) means every
+ * `runAtStart: true` (the overlay's reflection task) means every
  * watcher boot calls `executeReflection`, and more than one watcher can be up
  * at once — a compose restart overlapping a hand-run `pipeline watch`. Without
  * this lock, two processes can both read "no proposal for this cycle yet" and
