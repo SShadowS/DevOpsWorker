@@ -71,6 +71,13 @@ scripts/ab-results/
 # have offered the whole directory to `git add .`.
 /.superpowers/
 
+# Design-critique working notes written by the design tooling. Same class as
+# /docs/superpowers/ and /.superpowers/: generated commentary on in-flight work,
+# tens of kilobytes at a time, quoting whatever the dashboard happened to be
+# showing — which is real work-item titles and branch names. Untracked but
+# committable is not protection; one `git add .` publishes it.
+/.impeccable/
+
 # deployment-local Claude Code guidance (site-specific: internal repos, tools,
 # environments). Loads automatically at the workspace root. Never commit it here.
 /CLAUDE.local.md
