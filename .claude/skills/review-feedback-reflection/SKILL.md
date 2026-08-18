@@ -9,7 +9,7 @@ description: >-
   or mistaken rejections out of the prompts.
 ---
 
-# Monthly review-feedback reflection
+# Review-feedback reflection
 
 Turn what humans said about the reviewer's findings into verified prompt improvements.
 
@@ -22,8 +22,8 @@ PR discussion, not just the finding's thread, so "replied elsewhere" is already 
 
 Coverage caveats before you read any number: only critical+major findings, only settled
 PRs; `said` is null when nobody wrote a word or the sweep hasn't reached the row yet.
-Say what fraction of the month's rows carry a `said` label — conclusions rest on that
-slice, not on "the month".
+Say what fraction of the window's rows carry a `said` label — conclusions rest on that
+slice, not on "the cycle".
 
 ## Step 1 — pull the learning set
 
@@ -98,7 +98,7 @@ to suppress far more than intended.
 **Ship at most 3 changes per cycle, and at most 1 severity-calibration change.** A batch
 that edits the main prompt, four sub-agents and the severity table at once cannot be
 attributed by the next cost review — if everything changes, nothing is measurable. Rank
-by adjudicated impact; the rest waits a month. "We want it all shipped today" is how the
+by adjudicated impact; the rest waits a cycle. "We want it all shipped today" is how the
 unmeasurable batch happens.
 
 ## Traps — each one has already produced a wrong conclusion here
@@ -116,7 +116,7 @@ unmeasurable batch happens.
   the coder agent, not the team — a sweep misclassification. Log it to the tuning log
   for the classifier, and never learn from it.
 - **Prompt levers frequently do not bind.** Record the expected effect in the tuning
-  log BEFORE shipping (e.g. "class-X rejections: 3 this month → 0 next"), so next
+  log BEFORE shipping (e.g. "class-X rejections: 3 this cycle → 0 next"), so next
   cycle's reading cannot be fitted after the fact.
 - **Rebuild the spawned-container image** (`pwsh private/deploy/docker-build.ps1`) —
   compose services pick up prompt changes while spawned review containers silently run
@@ -127,7 +127,7 @@ unmeasurable batch happens.
 1. Append to the tuning log: the labelled learning set, each adjudication verdict with
    its evidence, the clusters, what shipped, what went to the watch ledger, and the
    expected effect of each change. Negative results ("cluster X: human was right, no
-   fixable class") are entries too — they stop next month's rerun.
+   fixable class") are entries too — they stop next cycle's rerun.
 2. Acceptance: replay one PR whose finding you addressed (the `acceptance-run` skill,
    NO-POST mode) and confirm the finding is now absent, downgraded, or evidence-gated.
 3. Next cycle starts by comparing this cycle's expected effects against what happened.
@@ -153,5 +153,14 @@ and a rejected one is settled.
    applied_commits='{"core":"<sha>","overlay":"<sha>"}' WHERE id=N AND
    status='approved'`).
 
-Cadence: monthly, manually or scheduled. Expect ~10–20 disputed findings per month —
-sized for real adjudication, not for skimming.
+Cadence: twice a month — the 1st and the 15th, UTC — manually or scheduled
+(`shouldDispatchReflection` in `src/cli/watch/container-dispatcher.ts`). Expect ~10-20
+disputed findings per cycle, sized for real adjudication rather than skimming.
+
+The window (35 days) is deliberately wider than the gap between cycles, because a human
+response takes a median of 7 days and up to 19 to be labelled, and a narrower window
+would drop the slow ones entirely. So **a row you adjudicated last cycle will appear
+again in this one**. Count a finding once toward its class, not once per cycle it shows
+up in: re-counting the same three rows every fortnight manufactures a cluster that
+clears the n-rule without a single new occurrence. Read the previous cycle's log entry
+before counting.

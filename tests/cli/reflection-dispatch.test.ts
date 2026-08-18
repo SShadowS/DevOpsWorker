@@ -3,7 +3,9 @@ import { shouldDispatchReflection } from '../../src/cli/watch/container-dispatch
 import type { ReflectionProposal } from '../../src/db/reflection-proposal-mapper.ts';
 
 // ---------------------------------------------------------------------------
-// shouldDispatchReflection — pure day-15 + no-existing-proposal guard.
+// shouldDispatchReflection — pure cycle-day + no-existing-proposal guard.
+//
+// Two cycles a month: the 1st and the 15th, UTC. Every other day is a no-op.
 //
 // `existing` is expected to come from IReflectionStore.findByCycle, which
 // already excludes 'superseded' rows before this function ever sees them —
@@ -58,10 +60,27 @@ describe('shouldDispatchReflection', () => {
     expect(shouldDispatchReflection(new Date('2026-08-15T09:00:00Z'), proposal('rejected'))).toBe(false);
   });
 
-  test('not day 15, no existing proposal -> false', () => {
+  test('day 1, no existing proposal -> true', () => {
+    // The second cycle of the fortnightly cadence. Before this, the 1st was a
+    // no-op day and the reflection ran once a month.
+    expect(shouldDispatchReflection(new Date('2026-09-01T09:00:00Z'), null)).toBe(true);
+  });
+
+  test('day 1, a row already exists for this cycle -> false', () => {
+    expect(shouldDispatchReflection(new Date('2026-09-01T09:00:00Z'), proposal('pending'))).toBe(false);
+  });
+
+  test('neither cycle day, no existing proposal -> false', () => {
     expect(shouldDispatchReflection(new Date('2026-08-14T09:00:00Z'), null)).toBe(false);
     expect(shouldDispatchReflection(new Date('2026-08-16T09:00:00Z'), null)).toBe(false);
-    expect(shouldDispatchReflection(new Date('2026-09-01T09:00:00Z'), null)).toBe(false);
+    expect(shouldDispatchReflection(new Date('2026-08-31T09:00:00Z'), null)).toBe(false);
+    expect(shouldDispatchReflection(new Date('2026-09-02T09:00:00Z'), null)).toBe(false);
+  });
+
+  test('a February 1st is a cycle day like any other — no month-length special case', () => {
+    // The two days are fixed calendar days, so the short month needs no handling.
+    expect(shouldDispatchReflection(new Date('2027-02-01T09:00:00Z'), null)).toBe(true);
+    expect(shouldDispatchReflection(new Date('2027-02-15T09:00:00Z'), null)).toBe(true);
   });
 
   test('day 15 but the only row for this cycle was superseded -> findByCycle already excludes it, so this sees null -> true', () => {

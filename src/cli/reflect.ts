@@ -12,7 +12,7 @@ import { findingKey } from '../sdk/ado/finding-key.ts';
 import type { PipelineContext } from '../types/pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
-// pipeline reflect — monthly reflection on human responses to the PR
+// pipeline reflect — fortnightly reflection on human responses to the PR
 // reviewer's findings. Queries the labelled learning set from
 // `finding_outcomes` + `pr_reviews.findings_list`, runs the reflection agent,
 // and persists its proposal to `reflection_proposals`.

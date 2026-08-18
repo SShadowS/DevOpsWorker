@@ -432,9 +432,27 @@ export interface ReflectionDispatchDeps {
 }
 
 /**
+ * The UTC days of the month a reflection cycle starts on.
+ *
+ * Two cycles a month, roughly a fortnight apart. The 1st and the 15th are
+ * fixed calendar days rather than "every 14 days" on purpose: a fixed-interval
+ * schedule drifts against the month and makes two cycle dates ambiguous to
+ * anyone reading the log, while these two are the same dates every month and
+ * survive a watcher restart with no stored counter.
+ *
+ * The window (`--window-days`, default 35) deliberately still exceeds the gap,
+ * so a finding whose human response lands late is never missed: labels take a
+ * median of 7 days and up to 19 to appear, and 35 > 14 + 19. The cost is that
+ * a row can appear in two consecutive learning sets — the agent is given the
+ * prior proposals for exactly that reason, and the skill's n-rule counts a
+ * finding once, not once per cycle it appears in.
+ */
+const REFLECTION_CYCLE_DAYS = [1, 15];
+
+/**
  * Whether today's scheduler tick should dispatch a reflection run.
  *
- * Pure and total: no I/O, so the day-15 gate and the one-proposal-per-cycle
+ * Pure and total: no I/O, so the cycle-day gate and the one-proposal-per-cycle
  * gate can both be exercised without a database. `existing` is expected to
  * come from `IReflectionStore.findByCycle`, which already excludes
  * 'superseded' rows before this function ever sees them — a cycle whose only
@@ -456,7 +474,7 @@ export interface ReflectionDispatchDeps {
  * which calendar they're using.
  */
 export function shouldDispatchReflection(now: Date, existing: ReflectionProposal | null): boolean {
-  return now.getUTCDate() === 15 && existing === null;
+  return REFLECTION_CYCLE_DAYS.includes(now.getUTCDate()) && existing === null;
 }
 
 /**
@@ -514,12 +532,13 @@ async function releaseReflectionLock(held: postgres.ReservedSql): Promise<void> 
 }
 
 /**
- * Dispatch the monthly reflection container, if today is its day and no
- * proposal exists yet for this cycle.
+ * Dispatch the reflection container, if today is a cycle day and no proposal
+ * exists yet for this cycle.
  *
- * Called by the overlay's `monthly-reflection` scheduled task on every tick,
- * including once at watcher startup — so this must tolerate being invoked
- * far more often than once a month, and do nothing on every day but the 15th.
+ * Called by the overlay's reflection scheduled task on every tick, including
+ * once at watcher startup — so this must tolerate being invoked far more
+ * often than twice a month, and do nothing on any day but a cycle day
+ * (`REFLECTION_CYCLE_DAYS`).
  *
  * Never throws. A dispatch failure — a lock error, a docker error, anything
  * unexpected — is logged and swallowed here, matching the `ScheduledTask.run`
