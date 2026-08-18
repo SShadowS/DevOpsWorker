@@ -193,3 +193,85 @@ describe('detectCherryPick — what must NOT route to the cheap path', () => {
     expect(r.originalPrId).toBe(52117);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The third shape: `[Backport 26.x] <title>`.
+//
+// PR 53271 carried it. The router saw "not a
+// cherry-pick", spent $6.23 on a full review, and all three of its Major
+// findings were rejected with "That's a merge from master where it was tested
+// and approved" — the review judged the original design of work that had
+// already shipped, because nothing told it this was a port.
+//
+// The marker is structurally the same as `[Cherry-pick 25]`: written by the
+// backport tooling, mid-title, in brackets, carrying the Business Central
+// version branch rather than a PR id. The version can be written `26` or
+// `26.x`.
+// ---------------------------------------------------------------------------
+describe('detectCherryPick — the [Backport] marker', () => {
+  test('recognises the marker, with the version written as 26.x', () => {
+    const r = detectCherryPick({ title: '[Backport 26.x] Purchase Receipt/Shipment Unit Cost Matching' });
+    expect(r.isCherryPick).toBe(true);
+  });
+
+  test('recognises it with a bare version number and mixed case', () => {
+    expect(detectCherryPick({ title: '[backport 26] Purchase Receipt matching' }).isCherryPick).toBe(true);
+    expect(detectCherryPick({ title: 'Merged PR 42379: [BackPort 25] Fix quantity matching' }).isCherryPick).toBe(true);
+  });
+
+  test('the bracketed version is never read as the source PR id', () => {
+    const r = detectCherryPick({ title: 'Merged PR 42379: [Backport 26.x] Fix quantity matching' });
+    expect(r.originalPrId).toBe(42379);
+    expect(r.originalPrId).not.toBe(26);
+  });
+
+  test('a revert of a backport is still not a port', () => {
+    const r = detectCherryPick({ title: 'Revert "[Backport 26.x] Purchase Receipt matching"' });
+    expect(r.isCherryPick).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A port that carries SEVERAL merged parents has no single source to compare
+// against, and the cheap path compares against exactly one. PR 53271's
+// description lists two: `- Merged PR 41464: …` and `- Merged PR 42379: …`.
+// Taking the first would compare half the change and call the other half
+// diverged — a confident wrong answer, which is worse than the full review it
+// replaces. Detected as a port (so the prompt frames it as one), unresolved
+// (so `chooseReviewPath` keeps the full path).
+// ---------------------------------------------------------------------------
+describe('detectCherryPick — multi-source ports stay on the full path', () => {
+  const MULTI = {
+    title: '[Backport 26.x] Purchase Receipt/Shipment Unit Cost Matching',
+    description: [
+      '- Merged PR 41464: Fix Quantity Matching for Purchase Documents',
+      '- Merged PR 42379: Merged PR 42271: Purchase Receipt/Shipment Unit Cost Matching',
+    ].join('\n'),
+  };
+
+  test('is a port', () => {
+    expect(detectCherryPick(MULTI).isCherryPick).toBe(true);
+  });
+
+  test('resolves no single parent', () => {
+    expect(detectCherryPick(MULTI).originalPrId).toBeUndefined();
+  });
+
+  test('says why, so the route reason is not a lie about a missing trailer', () => {
+    expect(detectCherryPick(MULTI).multiSourcePrIds).toEqual([41464, 42379]);
+  });
+
+  test('nested prefixes on ONE line are a port of a port, not two sources', () => {
+    // `Merged PR 52705: Merged PR 52680: [Cherry-pick 26] …` is one chain; the
+    // nearest ancestor wins and this must not read as a multi-source port.
+    const r = detectCherryPick({ title: 'Merged PR 52705: Merged PR 52680: [Cherry-pick 26] Remove DK prefix' });
+    expect(r.originalPrId).toBe(52705);
+    expect(r.multiSourcePrIds).toBeUndefined();
+  });
+
+  test('an explicit trailer settles it even with several merged parents listed', () => {
+    const r = detectCherryPick({ ...MULTI, description: `${MULTI.description}\nCherry picked from !42379` });
+    expect(r.originalPrId).toBe(42379);
+    expect(r.multiSourcePrIds).toBeUndefined();
+  });
+});

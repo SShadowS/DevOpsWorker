@@ -54,6 +54,17 @@ export interface PRReviewParams {
 export interface CherryPickInfo {
   isCherryPick: boolean;
   originalPrId?: number;
+  /**
+   * Set only when the port names SEVERAL merged parents and nothing settles
+   * which one it came from — the ids, in the order they appear. `originalPrId`
+   * is then deliberately left unset: the cheap path compares against exactly
+   * one source, and half a comparison reports the other half as divergence.
+   *
+   * Carried so the route reason can say what really happened instead of
+   * blaming a missing trailer, and so the prompt can still tell the reviewer
+   * this is a port.
+   */
+  multiSourcePrIds?: number[];
 }
 
 /**
@@ -75,9 +86,15 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
   // neither test above sees it. Nine reviews took the full path on this shape and cost
   // $63.71 between them against roughly $0.42 a review on the cheap path.
   //
+  // The same tooling also writes `[Backport 26.x] <title>` — same brackets, same
+  // position, same meaning, different word, and the version may carry a `.x`. PR 53271
+  // took the full path on it: $6.23, and all three of its Major findings were rejected
+  // with "That's a merge from master where it was tested and approved", because nothing
+  // in the review knew the code had already shipped upstream.
+  //
   // The number in the bracket is the Business Central version branch (25.x, 26.x), NOT
   // a PR id — `\d+` is matched only to anchor the form, and never read as an id.
-  const BRACKETED = /\[cherry[- ]pick\s*\d*\s*\]/i;
+  const BRACKETED = /\[(?:cherry[- ]pick|backport)\s*\d*(?:\.x)?\s*\]/i;
   const bracketMatch = BRACKETED.test(pr.title) || BRACKETED.test(pr.description ?? '');
 
   // A revert of a port quotes the port's own title, marker and all, so every test above
@@ -88,6 +105,28 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
 
   const isCherryPick = !isRevert && (titleMatch || descMatch || bracketMatch);
   if (!isCherryPick) return { isCherryPick: false };
+
+  // A port can carry more than one source. PR 53271 lists two, one per line:
+  //   - Merged PR 41464: Fix Quantity Matching for Purchase Documents
+  //   - Merged PR 42379: Merged PR 42271: Purchase Receipt/Shipment Unit Cost Matching
+  // The cheap path compares against exactly ONE source PR, so picking the first would
+  // compare half the change and report the other half as divergence — confidently, and
+  // with nothing downstream to catch it. Better to pay for the full review and say why.
+  //
+  // One id per line, deliberately: nested prefixes on a single line are a port of a
+  // port (one chain, nearest ancestor first), not two separate sources.
+  const parentsPerLine = (text: string | undefined): number[] =>
+    (text?.split(/\r?\n/) ?? [])
+      .map((line) => line.match(/merged pr (\d+):/i))
+      .filter((m): m is RegExpMatchArray => m !== null)
+      .map((m) => parseInt(m[1]!, 10));
+  const distinctParents = [...new Set([...parentsPerLine(pr.title), ...parentsPerLine(pr.description)])];
+  // An explicit `Cherry picked from !<id>` trailer names the source outright and
+  // outranks any list of merged parents, exactly as it does everywhere below.
+  const hasTrailer = /cherry[- ]picked? from !\d+/i.test(pr.description ?? '');
+  if (!hasTrailer && distinctParents.length > 1) {
+    return { isCherryPick: true, multiSourcePrIds: distinctParents };
+  }
 
   let originalPrId: number | undefined;
 
@@ -318,7 +357,12 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
           `This PR has been identified as a cherry-pick.`,
           cherryPick.originalPrId
             ? `Original PR: #${cherryPick.originalPrId}`
-            : `Original PR: could not be determined from description — use commit messages to find the source.`,
+            : cherryPick.multiSourcePrIds?.length
+              // Named, but plural: this port carries several already-merged changes.
+              // Saying "could not be determined" here would send the model looking for
+              // a source the description already gives it.
+              ? `Original PRs: ${cherryPick.multiSourcePrIds.map((id) => `#${id}`).join(', ')} — this port carries work from more than one already-merged PR, so verify it against each of them.`
+              : `Original PR: could not be determined from description — use commit messages to find the source.`,
           ``,
           `**Follow the Cherry-Pick Verification workflow in CLAUDE.md Phase 2.**`,
         );

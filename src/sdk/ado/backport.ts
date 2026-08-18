@@ -47,6 +47,18 @@ export function chooseReviewPath(input: RouteInput): ReviewPath {
   if (input.forceFull) return { path: 'full', reason: 'forced by caller (--full or /review-full)' };
   if (!input.cherryPick.isCherryPick) return { path: 'full', reason: 'not a cherry-pick' };
   if (!input.cherryPick.originalPrId) {
+    // Several named sources is a different miss from none, and `review_path` is
+    // read months later: the sanity review compares against ONE source PR, so a
+    // port that carries two has nothing single to compare against, and saying
+    // "no source PR id in the trailer" would send the next reader hunting for a
+    // trailer that was never the problem.
+    const multi = input.cherryPick.multiSourcePrIds;
+    if (multi && multi.length > 1) {
+      return {
+        path: 'full',
+        reason: `port of several merged PRs (${multi.map((id) => `!${id}`).join(', ')}) — no single source to compare against`,
+      };
+    }
     return { path: 'full', reason: 'cherry-pick detected but no source PR id in the trailer' };
   }
   // Reachable ONLY when Azure DevOps answered 404 for the PR itself. Any other

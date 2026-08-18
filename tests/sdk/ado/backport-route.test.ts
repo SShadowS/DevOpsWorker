@@ -140,3 +140,32 @@ describe('chooseReviewPath', () => {
     if (r.path === 'full') expect(r.reason).toContain('forced');
   });
 });
+
+// ---------------------------------------------------------------------------
+// A multi-source port keeps the full path, and the reason says so.
+//
+// `originalPrId` is now unset for two different reasons — nothing named a
+// source at all, or several did — and the route reason is what a human reads
+// out of `review_path` months later. "no source PR id in the trailer" would be
+// a lie about the second case.
+// ---------------------------------------------------------------------------
+describe('chooseReviewPath — multi-source ports', () => {
+  const multi = {
+    ...base,
+    cherryPick: { isCherryPick: true, multiSourcePrIds: [41464, 42379] },
+    sourcePrExists: false,
+    sourceDiffFetchable: false,
+  };
+
+  test('stays on the full path', () => {
+    expect(chooseReviewPath(multi).path).toBe('full');
+  });
+
+  test('names the sources in the reason instead of blaming a missing trailer', () => {
+    const r = chooseReviewPath(multi);
+    if (r.path !== 'full') throw new Error('expected the full path');
+    expect(r.reason).toContain('41464');
+    expect(r.reason).toContain('42379');
+    expect(r.reason).not.toContain('trailer');
+  });
+});
