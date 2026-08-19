@@ -133,11 +133,26 @@ export function findDefinition(symbol: string, files: string[]): Definition[] {
  * The procedure name is matched case-insensitively. Deduplicates the result.
  */
 export function findCallees(file: string, proc: string): string[] {
+  return findCalleesWithPresence(file, proc).callees;
+}
+
+/**
+ * As `findCallees`, but says whether the procedure was there at all.
+ *
+ * An empty list means two different things — the procedure calls nothing, or
+ * this file does not contain it — and the caller cannot tell them apart from
+ * `[]`. They are opposite answers: one ends the search, the other says look
+ * somewhere else.
+ */
+export function findCalleesWithPresence(
+  file: string,
+  proc: string,
+): { found: boolean; callees: string[] } {
   const parsed = parseFile(file);
   const procs = procedureNodes(parsed.tree.rootNode);
   const target = proc.toLowerCase();
   const procNode = procs.find(p => procedureName(p)?.toLowerCase() === target);
-  if (!procNode) return [];
+  if (!procNode) return { found: false, callees: [] };
 
   const names = new Set<string>();
   walk(procNode, n => {
@@ -147,7 +162,7 @@ export function findCallees(file: string, proc: string): string[] {
     }
   });
 
-  return [...names];
+  return { found: true, callees: [...names] };
 }
 
 /**
