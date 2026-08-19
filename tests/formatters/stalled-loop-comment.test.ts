@@ -336,3 +336,196 @@ describe('leadSentence', () => {
     expect(leadSentence('Version 1.2 is affected. Next.')).toBe('Version 1.2 is affected.');
   });
 });
+
+// ---------------------------------------------------------------------------
+// The other two loops
+//
+// The diagnostic was written for the coding loop and read only `codeReviews`.
+// A planning loop that exhausted its budget therefore fell through to the bare
+// "exhausted 5 attempts" comment with generic recovery options — the exact
+// failure this section exists to prevent, on the loop that hits it most.
+// Work item 81098 exhausted planning with five reviews on file and reported
+// none of them.
+// ---------------------------------------------------------------------------
+
+/** A plan-reviewer issue: `description`/`relatedObject`/`category`, not `comment`/`filePath`. */
+function stateWithPlanReviews(
+  rounds: Array<Array<{ severity: string; description: string; relatedObject?: string; category?: string }>>,
+  extra?: Partial<PipelineState>,
+): PipelineState {
+  return {
+    currentStage: 'planning',
+    telemetry: { totalCostUsd: 0, totalDurationMs: 0, stages: [] },
+    startedAt: 'now',
+    planReviews: rounds.map((issues, i) => ({
+      verdict: 'revise',
+      feedback: `round ${i + 1} summary`,
+      issues,
+      revisionInstructions: i === rounds.length - 1 ? 'Cut the scope creep.' : undefined,
+    })),
+    ...extra,
+  } as unknown as PipelineState;
+}
+
+describe('summarizeStalledLoop on the planning loop', () => {
+  test('reads planReviews, not codeReviews', () => {
+    const s = summarizeStalledLoop(stateWithPlanReviews([
+      [{ severity: 'critical', description: 'AC 4 has no test' }],
+      [{ severity: 'critical', description: 'AC 4 has no test' }],
+    ]), 'planning');
+
+    expect(s).not.toBeNull();
+    expect(s!.issueCounts).toEqual([1, 1]);
+  });
+
+  test('reads the issue text out of `description`', () => {
+    const s = summarizeStalledLoop(
+      stateWithPlanReviews([[{ severity: 'critical', description: 'AC 4 has no test' }]]),
+      'planning',
+    )!;
+
+    expect(s.latest[0]!.comment).toBe('AC 4 has no test');
+  });
+
+  test('reads the location out of `relatedObject`', () => {
+    const s = summarizeStalledLoop(
+      stateWithPlanReviews([[
+        { severity: 'critical', description: 'AC 4 has no test', relatedObject: 'CDO Events' },
+      ]]),
+      'planning',
+    )!;
+
+    expect(s.latest[0]!.filePath).toBe('CDO Events');
+  });
+
+  test('spots a recurring objection even when it is reworded each round', () => {
+    // Reviewers restate an objection in new words every round, so matching on
+    // exact text finds nothing. What repeats is the thing being objected to.
+    const s = summarizeStalledLoop(stateWithPlanReviews([
+      [{ severity: 'critical', description: 'AC 4 has no test', relatedObject: 'CDO Events', category: 'testing' }],
+      [{ severity: 'critical', description: 'Acceptance criterion 4 still lacks coverage', relatedObject: 'CDO Events', category: 'testing' }],
+    ]), 'planning')!;
+
+    expect(s.recurring).toHaveLength(1);
+    expect(s.recurring[0]).toContain('CDO Events');
+  });
+
+  test('the error comment carries the diagnostic instead of bare recovery options', () => {
+    // The shape work item 81098 produced: 5 rounds, counts 7/8/15/10/10.
+    const rounds = [7, 8, 15, 10, 10].map((n, r) =>
+      Array.from({ length: n }, (_, i) => ({
+        severity: i === 0 ? 'critical' : 'minor',
+        description: `round ${r + 1} issue ${i + 1}`,
+        relatedObject: `Object ${i + 1}`,
+        category: 'design',
+      })),
+    );
+    const err = new Error('Revision loop "planning" exhausted 5 attempts without approval');
+
+    const out = formatErrorComment(81098, 'planning', err, stateWithPlanReviews(rounds));
+
+    expect(out).toContain('Why it is stuck');
+    expect(out).toContain('/fix');
+    // The bare form promoted a plain resume as "preferred"; with a diagnostic
+    // attached, answering the reviewer is the option that changes anything.
+    expect(out).not.toContain('(preferred)');
+  });
+});
+
+describe('summarizeStalledLoop on the test-cases loop', () => {
+  test('reads testCaseReviews', () => {
+    const state = {
+      currentStage: 'test-cases',
+      telemetry: { totalCostUsd: 0, totalDurationMs: 0, stages: [] },
+      startedAt: 'now',
+      testCaseReviews: [
+        { verdict: 'revise', feedback: 'r1', issues: [{ severity: 'major', description: 'step 3 is not verifiable' }] },
+      ],
+    } as unknown as PipelineState;
+
+    const s = summarizeStalledLoop(state, 'test-cases')!;
+
+    expect(s.latest[0]!.comment).toBe('step 3 is not verifiable');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Which repeated objections are worth naming
+//
+// Both flaws below were visible in the real WI 81098 comment once the planning
+// loop started reporting at all: three of the seven "raised in more than one
+// round" entries were things the reviewer had explicitly ACCEPTED — one was
+// even "flagged as a positive" — and every entry printed at full paragraph
+// length, which is the wall of text this section exists to avoid.
+// ---------------------------------------------------------------------------
+
+describe('recurring objections', () => {
+  test('drops an objection that never blocked, however often it repeats', () => {
+    const s = summarizeStalledLoop(stateWithPlanReviews([
+      [
+        { severity: 'critical', description: 'the bracket leaks', relatedObject: 'Ctx', category: 'risk' },
+        { severity: 'suggestion', description: 'nice pattern, accepted', relatedObject: 'Ctx', category: 'style' },
+      ],
+      [
+        { severity: 'critical', description: 'the bracket still leaks', relatedObject: 'Ctx', category: 'risk' },
+        { severity: 'suggestion', description: 'still a nice pattern', relatedObject: 'Ctx', category: 'style' },
+      ],
+    ]), 'planning')!;
+
+    expect(s.recurring).toHaveLength(1);
+    expect(s.recurring[0]).toContain('bracket');
+  });
+
+  test('keeps an objection that blocked in any one round', () => {
+    // Severity moves between rounds. Blocking once is enough to have cost an
+    // attempt, so it belongs in the list.
+    const s = summarizeStalledLoop(stateWithPlanReviews([
+      [{ severity: 'minor', description: 'scope creep in the tests', relatedObject: 'Tests', category: 'scope-creep' }],
+      [{ severity: 'major', description: 'scope creep in the tests, still', relatedObject: 'Tests', category: 'scope-creep' }],
+    ]), 'planning')!;
+
+    expect(s.recurring).toHaveLength(1);
+  });
+
+  test('quotes the newest blocking wording, not a later downgrade', () => {
+    const s = summarizeStalledLoop(stateWithPlanReviews([
+      [{ severity: 'critical', description: 'FIRST blocking wording', relatedObject: 'Ctx', category: 'risk' }],
+      [{ severity: 'major', description: 'SECOND blocking wording', relatedObject: 'Ctx', category: 'risk' }],
+      [{ severity: 'suggestion', description: 'accepted now, no longer blocking', relatedObject: 'Ctx', category: 'risk' }],
+    ]), 'planning')!;
+
+    expect(s.recurring[0]).toContain('SECOND blocking wording');
+  });
+
+  test('still knows something repeated even when nothing blocking did', () => {
+    // Otherwise the comment claims the reviewers raised different objections
+    // every round — the opposite of what happened.
+    const s = summarizeStalledLoop(stateWithPlanReviews([
+      [{ severity: 'minor', description: 'a nit', relatedObject: 'Ctx', category: 'style' }],
+      [{ severity: 'minor', description: 'the same nit', relatedObject: 'Ctx', category: 'style' }],
+    ]), 'planning')!;
+
+    expect(s.recurring).toEqual([]);
+    expect(s.repeatedAny).toBe(true);
+  });
+
+  test('does not call it underspecified when only minor findings repeated', () => {
+    const out = formatErrorComment(1, 'planning', new Error('exhausted'), stateWithPlanReviews([
+      [{ severity: 'minor', description: 'a nit', relatedObject: 'Ctx', category: 'style' }],
+      [{ severity: 'minor', description: 'the same nit', relatedObject: 'Ctx', category: 'style' }],
+    ]));
+
+    expect(out).not.toContain('underspecified');
+  });
+
+  test('trims a paragraph-length recurring finding', () => {
+    const long = 'x'.repeat(900);
+    const out = formatErrorComment(1, 'planning', new Error('exhausted'), stateWithPlanReviews([
+      [{ severity: 'critical', description: long, relatedObject: 'Ctx', category: 'risk' }],
+      [{ severity: 'critical', description: long, relatedObject: 'Ctx', category: 'risk' }],
+    ]));
+
+    expect(out).toContain('…');
+    expect(out).not.toContain(long);
+  });
+});

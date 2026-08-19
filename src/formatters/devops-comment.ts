@@ -3,7 +3,6 @@ import type { DevPlan } from '../agents/planner/schema.ts';
 import type { Changeset } from '../agents/coder/schema.ts';
 import type { PipelineState, TelemetryData } from '../types/pipeline.types.ts';
 import { TransientAgentError } from '../sdk/errors.ts';
-import { recurringFindings } from '../pipeline/revision-loop.ts';
 
 // ---------------------------------------------------------------------------
 // DevOps comment formatters — HTML for posting to work item comments
@@ -223,8 +222,16 @@ export interface StalledLoopSummary {
   loop: string;
   /** Issue count per round, oldest first. Empty when the reviewer reported none. */
   issueCounts: number[];
-  /** Findings raised in more than one round — what iteration is failing to resolve. */
+  /** Blocking findings raised in more than one round — what iteration is failing to resolve. */
   recurring: string[];
+  /**
+   * Did anything at all repeat across rounds, blocking or not?
+   *
+   * Separates "the reviewers objected to something new every time" (a sign the
+   * target is underspecified) from "the same thing came back, but nobody was
+   * blocking on it".
+   */
+  repeatedAny?: boolean;
   /** Findings from the most recent round only, worst-first. */
   latest: Array<{ severity: string; filePath?: string; comment: string }>;
   /** The last reviewer's own summary. */
@@ -262,11 +269,74 @@ export function blockingFindings<T extends { severity: string }>(findings: T[]):
 }
 
 /**
+ * Which accumulated review array each revision loop writes into.
+ *
+ * All three loops produce the shared `ReviewVerdict` shape but keep it in a
+ * different field. This diagnostic was written for the coding loop and read
+ * `codeReviews` alone, so a planning loop that ran out of budget fell through
+ * to the bare "exhausted N attempts" comment with five reviews sitting unread
+ * in state — the exact failure the section exists to prevent, on the loop that
+ * hits it most often.
+ */
+const REVIEWS_BY_LOOP: Record<string, 'planReviews' | 'codeReviews' | 'testCaseReviews'> = {
+  planning: 'planReviews',
+  coding: 'codeReviews',
+  'test-cases': 'testCaseReviews',
+};
+
+/** A reviewer issue as any of the three reviewers writes it. */
+interface RawReviewIssue {
+  severity?: string;
+  /** code-reviewer */
+  comment?: string;
+  filePath?: string;
+  /** plan-reviewer and test-case-reviewer */
+  description?: string;
+  relatedObject?: string;
+  category?: string;
+  testCaseId?: number;
+}
+
+interface NormalisedIssue {
+  severity: string;
+  text: string;
+  where?: string;
+  /** Identity across rounds, for spotting an objection that keeps coming back. */
+  key: string;
+}
+
+/**
+ * Reduce the three reviewers' issue shapes to one.
+ *
+ * The plan reviewer calls the text `description` and the place `relatedObject`;
+ * the code reviewer calls them `comment` and `filePath`; the test-case reviewer
+ * points at a test case id. Same information, three spellings.
+ *
+ * The `key` decides what counts as "the same objection twice". Text is a poor
+ * identity — reviewers restate an objection in fresh words every round, so
+ * matching on the sentence finds nothing and the loop looks like it is arguing
+ * about something new each time. When a reviewer names both the thing and the
+ * kind of problem, that pair is the identity instead. A file path on its own is
+ * deliberately not enough: two unrelated objections in one file would collapse
+ * into a single phantom "recurring" item.
+ */
+function normaliseIssue(i: RawReviewIssue): NormalisedIssue | null {
+  const text = i.comment ?? i.description ?? '';
+  if (!text) return null;
+
+  const where =
+    i.filePath ?? i.relatedObject ?? (i.testCaseId != null ? `test case ${i.testCaseId}` : undefined);
+  const key = where && i.category ? `${where}::${i.category}` : text;
+
+  return { severity: i.severity ?? 'unknown', text, where, key };
+}
+
+/**
  * Pull everything a human needs to unblock a stalled loop out of accumulated
  * state. Returns null when the loop left no reviews to report on — there is
  * genuinely nothing to say, and inventing a section would be worse.
  *
- * Reads `codeReviews` structurally: it is typed as the shared `ReviewVerdict`
+ * Reads the reviews structurally: they are typed as the shared `ReviewVerdict`
  * minimum, and this formatter must not import agent output schemas.
  */
 export function summarizeStalledLoop(
@@ -274,41 +344,89 @@ export function summarizeStalledLoop(
   loop: string,
 ): StalledLoopSummary | null {
   if (!state) return null;
-  const reviews = (state.codeReviews ?? []) as Array<{
+
+  const field = REVIEWS_BY_LOOP[loop];
+  const reviews = ((field ? state[field] : undefined) ?? []) as Array<{
     verdict?: string;
     feedback?: string;
     revisionInstructions?: string;
-    issues?: Array<{ severity?: string; filePath?: string; comment?: string }>;
+    issues?: RawReviewIssue[];
   }>;
   if (reviews.length === 0) return null;
 
   const perRound = reviews.map((r) =>
-    (r.issues ?? []).map((i) => i.comment ?? '').filter(Boolean),
+    (r.issues ?? []).map(normaliseIssue).filter((i): i is NormalisedIssue => i !== null),
   );
   const last = reviews.at(-1);
 
-  const latest = [...(last?.issues ?? [])]
-    .map((i) => ({
-      severity: i.severity ?? 'unknown',
-      filePath: i.filePath,
-      comment: i.comment ?? '',
-    }))
-    .filter((i) => i.comment)
+  const latest = (perRound.at(-1) ?? [])
+    .map((i) => ({ severity: i.severity, filePath: i.where, comment: i.text }))
     .sort((a, b) => {
       const ai = SEVERITY_ORDER.indexOf(a.severity);
       const bi = SEVERITY_ORDER.indexOf(b.severity);
       return (ai < 0 ? SEVERITY_ORDER.length : ai) - (bi < 0 ? SEVERITY_ORDER.length : bi);
     });
 
+  const repeats = recurringObjections(perRound);
+
   return {
     loop,
     issueCounts: state.revisionIssueCounts?.[loop]
       ?? reviews.map((r) => (r.issues ?? []).length),
-    recurring: recurringFindings(perRound),
+    recurring: repeats.blocking,
+    repeatedAny: repeats.repeatedAny,
     latest,
     lastFeedback: last?.feedback,
     revisionInstructions: last?.revisionInstructions,
     attempts: state.revisionAttempts?.[loop],
+  };
+}
+
+/**
+ * Objections raised in more than one round and blocking in at least one.
+ *
+ * Grouped by `key` rather than by sentence, so a reviewer who rephrases the
+ * same complaint five times still shows up as one thing that is not getting
+ * fixed. Where the reviewer named the object, it leads the line — "which
+ * object" is the first thing a human needs to act on.
+ *
+ * Only blocking objections make the list. A reviewer restates accepted items
+ * every round as part of the record, and on work item 81098 three of the seven
+ * repeats were things the reviewer had explicitly allowed — one of them
+ * "flagged as a positive". Printed under a heading about what keeps coming
+ * back, an accepted note reads as an unresolved objection and sends the human
+ * to argue about something nobody is blocking on.
+ *
+ * `repeatedAny` reports whether ANYTHING repeated, blocking or not, so the
+ * caller can tell "nothing recurred" from "nothing blocking recurred" — the
+ * two call for opposite readings.
+ */
+function recurringObjections(rounds: NormalisedIssue[][]): {
+  blocking: string[];
+  repeatedAny: boolean;
+} {
+  const roundsSeen = new Map<string, number>();
+  /** Latest wording from a round where this objection actually blocked. */
+  const newestBlocking = new Map<string, NormalisedIssue>();
+
+  for (const round of rounds) {
+    for (const key of new Set(round.map((i) => i.key))) {
+      roundsSeen.set(key, (roundsSeen.get(key) ?? 0) + 1);
+    }
+    // Later rounds overwrite, so each key keeps its most recent blocking form.
+    for (const issue of blockingFindings(round)) newestBlocking.set(issue.key, issue);
+  }
+
+  const repeated = [...roundsSeen.entries()].filter(([, n]) => n > 1).map(([key]) => key);
+
+  return {
+    blocking: repeated
+      .filter((key) => newestBlocking.has(key))
+      .map((key) => {
+        const issue = newestBlocking.get(key)!;
+        return truncateFinding(issue.where ? `${issue.where} — ${issue.text}` : issue.text);
+      }),
+    repeatedAny: repeated.length > 0,
   };
 }
 
@@ -387,7 +505,7 @@ function renderStalledLoopHtml(s: StalledLoopSummary): string {
     p.push(`<ul>`);
     for (const f of s.recurring) p.push(`<li>${esc(f)}</li>`);
     p.push(`</ul>`);
-  } else if (s.issueCounts.length > 1) {
+  } else if (s.issueCounts.length > 1 && s.repeatedAny !== true) {
     p.push(
       `<p><i>No finding repeated across rounds — the reviewers raised <b>different</b> `
         + `objections each time. That usually means the target is underspecified rather `
