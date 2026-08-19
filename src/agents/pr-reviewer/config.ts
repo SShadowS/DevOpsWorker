@@ -250,7 +250,26 @@ function calleeGuide(mechanism: string): string {
       `disambiguate. Pass this instruction to every analysis sub-agent.`,
     ].join('\n');
   }
-  return ''; // none — baseline, no guide
+  // none — the baseline arm. It still needs a guide, because every sub-agent
+  // carries a rule saying to resolve a callee "using whichever callee-resolution
+  // tool the orchestrator's prompt told you is available" and then to state in the
+  // finding that the callee was confirmed. Returning nothing here left that rule
+  // pointing at a tool nobody named: an instruction to claim a confirmation with no
+  // instructed way to perform one. Telemetry says the sub-agents fell back to
+  // Grep/Read on their own, which is the outcome you want — this makes it the
+  // instructed path rather than a lucky habit.
+  //
+  // The repo is cloned at the cwd on every review, so this is always available.
+  return [
+    `## Resolving Called Procedures (source tree)`,
+    `The repo is cloned at the cwd. Before flagging anything that depends on what`,
+    `a CALLED procedure does — a transaction/commit boundary, a swallowed error,`,
+    `an IsHandled bail-out — open the callee and read it:`,
+    `- Find where it is defined → \`Grep\` for \`procedure <Name>\` across the repo`,
+    `- Then \`Read\` that file around the match for the body itself`,
+    `A callee you could not open is a finding you state as unverified, not one you`,
+    `describe as confirmed. Pass this instruction to every analysis sub-agent.`,
+  ].join('\n');
 }
 
 export function createPRReviewConfig(config: PipelineConfig, params: PRReviewParams): AgentConfig<typeof PRReviewSchema> {

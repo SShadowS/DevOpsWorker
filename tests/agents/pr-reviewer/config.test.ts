@@ -398,10 +398,14 @@ describe('createPRReviewConfig — buildPrompt', () => {
 
   // --- Callee guide (mechanism-dependent) ------------------------------------
 
-  test('mechanism "none" emits no callee guide', () => {
+  test('mechanism "none" emits the source-tree callee guide, not the LSP one', () => {
+    // Previously this arm emitted nothing at all. The sub-agents' resolve-the-callee
+    // rule defers to whatever the orchestrator names, so naming nothing left them
+    // instructed to claim a confirmation with no instructed way to perform one.
     process.env['CALLEE_MECHANISM'] = 'none';
     const prompt = buildPromptFor();
-    expect(prompt).not.toContain('Resolving Called Procedures');
+    expect(prompt).toContain('## Resolving Called Procedures (source tree)');
+    expect(prompt).not.toContain('AL LSP');
   });
 
   test('mechanism "lsp" injects the LSP callee guide', () => {
@@ -432,5 +436,71 @@ describe('createPRReviewConfig — buildPrompt', () => {
     expect(prompt).toContain('Resolving Called Procedures (AL LSP)');
     expect(prompt).toContain('## Cherry-Pick Detected');
     expect(prompt).toContain('Original PR: #123');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The baseline arm names a mechanism too.
+//
+// Every sub-agent carries a mandatory-shaped instruction: resolve a callee
+// before flagging behaviour that depends on it, "using whichever
+// callee-resolution tool the orchestrator's prompt told you is available", and
+// then say in the finding that you confirmed it. On the baseline arm the
+// orchestrator named NOTHING — calleeGuide('none') returned an empty string —
+// so the sub-agents were told to state a confirmation with no named way to
+// perform one. Telemetry says they fell back to Grep/Read, which is the good
+// outcome; naming that fallback makes it the instructed one rather than a
+// lucky guess.
+//
+// The repository is cloned at the agent's cwd on every review, so reading the
+// callee's source is always possible — this is not aspirational advice.
+// ---------------------------------------------------------------------------
+describe('createPRReviewConfig — the baseline arm names its fallback', () => {
+  const savedMechanism = process.env['CALLEE_MECHANISM'];
+  afterEach(() => {
+    if (savedMechanism === undefined) delete process.env['CALLEE_MECHANISM'];
+    else process.env['CALLEE_MECHANISM'] = savedMechanism;
+  });
+
+  function promptFor(mechanism?: string): string {
+    if (mechanism === undefined) delete process.env['CALLEE_MECHANISM'];
+    else process.env['CALLEE_MECHANISM'] = mechanism;
+    const config = createPRReviewConfig(mockConfig(), mockParams());
+    return config.buildPrompt!(createInitialState('pr-reviewer'), {} as never);
+  }
+
+  test('the unset mechanism still tells the reviewer how to resolve a callee', () => {
+    const prompt = promptFor(undefined);
+    expect(prompt).toContain('Resolving Called Procedures');
+  });
+
+  test('it names the source tree, which is what that arm actually has', () => {
+    const prompt = promptFor('none');
+    expect(prompt).toMatch(/Grep|Read/);
+  });
+
+  test('it does not promise the LSP tool that arm does not load', () => {
+    const prompt = promptFor('none');
+    expect(prompt).not.toContain('goToDefinition');
+    expect(prompt).not.toContain('LSP hover');
+  });
+
+  test('the lsp arm is unchanged — still the LSP guide', () => {
+    const prompt = promptFor('lsp');
+    expect(prompt).toContain('AL LSP');
+    expect(prompt).toContain('goToDefinition');
+  });
+
+  test('the treesitter arm is unchanged — still the al-symbol guide', () => {
+    const prompt = promptFor('treesitter');
+    expect(prompt).toContain('al-symbol');
+  });
+
+  test('every arm passes the instruction on to the sub-agents', () => {
+    // The sub-agents are the ones holding the resolve-the-callee rule, so a guide
+    // the orchestrator keeps to itself changes nothing.
+    for (const arm of [undefined, 'none', 'treesitter', 'lsp']) {
+      expect(promptFor(arm)).toContain('every analysis sub-agent');
+    }
   });
 });
