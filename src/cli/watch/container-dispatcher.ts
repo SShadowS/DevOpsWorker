@@ -324,7 +324,8 @@ export async function executeStartFresh(
         `To re-analyse from scratch, first <b>abandon or complete</b> the existing PR, ` +
         `then re-add the <code>analyse</code> tag.<br>` +
         `To iterate on existing code, use <code>/fix</code> or <code>/rerun-plan</code> comments instead.`;
-      await postWorkItemComment(workItemId, comment, pollingConfig).catch(() => {});
+      // Hand-written HTML above, so say html rather than leaning on the default.
+      await postWorkItemComment(workItemId, comment, pollingConfig, 'html').catch(() => {});
       await removeWorkItemTags(workItemId, ['analyse'], pollingConfig).catch(() => {});
       return;
     }

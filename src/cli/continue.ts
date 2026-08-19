@@ -7,7 +7,7 @@ import { loadConfigFromState } from './config.ts';
 import { buildPipelineContext } from './context.ts';
 import { formatTelemetrySummary } from '../formatters/devops-comment.ts';
 import { removeWorkItemTags, addWorkItemTags, postWorkItemComment, updateWorkItemFields } from '../sdk/azure-devops-client.ts';
-import { formatPlanComment, formatReadinessComment, formatConvergenceEscalation } from '../formatters/devops-comment.ts';
+import { STAGE_COMMENTS } from '../formatters/stage-comments.ts';
 import type { PipelineState } from '../types/pipeline.types.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import { join, resolve } from 'node:path';
@@ -76,12 +76,9 @@ export async function cont(args: string[]): Promise<void> {
   const logger = new PipelineLogger(logDir, workItemId, logSink(workItemId));
   context.logger = logger;
 
-  // Data-driven hooks (same as run.ts — duplicated here for simplicity)
-  const commentFormatters: Record<string, (wid: number, s: PipelineState) => string | null> = {
-    analyzer: (wid, s) => s.readiness ? formatReadinessComment(wid, s.readiness) : null,
-    planning: (wid, s) => s.devPlan ? formatPlanComment(wid, s.devPlan) : null,
-    coding: formatConvergenceEscalation,
-  };
+  // Data-driven hooks. The comment table is SHARED with run.ts — this file used
+  // to keep its own copy with the format dropped, so every plan comment on a
+  // resumed run was posted as html and rendered as one unreadable paragraph.
   const fieldUpdates: Record<string, Record<string, string>> = {
     analyzer:   { 'System.State': 'Active' },
     'draft-pr': { 'System.BoardColumn': 'In Code Review' },
@@ -97,11 +94,11 @@ export async function cont(args: string[]): Promise<void> {
     onStageComplete: async (stage, state) => {
       console.log(`  ✅ ${stage.name} completed`);
 
-      const format = commentFormatters[stage.name];
-      const comment = format?.(workItemId, state);
-      if (comment) {
+      const fmt = STAGE_COMMENTS[stage.name];
+      const comment = fmt?.fn(workItemId, state);
+      if (comment && fmt) {
         try {
-          await postWorkItemComment(workItemId, comment, config);
+          await postWorkItemComment(workItemId, comment, config, fmt.format);
           console.log(`  📝 Posted comment to work item`);
         } catch (err) {
           console.warn(`  ⚠️  Failed to post comment: ${err}`);

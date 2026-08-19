@@ -73,8 +73,10 @@ export async function reprovisionEnv(
     logWI(workItemId, 'Environment reprovisioned successfully');
   } catch (err) {
     logWIError(workItemId, 'Failed to reprovision environment', err);
+    // `formatErrorComment` emits HTML. It only switches to Markdown for a stalled
+    // revision loop, which needs state — and none is passed here.
     const comment = formatErrorComment(workItemId, 'env-reprovision', err instanceof Error ? err : new Error(String(err)));
-    await postWorkItemComment(workItemId, comment, config).catch(() => {});
+    await postWorkItemComment(workItemId, comment, config, 'html').catch(() => {});
     await addWorkItemTags(workItemId, ['need-input'], config).catch(() => {});
   }
 }

@@ -11,7 +11,8 @@ import type { PipelineConfig, PipelineState } from '../types/pipeline.types.ts';
 import type { RepoConfig } from '../config/repo-config.ts';
 import { getRepoConfig } from '../config/repos.ts';
 import { hydrateRegistryBestEffort } from '../config/hydrate.ts';
-import { formatPlanComment, formatReadinessComment, formatTelemetrySummary, formatConvergenceEscalation } from '../formatters/devops-comment.ts';
+import { formatTelemetrySummary } from '../formatters/devops-comment.ts';
+import { STAGE_COMMENTS } from '../formatters/stage-comments.ts';
 import { postWorkItemComment, addWorkItemTags, removeWorkItemTags, updateWorkItemFields } from '../sdk/azure-devops-client.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import { join, resolve } from 'node:path';
@@ -20,14 +21,6 @@ import { join, resolve } from 'node:path';
 // Data-driven comment hooks — maps stage name to a formatter function.
 // Adding future comment hooks = one line in this map, no callback changes.
 // ---------------------------------------------------------------------------
-
-const commentFormatters: Record<string, { fn: (wid: number, state: PipelineState) => string | null; format: 'html' | 'markdown' }> = {
-  analyzer: { fn: (wid, s) => s.readiness ? formatReadinessComment(wid, s.readiness) : null, format: 'html' },
-  planning: { fn: (wid, s) => s.devPlan ? formatPlanComment(wid, s.devPlan) : null, format: 'markdown' },
-  // Fires only when the loop escalated — the formatter returns null otherwise,
-  // so a normal `coding` completion posts nothing.
-  coding: { fn: formatConvergenceEscalation, format: 'markdown' },
-};
 
 // ---------------------------------------------------------------------------
 // Data-driven field updates — maps stage name to work item field changes.
@@ -144,7 +137,7 @@ export async function run(args: string[]): Promise<void> {
     onStageComplete: async (stage, state) => {
       console.log(`  ✅ ${stage.name} completed`);
 
-      const fmt = commentFormatters[stage.name];
+      const fmt = STAGE_COMMENTS[stage.name];
       const comment = fmt?.fn(workItemId, state);
       if (comment && fmt) {
         try {
