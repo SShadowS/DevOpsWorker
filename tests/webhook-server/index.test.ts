@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildReviewPrActionFeedback } from '../../src/webhook-server/index.ts';
+import { buildReviewPrActionFeedback, dedupScopeFor } from '../../src/webhook-server/index.ts';
 import type { PRWebhookEvent } from '../../src/webhook-server/parse.ts';
 
 // ---------------------------------------------------------------------------
@@ -63,5 +63,44 @@ describe('buildReviewPrActionFeedback', () => {
       prDescription: 'Cherry-picked from pull request !456',
       commentKey: '5001:1',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dedupScopeFor — which existing actions block a new review.
+//
+// The three triggers need three different answers, and getting this wrong is
+// expensive in one direction and silent in the other. A creation checks only
+// PENDING actions, so a PR whose earlier review already finished can be
+// reviewed again on a later trigger. A publish must check ALL actions instead:
+// a PR can be published more than once (draft -> published -> draft ->
+// published, which PR 53373 did), and with the pending-only rule each publish
+// after a finished review would buy another full review of the same code.
+// ---------------------------------------------------------------------------
+describe('dedupScopeFor', () => {
+  test('a creation is blocked only by a review still pending', () => {
+    const scope = dedupScopeFor(baseEvent({ eventType: 'git.pullrequest.created', commentKey: undefined }));
+    expect(scope).toEqual({ key: 'prId', value: '100', pendingOnly: true });
+  });
+
+  test('a published draft is blocked by ANY earlier review of the same PR', () => {
+    const scope = dedupScopeFor(baseEvent({
+      eventType: 'git.pullrequest.updated',
+      publishedFromDraft: true,
+      commentKey: undefined,
+    }));
+    expect(scope).toEqual({ key: 'prId', value: '100', pendingOnly: false });
+  });
+
+  test('a /review comment still dedups on the comment, not the PR', () => {
+    // Otherwise a human could never ask for a second look at a PR we already read.
+    const scope = dedupScopeFor(baseEvent({ commentKey: '7:42' }));
+    expect(scope).toEqual({ key: 'commentKey', value: '7:42', pendingOnly: false });
+  });
+
+  test('a comment on a PR that was also published dedups as a comment', () => {
+    // The human asked explicitly; that outranks the publish rule.
+    const scope = dedupScopeFor(baseEvent({ commentKey: '7:42', publishedFromDraft: true }));
+    expect(scope.key).toBe('commentKey');
   });
 });

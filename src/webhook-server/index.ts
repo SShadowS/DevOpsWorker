@@ -64,6 +64,30 @@ export function buildReviewPrActionFeedback(event: PRWebhookEvent, repoKey: stri
   });
 }
 
+/**
+ * Which existing actions block this event from queueing another review.
+ *
+ * Three triggers, three answers:
+ *
+ * - **A `/review` comment** dedups on the comment itself, across all actions. A human
+ *   asking for a second look must always get one, so the PR's review history is not
+ *   allowed to block it — only the same comment being delivered twice.
+ * - **A creation** dedups on the PR, but only against a review still pending. A PR is
+ *   created once, so there is nothing else to protect against.
+ * - **A published draft** dedups on the PR against ALL actions, pending or finished.
+ *   Unlike creation, publishing can happen repeatedly — draft → published → draft →
+ *   published — and with the creation rule every publish after a finished review would
+ *   buy a second full review of code already read. First publish reviews; after that a
+ *   human asks with `/review`.
+ */
+export function dedupScopeFor(
+  event: PRWebhookEvent,
+): { key: 'commentKey' | 'prId'; value: string; pendingOnly: boolean } {
+  if (event.commentKey) return { key: 'commentKey', value: event.commentKey, pendingOnly: false };
+  if (event.publishedFromDraft) return { key: 'prId', value: String(event.pr.id), pendingOnly: false };
+  return { key: 'prId', value: String(event.pr.id), pendingOnly: true };
+}
+
 export async function startWebhookServer(options: WebhookServerOptions): Promise<void> {
   const { port, webhookSecret } = options;
 
@@ -166,25 +190,26 @@ export async function startWebhookServer(options: WebhookServerOptions): Promise
           return Response.json({ ok: true, ignored: true, reason: 'pipeline PR' }, { status: 200 });
         }
 
-        // Dedup: comment-triggered reviews dedup by comment ID; PR-created reviews dedup by PR ID
-        if (event.commentKey) {
-          // Comment-triggered review: dedup by comment ID (check all actions, consumed or not)
-          const commentDupe = await webhookEventStore.hasMatchingAction(0, 'review-pr', 'commentKey', event.commentKey, false);
-          if (commentDupe) {
-            log(`Webhook ignored: comment ${event.commentKey} on PR #${event.pr.id} already triggered a review`);
-            return Response.json({ ok: true, ignored: true, reason: 'duplicate comment' }, { status: 200 });
-          }
-        } else {
-          // PR-created review: dedup by pending action for same PR
-          const pendingDupe = await webhookEventStore.hasMatchingAction(0, 'review-pr', 'prId', String(event.pr.id), true);
-          if (pendingDupe) {
-            log(`Webhook ignored: PR #${event.pr.id} already has a pending review`);
-            return Response.json({ ok: true, ignored: true, reason: 'duplicate' }, { status: 200 });
-          }
+        // Dedup — see `dedupScopeFor` for why the three triggers differ.
+        const scope = dedupScopeFor(event);
+        const dupe = await webhookEventStore.hasMatchingAction(0, 'review-pr', scope.key, scope.value, scope.pendingOnly);
+        if (dupe) {
+          const why = scope.key === 'commentKey'
+            ? `comment ${scope.value} on PR #${event.pr.id} already triggered a review`
+            : scope.pendingOnly
+              ? `PR #${event.pr.id} already has a pending review`
+              : `PR #${event.pr.id} was already reviewed — comment /review to ask for another`;
+          log(`Webhook ignored: ${why}`);
+          return Response.json(
+            { ok: true, ignored: true, reason: scope.key === 'commentKey' ? 'duplicate comment' : 'duplicate' },
+            { status: 200 },
+          );
         }
 
         // Queue the review action
-        const trigger = event.commentKey ? `/review comment ${event.commentKey}` : 'PR creation';
+        const trigger = event.commentKey
+          ? `/review comment ${event.commentKey}`
+          : event.publishedFromDraft ? 'draft published' : 'PR creation';
         log(`Queuing review for PR #${event.pr.id} in ${event.pr.repositoryName} (trigger: ${trigger})`);
         await actionStore.write({
           workItemId: 0,

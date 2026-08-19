@@ -266,3 +266,100 @@ describe('parseCommentKey', () => {
     expect(parseCommentKey('  246397:1  ')).toEqual({ threadId: 246397, commentId: 1 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Draft published — the one PR update worth acting on.
+//
+// A PR opened as a draft is skipped at creation by policy, and until now nothing
+// ever looked at it again: every `git.pullrequest.updated` was dropped, so the
+// moment its author published it passed unseen. In one week 28 PRs were created
+// as drafts and exactly 1 was ever reviewed, that one because a human typed
+// /review.
+//
+// Azure DevOps names the transition outright — the notification message reads
+// "<author> published the pull request" and the resource carries isDraft: false.
+// Both are required here: `isDraft: false` alone is true of EVERY update to a
+// published PR (a push, an approval, a reviewer change), so on its own it would
+// turn each of those into a review.
+// ---------------------------------------------------------------------------
+function prUpdatedPayload(
+  messageText: string,
+  resourceOverrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    eventType: 'git.pullrequest.updated',
+    createdDate: new Date().toISOString(),
+    message: { text: messageText },
+    resource: {
+      pullRequestId: 53373,
+      repository: {
+        id: 'repo-guid-123',
+        name: 'My Repo',
+        project: { id: 'proj-id', name: 'My Project' },
+      },
+      sourceRefName: 'refs/heads/userstory/80568-approvers-endpoint',
+      targetRefName: 'refs/heads/master',
+      status: 'active',
+      isDraft: false,
+      createdBy: { displayName: 'Jane Roe' },
+      ...resourceOverrides,
+    },
+  };
+}
+
+describe('parseWebhookPayload — a draft being published', () => {
+  test('is parsed, where every other update is still ignored', () => {
+    const result = parseWebhookPayload(prUpdatedPayload('Jane Roe published the pull request'));
+    expect(result).not.toBeNull();
+    expect(result!.pr.id).toBe(53373);
+  });
+
+  test('is marked as a publish, so the queueing side can tell it from a creation', () => {
+    const result = parseWebhookPayload(prUpdatedPayload('Jane Roe published the pull request'));
+    expect(result!.publishedFromDraft).toBe(true);
+  });
+
+  test('carries the branches the review needs', () => {
+    const result = parseWebhookPayload(prUpdatedPayload('Jane Roe published the pull request'));
+    expect(result!.pr.sourceBranch).toBe('refs/heads/userstory/80568-approvers-endpoint');
+    expect(result!.pr.targetBranch).toBe('refs/heads/master');
+    expect(result!.pr.isDraft).toBe(false);
+  });
+
+  test('a push to a published PR is still ignored', () => {
+    expect(parseWebhookPayload(prUpdatedPayload('Jane Roe updated pull request 53373'))).toBeNull();
+  });
+
+  test('an approval is still ignored', () => {
+    expect(parseWebhookPayload(prUpdatedPayload('Karolis Vaisnoras approved pull request 53373'))).toBeNull();
+  });
+
+  test('a reviewer-list change is still ignored', () => {
+    expect(parseWebhookPayload(prUpdatedPayload('Jane Roe changed the reviewer list for pull request 53373'))).toBeNull();
+  });
+
+  test('going the other way — published back to draft — is ignored', () => {
+    // PR 53373 did exactly this between its two publishes. isDraft is true here,
+    // and nothing should follow from it.
+    const payload = prUpdatedPayload('Jane Roe marked the pull request as a draft', { isDraft: true });
+    expect(parseWebhookPayload(payload)).toBeNull();
+  });
+
+  test('a publish message with isDraft still true is not trusted', () => {
+    // Belt and braces: the two signals disagree, so act on neither.
+    const payload = prUpdatedPayload('Jane Roe published the pull request', { isDraft: true });
+    expect(parseWebhookPayload(payload)).toBeNull();
+  });
+
+  test('an update with no message at all is ignored rather than throwing', () => {
+    const payload = prUpdatedPayload('x');
+    delete (payload as Record<string, unknown>)['message'];
+    expect(parseWebhookPayload(payload)).toBeNull();
+  });
+
+  test('replay protection applies to publishes too', () => {
+    const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const payload = { ...prUpdatedPayload('Jane Roe published the pull request'), createdDate: stale };
+    expect(() => parseWebhookPayload(payload)).toThrow('too old');
+  });
+});
