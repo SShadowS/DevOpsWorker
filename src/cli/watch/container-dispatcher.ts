@@ -89,6 +89,13 @@ export function getContainerEnv(): Record<string, string> {
     PR_REVIEW_AGENT_ROUTING: process.env['PR_REVIEW_AGENT_ROUTING'] ?? '',
     PR_REVIEW_SCOPED_PAYLOAD: process.env['PR_REVIEW_SCOPED_PAYLOAD'] ?? '',
     PR_REVIEW_SECURITY_BC_ONLY: process.env['PR_REVIEW_SECURITY_BC_ONLY'] ?? '',
+    // Which callee-resolution mechanism the reviewer is told it has: 'lsp',
+    // 'treesitter' (the al-symbol Bash helper, which ships in every image), or
+    // 'none'. Unset resolves to 'none', so listing it changes nothing on its own —
+    // it makes the arm reachable at all. Until now it was missing from this list,
+    // which is exactly the failure the comment above warns about: an arm could be
+    // set on the host, forwarded nowhere, and silently measured as the baseline.
+    CALLEE_MECHANISM: process.env['CALLEE_MECHANISM'] ?? '',
     // Git identity inside pipeline containers. Email must be authorized in the
     // AL Object ID Ninja backend app pool; name marks commits as AI-made.
     GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',
