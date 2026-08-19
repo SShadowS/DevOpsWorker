@@ -12,7 +12,12 @@ import type { StageTokenUsage, StageModelUsage, SubAgentUsage } from '../types/p
 // `query()` at the module boundary.
 // ---------------------------------------------------------------------------
 
-/** Max chars to log for tool results (prevents huge log files from file reads). */
+/**
+ * Max chars to log for tool results (prevents huge log files from file reads).
+ *
+ * Does NOT apply to what a sub-agent hands back — see the tool_result branch in
+ * `consumeAgentStream`.
+ */
 const TOOL_RESULT_LOG_LIMIT = 2000;
 
 // ---------------------------------------------------------------------------
@@ -286,10 +291,30 @@ export async function consumeAgentStream(
             const resultText = typeof block.content === 'string'
               ? block.content
               : JSON.stringify(block.content);
-            const truncated = resultText.length > TOOL_RESULT_LOG_LIMIT
+
+            // A sub-agent's reply is logged whole; every other tool result is
+            // capped. The cap was written to stop one `grep -rn` over a repo
+            // from filling the log, and that is still worth doing — but it also
+            // fell on the one tool result that IS the product. What the seven
+            // review sub-agents hand back is the entire evidence base the
+            // orchestrator writes its findings from, and it averages 4,245
+            // chars: 110 of 129 returns measured over three days were cut in
+            // half. That left the stored record of a review unable to answer
+            // "what was this finding actually based on", and unable to be
+            // replayed against a different synthesis prompt.
+            //
+            // `subAgentByToolUseId` already holds exactly the right ids — it is
+            // populated from every Task/Agent dispatch a few lines above for
+            // sub-agent attribution, so this needs no new bookkeeping. An id we
+            // never saw dispatched stays capped: we cannot tell what it is, and
+            // defaulting to unbounded would hand the cap's fate to a dropped
+            // message.
+            const isSubAgentReport = block.tool_use_id != null
+              && subAgentByToolUseId.has(block.tool_use_id);
+            const logged = !isSubAgentReport && resultText.length > TOOL_RESULT_LOG_LIMIT
               ? resultText.slice(0, TOOL_RESULT_LOG_LIMIT) + `\n... (truncated, ${resultText.length} chars total)`
               : resultText;
-            logger?.logPrompt(`TOOL RESULT (${block.tool_use_id ?? 'unknown'})`, truncated);
+            logger?.logPrompt(`TOOL RESULT (${block.tool_use_id ?? 'unknown'})`, logged);
           }
         }
       }

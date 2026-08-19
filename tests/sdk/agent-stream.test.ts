@@ -771,3 +771,120 @@ describe('consumeAgentStream — tool call and result share an id', () => {
     expect(logger.logJson).toHaveBeenCalledWith('TOOL INPUT: Bash', { command: 'git status' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sub-agent reports are logged whole
+//
+// Tool results were capped at 2,000 chars to stop a `grep -rn` dump filling the
+// log. That cap also fell on the one tool result that IS the product: what a
+// sub-agent hands back to the orchestrator. Measured over three days, 110 of
+// 129 sub-agent returns were cut, average true length 4,245 chars — so the
+// stored record of a review held roughly half the evidence its findings were
+// written from, and could not be replayed against a different prompt.
+// ---------------------------------------------------------------------------
+
+describe('tool result logging', () => {
+  const LIMIT = 2000;
+
+  /** A dispatch to a sub-agent, then that sub-agent's reply. */
+  function dispatchAndReply(toolName: string, toolUseId: string, reply: string) {
+    return [
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: toolUseId, name: toolName, input: { subagent_type: 'code-review-validator' } },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: toolUseId, content: reply }] },
+      },
+    ];
+  }
+
+  function loggedResult(fake: ReturnType<typeof fakeLogger>): string {
+    const calls = fake.logPrompt.mock.calls as unknown as unknown[][];
+    const call = calls.find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('TOOL RESULT'),
+    );
+    return typeof call?.[1] === 'string' ? call[1] : '';
+  }
+
+  test('keeps a sub-agent report in full', async () => {
+    const report = 'FINDING: '.repeat(900); // ~8k chars, past the old cap
+    const fake = fakeLogger();
+
+    await consumeAgentStream(
+      asStream(fakeMessages(...dispatchAndReply('Agent', 'toolu_sub1', report))),
+      { agentName: 'pr-reviewer', logger: asLogger(fake) } as never,
+    );
+
+    const logged = loggedResult(fake);
+    expect(logged).toBe(report);
+    expect(logged).not.toContain('truncated');
+  });
+
+  test('keeps a report from the Task tool too', async () => {
+    // Both spellings dispatch a sub-agent; the id map already treats them alike.
+    const report = 'x'.repeat(LIMIT + 500);
+    const fake = fakeLogger();
+
+    await consumeAgentStream(
+      asStream(fakeMessages(...dispatchAndReply('Task', 'toolu_sub2', report))),
+      { agentName: 'pr-reviewer', logger: asLogger(fake) } as never,
+    );
+
+    expect(loggedResult(fake)).toBe(report);
+  });
+
+  test('still caps an ordinary tool result', async () => {
+    // The cap exists for a reason: one `grep -rn` over a repo is worth more
+    // log volume than every sub-agent report in the run put together.
+    const dump = 'y'.repeat(LIMIT + 500);
+    const fake = fakeLogger();
+
+    await consumeAgentStream(
+      asStream(fakeMessages(
+        {
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'toolu_bash1', name: 'Bash', input: { command: 'grep -rn x .' } }] },
+        },
+        { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_bash1', content: dump }] } },
+      )),
+      { agentName: 'pr-reviewer', logger: asLogger(fake) } as never,
+    );
+
+    const logged = loggedResult(fake);
+    expect(logged.length).toBeLessThan(dump.length);
+    expect(logged).toContain(`truncated, ${dump.length} chars total`);
+  });
+
+  test('caps a result whose dispatch was never seen', async () => {
+    // No matching tool_use means we cannot tell what this is, and an unbounded
+    // default would put the cap back at the mercy of a dropped message.
+    const dump = 'z'.repeat(LIMIT + 500);
+    const fake = fakeLogger();
+
+    await consumeAgentStream(
+      asStream(fakeMessages(
+        { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_orphan', content: dump }] } },
+      )),
+      { agentName: 'pr-reviewer', logger: asLogger(fake) } as never,
+    );
+
+    expect(loggedResult(fake)).toContain('truncated');
+  });
+
+  test('leaves a short result untouched either way', async () => {
+    const fake = fakeLogger();
+
+    await consumeAgentStream(
+      asStream(fakeMessages(...dispatchAndReply('Agent', 'toolu_sub3', 'no findings'))),
+      { agentName: 'pr-reviewer', logger: asLogger(fake) } as never,
+    );
+
+    expect(loggedResult(fake)).toBe('no findings');
+  });
+});
