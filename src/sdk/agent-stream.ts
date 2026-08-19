@@ -252,10 +252,21 @@ export async function consumeAgentStream(
             logger?.setAgentName(resolveActiveAgent(parentToolUseId, subAgentByToolUseId, agentName));
             process.stderr.write(`[${agentName}]   ↳ tool: ${toolName}\n`);
             logger?.log(`  tool: ${toolName}`);
-            // Log tool input to file (not console — too verbose)
+            // Log tool input to file (not console — too verbose).
+            //
+            // The label carries the SDK's `tool_use_id` so this block can be paired
+            // with the `TOOL RESULT (<id>)` block written further down. Without it the
+            // two halves shared no identifier — the input knew the tool name, the
+            // result knew the id — and a log could only be read back by assuming the
+            // next result belongs to the last call. That assumption does not survive
+            // the seven sub-agents running at once.
+            //
+            // Appended, not inserted: `TOOL INPUT: LSP` still leads the label, so
+            // every existing `content LIKE '%TOOL INPUT: LSP%'` query keeps working.
             if (block.input != null) {
               try {
-                logger?.logJson(`TOOL INPUT: ${toolName}`, block.input);
+                const label = block.id ? `TOOL INPUT: ${toolName} (${block.id})` : `TOOL INPUT: ${toolName}`;
+                logger?.logJson(label, block.input);
               } catch {
                 // Best-effort
               }

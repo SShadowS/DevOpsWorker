@@ -712,3 +712,62 @@ describe('consumeAgentStream subAgents — background tasks', () => {
     expect(out.subAgents).toEqual({});
   });
 });
+
+// ---------------------------------------------------------------------------
+// Pairing a tool call with its result.
+//
+// Both halves are logged, but until now they shared no identifier: the input
+// block carried the tool name and no id, the result block carried the id and no
+// name. Reading a log back, you could see that an LSP call happened and,
+// separately, that some result arrived — and could only guess which belonged to
+// which by their order in time. Anything concurrent (the seven sub-agents run in
+// parallel) made even that unreliable.
+//
+// The id is the SDK's own `tool_use_id`, already present on both messages.
+// ---------------------------------------------------------------------------
+describe('consumeAgentStream — tool call and result share an id', () => {
+  test('the input label carries the tool_use_id', async () => {
+    const logger = fakeLogger();
+    await consumeAgentStream(
+      asStream(fakeMessages(
+        initMessage(),
+        assistantToolUse('LSP', { id: 'toolu_abc123', input: { operation: 'hover', line: 65 } }),
+        resultSuccess(),
+      )),
+      { logger: asLogger(logger), agentName: 'pr-reviewer' },
+    );
+    expect(logger.logJson).toHaveBeenCalledWith(
+      'TOOL INPUT: LSP (toolu_abc123)',
+      { operation: 'hover', line: 65 },
+    );
+  });
+
+  test('the tool name still leads the label, so filtering by tool keeps working', async () => {
+    // Existing queries do `content LIKE '%TOOL INPUT: LSP%'`; the id is appended
+    // rather than inserted so none of them have to change.
+    const logger = fakeLogger();
+    await consumeAgentStream(
+      asStream(fakeMessages(
+        initMessage(),
+        assistantToolUse('LSP', { id: 'toolu_abc123', input: { operation: 'hover' } }),
+        resultSuccess(),
+      )),
+      { logger: asLogger(logger), agentName: 'pr-reviewer' },
+    );
+    const labels = logger.logJson.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(labels.some((l) => l.startsWith('TOOL INPUT: LSP'))).toBe(true);
+  });
+
+  test('a call with no id still logs, without an empty bracket', async () => {
+    const logger = fakeLogger();
+    await consumeAgentStream(
+      asStream(fakeMessages(
+        initMessage(),
+        assistantToolUse('Bash', { input: { command: 'git status' } }),
+        resultSuccess(),
+      )),
+      { logger: asLogger(logger), agentName: 'pr-reviewer' },
+    );
+    expect(logger.logJson).toHaveBeenCalledWith('TOOL INPUT: Bash', { command: 'git status' });
+  });
+});
