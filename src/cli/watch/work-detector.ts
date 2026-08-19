@@ -49,6 +49,13 @@ export interface CheckpointScan {
   fixTestSource: 'work-item-comment' | 'pr-comment' | null;
   /** Fetched only when /fix-test matched; undefined if the fetch failed. */
   testCaseFailures?: TestCaseFailure[];
+  /**
+   * The item's loaded state. The gather layer already has it (it loaded the
+   * state to decide the item was scannable at all), and the decision needs it
+   * for two things: where a `/fix` can actually go (see `resolveFixTarget`),
+   * and the current attempt counts, which the refill below must preserve.
+   */
+  state: PipelineState | null;
 }
 
 export interface PrCompletedItem {
@@ -156,6 +163,49 @@ export interface ApplyRerunOptions {
   targetStage: string;
   /** Only meaningful for mode 'fix-test'. */
   testCaseFailures?: TestCaseFailure[];
+  /**
+   * Whether the coder should take its "fix the existing branch" path, which is
+   * what `rerunMode` selects. Pass false when no branch exists yet: that prompt
+   * reads `state.changeset.branchName`, so setting `rerunMode` without a
+   * changeset kills the stage. Defaults to true, matching the old behaviour.
+   * Use `resolveFixTarget` to decide rather than guessing.
+   */
+  fixExistingBranch?: boolean;
+}
+
+/**
+ * Stage names that are revision loops, so a rerun into one can refill its
+ * attempt budget. A human answering a stalled loop is a new starting
+ * condition, not another automatic retry; without the refill the loop reads
+ * its spent counter and throws `RevisionExhaustedError` before running
+ * anything, so the answer changes nothing.
+ */
+const REVISION_LOOPS = new Set(['planning', 'coding', 'test-cases']);
+
+/**
+ * Where a `/fix` (or `/fix-test`) can actually go, and whether the coder may
+ * take its fix-the-existing-branch path.
+ *
+ * `/fix` means "fix the code on the existing branch". That branch only exists
+ * once coding has produced a changeset. On work item 81098 the *planning* loop
+ * ran out of budget, the error comment told the human to answer with `/fix`,
+ * and `/fix` rewound to a coding stage that had never run — the coder's fix
+ * prompt then read a branch name off an absent changeset and the stage died
+ * with "undefined is not an object (evaluating 'changeset.branchName')".
+ *
+ * With no changeset the answer belongs to the stage that actually stopped, and
+ * that stage runs its normal prompt, which already renders `humanFeedback`.
+ * A null state means the caller has nothing to judge on, so keep the old
+ * behaviour — the gather layer always has state, only fixtures do not.
+ */
+export function resolveFixTarget(
+  state: PipelineState | null | undefined,
+): { targetStage: string; fixExistingBranch: boolean } {
+  if (!state || state.changeset) return { targetStage: 'coding', fixExistingBranch: true };
+
+  const stopped = state.error?.stage;
+  const targetStage = stopped === 'planning' || !state.devPlan ? 'planning' : 'coding';
+  return { targetStage, fixExistingBranch: false };
 }
 
 const RERUN_COMMAND_PREFIX: Record<RerunMode, RegExp> = {
@@ -167,25 +217,36 @@ const RERUN_COMMAND_PREFIX: Record<RerunMode, RegExp> = {
 /**
  * Apply the rerun state-delta: clears error/checkpoint, records
  * revisionFeedback + humanFeedback (command prefix stripped from the
- * feedback text), and sets rerunMode for fix/fix-test (rerun-plan sets no
- * rerunMode key at all, matching the original per-mode behaviour).
+ * feedback text), refills the target loop's attempt budget, and sets rerunMode
+ * for fix/fix-test (rerun-plan sets no rerunMode key at all, matching the
+ * original per-mode behaviour; `fixExistingBranch: false` suppresses it too).
  *
  * `humanFeedback.source` only accepts 'work-item-comment' | 'pr-comment' —
  * there is no dashboard-authored comment to attribute — so a 'dashboard'
  * revisionFeedback source maps to 'work-item-comment' here, matching what
  * the original dashboard action arms hardcoded.
  *
- * Pass `{}` to build a standalone delta (the pure decision below); pass a
- * loaded `PipelineState` to mutate it in place (the dashboard action arm).
+ * Pass a partial to build a standalone delta (the pure decision below, which
+ * seeds it with the item's current attempt counts); pass a loaded
+ * `PipelineState` to mutate it in place (the dashboard action arm).
  * Mutates and returns its first argument.
  */
 export function applyRerun(state: Partial<PipelineState>, opts: ApplyRerunOptions): Partial<PipelineState> {
-  const { mode, feedback, source, targetStage, testCaseFailures } = opts;
+  const { mode, feedback, source, targetStage, testCaseFailures, fixExistingBranch } = opts;
 
   state.error = undefined;
   state.checkpoint = undefined;
-  if (mode !== 'rerun-plan') state.rerunMode = mode;
+  if (mode !== 'rerun-plan' && fixExistingBranch !== false) state.rerunMode = mode;
   state.revisionFeedback = { source, feedback, targetStage };
+
+  // Refill the target loop's attempt budget — the human's answer is a new
+  // starting condition, not another automatic retry. Skipped when the caller
+  // passed no attempt counts (a bare `{}` delta from a fixture): writing a
+  // partial map would wipe the other loops' counters, because the watcher
+  // merges the delta with Object.assign.
+  if (REVISION_LOOPS.has(targetStage) && state.revisionAttempts) {
+    state.revisionAttempts = { ...state.revisionAttempts, [targetStage]: 0 };
+  }
 
   const message = feedback.replace(RERUN_COMMAND_PREFIX[mode], '').trim();
   const humanFeedbackSource: 'work-item-comment' | 'pr-comment' = source === 'pr-comment' ? 'pr-comment' : 'work-item-comment';
@@ -202,13 +263,23 @@ export function applyRerun(state: Partial<PipelineState>, opts: ApplyRerunOption
 
 /** Translate a checkpoint comment scan into a rerun action, honouring precedence. */
 function decideCheckpointScan(scan: CheckpointScan): DetectedAction | null {
-  const { id, rerunPlanFeedback, fixFeedback, fixTestFeedback, fixTestSource, testCaseFailures } = scan;
+  const { id, rerunPlanFeedback, fixFeedback, fixTestFeedback, fixTestSource, testCaseFailures, state } = scan;
+
+  // Seed the delta with the item's current attempt counts so `applyRerun` can
+  // zero one loop without dropping the others — the watcher merges the delta
+  // with Object.assign, which replaces the map wholesale.
+  const seed = (): Partial<PipelineState> =>
+    state?.revisionAttempts ? { revisionAttempts: { ...state.revisionAttempts } } : {};
+
+  /** Tags to clear for a rerun into `targetStage`. */
+  const tagsFor = (targetStage: string): string[] =>
+    targetStage === 'planning' ? ['need-input', 'plan-approved'] : ['need-input'];
 
   if (rerunPlanFeedback) {
     return {
       kind: 'rerun',
       workItemId: id,
-      stateDelta: applyRerun({}, {
+      stateDelta: applyRerun(seed(), {
         mode: 'rerun-plan', feedback: rerunPlanFeedback, source: 'work-item-comment', targetStage: 'planning',
       }),
       tagOps: { remove: ['need-input', 'plan-approved'] },
@@ -217,26 +288,32 @@ function decideCheckpointScan(scan: CheckpointScan): DetectedAction | null {
   }
 
   if (fixFeedback) {
+    const { targetStage, fixExistingBranch } = resolveFixTarget(state);
     return {
       kind: 'rerun',
       workItemId: id,
-      stateDelta: applyRerun({}, {
-        mode: 'fix', feedback: fixFeedback, source: 'work-item-comment', targetStage: 'coding',
+      stateDelta: applyRerun(seed(), {
+        mode: 'fix', feedback: fixFeedback, source: 'work-item-comment', targetStage, fixExistingBranch,
       }),
-      tagOps: { remove: ['need-input'] },
-      log: 'Found /fix comment — restarting coding',
+      tagOps: { remove: tagsFor(targetStage) },
+      log: fixExistingBranch
+        ? 'Found /fix comment — restarting coding'
+        : `Found /fix comment, but no code exists yet — restarting ${targetStage} with the answer`,
     };
   }
 
   if (fixTestFeedback && fixTestSource) {
+    const { targetStage, fixExistingBranch } = resolveFixTarget(state);
     return {
       kind: 'rerun',
       workItemId: id,
-      stateDelta: applyRerun({}, {
-        mode: 'fix-test', feedback: fixTestFeedback, source: fixTestSource, targetStage: 'coding', testCaseFailures,
+      stateDelta: applyRerun(seed(), {
+        mode: 'fix-test', feedback: fixTestFeedback, source: fixTestSource, targetStage, testCaseFailures, fixExistingBranch,
       }),
-      tagOps: { remove: ['need-input'] },
-      log: 'Found /fix-test comment — fetching test case failures and restarting coding',
+      tagOps: { remove: tagsFor(targetStage) },
+      log: fixExistingBranch
+        ? 'Found /fix-test comment — fetching test case failures and restarting coding'
+        : `Found /fix-test comment, but no code exists yet — restarting ${targetStage} with the answer`,
     };
   }
 

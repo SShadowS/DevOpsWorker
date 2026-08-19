@@ -241,6 +241,31 @@ export interface StalledLoopSummary {
   attempts?: number;
 }
 
+/**
+ * The comment a human replies with to answer a stalled loop, per loop.
+ *
+ * This is not cosmetic: each command is hardwired to a stage it rewinds to.
+ * `/fix` rewinds to `coding` and puts the coder on its "fix the existing
+ * branch" path, which reads the branch name off `state.changeset`. A planning
+ * loop stalls before any code exists, so quoting `/fix` there sends the human's
+ * answer to a stage that has nothing to fix — on work item 81098 that killed
+ * the run with "undefined is not an object (evaluating 'changeset.branchName')".
+ * `/rerun-plan` rewinds to `planning`, where the planner reads the answer.
+ *
+ * The test-cases loop runs after coding, so a changeset exists by then and
+ * `/fix` is the right command: it re-runs the coder, and the test cases follow.
+ */
+const REPLY_COMMAND_BY_LOOP: Record<string, string> = {
+  planning: '/rerun-plan',
+  coding: '/fix',
+  'test-cases': '/fix',
+};
+
+/** The reply command for a stalled loop, defaulting to the coding one. */
+function replyCommand(loop: string): string {
+  return REPLY_COMMAND_BY_LOOP[loop] ?? '/fix';
+}
+
 const SEVERITY_ORDER = ['critical', 'major', 'minor', 'suggestion'];
 
 /**
@@ -471,7 +496,7 @@ export function formatErrorComment(
     // producer against the same reviewers that just deadlocked.
     parts.push(
       `<li><b>Answer and resume</b> — comment `
-        + `<code>/fix &lt;which findings to fix, which to drop, and why&gt;</code>. `
+        + `<code>${replyCommand(stalled.loop)} &lt;which findings to fix, which to drop, and why&gt;</code>. `
         + `This is the only option that changes the inputs.</li>`,
     );
   }
@@ -804,7 +829,7 @@ export function formatStalledLoopComment(
     `Reply in one comment. Naming the numbers is enough — you do not need to restate the findings.`,
     '',
     '```',
-    `/fix fix ${example}; drop ${dropExample} (out of scope); the reviewers are missing <...>`,
+    `${replyCommand(s.loop)} fix ${example}; drop ${dropExample} (out of scope); the reviewers are missing <...>`,
     '```',
     '',
   );

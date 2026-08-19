@@ -45,6 +45,7 @@ function scan(overrides: Partial<CheckpointScan> & { id: number }): CheckpointSc
     fixFeedback: null,
     fixTestFeedback: null,
     fixTestSource: null,
+    state: null,
     ...overrides,
   };
 }
@@ -445,5 +446,87 @@ describe('detectWork — continue tag', () => {
       planApproved: [{ id: 101, state: st }],
     }));
     expect(actions.map((a) => a.kind)).toEqual(['continue']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /fix when there is no code yet
+//
+// Work item 81098: the planning loop ran out of budget, the pipeline told the
+// human to answer with `/fix`, and `/fix` is hardwired to rewind to `coding`.
+// Coding had never run, so the coder's fix prompt read a branch name off a
+// changeset that did not exist and the stage died with
+// "undefined is not an object (evaluating 'changeset.branchName')".
+//
+// A `/fix` only means "fix the existing branch" once a branch exists. Without
+// one, the answer belongs to the stage that actually stopped.
+// ---------------------------------------------------------------------------
+
+const CHANGESET = { branchName: 'bug/#1-x', filesCreated: [], filesModified: [] } as unknown as PipelineState['changeset'];
+
+describe('detectWork — /fix routes to the stage that can use it', () => {
+  test('with a changeset: coding, on the fix-the-branch path', () => {
+    const state = baseState({ changeset: CHANGESET, error: { type: 'unknown', stage: 'coding', message: 'x', timestamp: 't' } });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 340, fixFeedback: '/fix null-ref', state })] }))[0]!;
+    expect(a.stateDelta!.rerunMode).toBe('fix');
+    expect(a.stateDelta!.revisionFeedback!.targetStage).toBe('coding');
+  });
+
+  test('planning stalled and no code exists: goes to planning, not coding', () => {
+    const state = baseState({
+      devPlan: {} as PipelineState['devPlan'],
+      error: { type: 'revision-exhausted', stage: 'planning', message: 'exhausted', timestamp: 't' },
+      revisionAttempts: { planning: 5 },
+    });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 341, fixFeedback: '/fix drop finding 3', state })] }))[0]!;
+
+    expect(a.stateDelta!.revisionFeedback!.targetStage).toBe('planning');
+    // No rerunMode: that is what puts the coder on the prompt that reads
+    // `state.changeset`, and there is no changeset.
+    expect(a.stateDelta!.rerunMode).toBeUndefined();
+    // The human's answer is not thrown away.
+    expect(a.stateDelta!.humanFeedback!.rerunComment).toBe('drop finding 3');
+    // A rerun into planning also clears the stale plan-approved tag.
+    expect(a.tagOps!.remove).toEqual(['need-input', 'plan-approved']);
+  });
+
+  test('answering a stalled loop buys it a fresh attempt budget', () => {
+    const state = baseState({
+      error: { type: 'revision-exhausted', stage: 'planning', message: 'exhausted', timestamp: 't' },
+      revisionAttempts: { planning: 5, coding: 2 },
+    });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 342, fixFeedback: '/fix answer', state })] }))[0]!;
+    // Without this the loop throws RevisionExhaustedError before running anything.
+    expect(a.stateDelta!.revisionAttempts!.planning).toBe(0);
+    // Other loops keep their spent budget — the delta is merged with Object.assign,
+    // so a partial map here would wipe them.
+    expect(a.stateDelta!.revisionAttempts!.coding).toBe(2);
+  });
+
+  test('/rerun-plan also refills the planning budget', () => {
+    const state = baseState({
+      error: { type: 'revision-exhausted', stage: 'planning', message: 'exhausted', timestamp: 't' },
+      revisionAttempts: { planning: 5 },
+    });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 343, rerunPlanFeedback: '/rerun-plan redo it', state })] }))[0]!;
+    expect(a.stateDelta!.revisionAttempts!.planning).toBe(0);
+  });
+
+  test('coding stopped before producing a changeset: coding, but not the fix-the-branch path', () => {
+    const state = baseState({
+      devPlan: {} as PipelineState['devPlan'],
+      error: { type: 'unknown', stage: 'coding', message: 'container died', timestamp: 't' },
+    });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 344, fixFeedback: '/fix use the other API', state })] }))[0]!;
+    expect(a.stateDelta!.revisionFeedback!.targetStage).toBe('coding');
+    expect(a.stateDelta!.rerunMode).toBeUndefined();
+  });
+
+  test('/fix-test without a changeset does not set rerunMode either', () => {
+    const state = baseState({ error: { type: 'revision-exhausted', stage: 'planning', message: 'x', timestamp: 't' } });
+    const a = detectWork(inputs({
+      checkpointScans: [scan({ id: 345, fixTestFeedback: '/fix-test steps', fixTestSource: 'work-item-comment', state })],
+    }))[0]!;
+    expect(a.stateDelta!.rerunMode).toBeUndefined();
   });
 });

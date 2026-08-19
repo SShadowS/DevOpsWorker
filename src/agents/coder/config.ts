@@ -122,6 +122,7 @@ export function buildCodeRevisionSection(state: PipelineState): string[] {
   return parts;
 }
 
+/** Callers must check `state.changeset` first — see `buildPrompt` below. */
 export function buildFixPrompt(state: PipelineState, workItemId: number): string {
   const changeset = state.changeset!;
 
@@ -158,6 +159,7 @@ export function buildFixPrompt(state: PipelineState, workItemId: number): string
   return parts.join('\n');
 }
 
+/** Callers must check `state.changeset` first — see `buildPrompt` below. */
 export function buildFixTestPrompt(state: PipelineState, workItemId: number): string {
   const changeset = state.changeset!;
   const failures = state.humanFeedback?.testCaseFailures ?? [];
@@ -353,12 +355,20 @@ export function createCoderConfig(config: PipelineConfig): AgentConfig<typeof Ch
     cwd: config.paths.sessionRoot,
 
     buildPrompt(state: PipelineState, ctx: PipelineContext): string {
-      if (state.rerunMode === 'fix') {
-        return buildFixPrompt(state, ctx.workItemId);
-      }
+      // Both rerun prompts tell the coder to check out an existing branch, which
+      // only exists once a previous run reported a changeset. Without one they
+      // used to read `changeset.branchName` off undefined and kill the stage
+      // (work item 81098). Callers now check before setting `rerunMode` — this is
+      // the net for state written by an older build or by the checkpoint path.
+      // The fresh prompt renders the same human feedback, so nothing is lost.
+      if (state.changeset) {
+        if (state.rerunMode === 'fix') {
+          return buildFixPrompt(state, ctx.workItemId);
+        }
 
-      if (state.rerunMode === 'fix-test') {
-        return buildFixTestPrompt(state, ctx.workItemId);
+        if (state.rerunMode === 'fix-test') {
+          return buildFixTestPrompt(state, ctx.workItemId);
+        }
       }
 
       const devPlan = state.devPlan!;

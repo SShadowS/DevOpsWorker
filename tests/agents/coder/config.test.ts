@@ -465,3 +465,55 @@ describe('buildFixTestPrompt', () => {
     expect(result).toContain('Test Case Failures to Fix');
   });
 });
+
+// ---------------------------------------------------------------------------
+// The last-resort net: rerunMode without a changeset
+//
+// `rerunMode: 'fix'` selects the prompt that tells the coder to check out an
+// existing branch, and that prompt reads `state.changeset.branchName`. Every
+// caller now checks for a changeset before setting rerunMode (see
+// `resolveFixTarget`), but the checkpoint path sets it directly and state
+// survives across deploys, so the coder must not die on the combination.
+// Work item 81098 died exactly here.
+// ---------------------------------------------------------------------------
+
+describe('coder buildPrompt — rerunMode with no changeset', () => {
+  const cfg = createCoderConfig(mockPipelineConfig());
+  const ctx = { workItemId: 81098, workItemType: 'Bug', config: mockPipelineConfig() } as unknown as PipelineContext;
+
+  test('falls back to the implement-the-plan prompt instead of throwing', () => {
+    const state = freshState({
+      rerunMode: 'fix',
+      devPlan: { summary: 'replace the bracket design' } as any,
+      humanFeedback: { rerunComment: 'drop finding 3', source: 'work-item-comment' as const },
+    });
+
+    const prompt = cfg.buildPrompt(state, ctx);
+    expect(prompt).toContain('Create the feature branch');
+    expect(prompt).not.toContain('Check out the existing branch');
+    // The human's answer still reaches the agent.
+    expect(prompt).toContain('drop finding 3');
+  });
+
+  test('fix-test with no changeset falls back the same way', () => {
+    const state = freshState({
+      rerunMode: 'fix-test',
+      devPlan: { summary: 'x' } as any,
+      humanFeedback: { rerunComment: 'step 3 failed', source: 'work-item-comment' as const, testCaseFailures: [] },
+    });
+
+    const prompt = cfg.buildPrompt(state, ctx);
+    expect(prompt).toContain('Create the feature branch');
+    expect(prompt).toContain('step 3 failed');
+  });
+
+  test('with a changeset it still takes the fix-the-branch path', () => {
+    const state = freshState({
+      rerunMode: 'fix',
+      changeset: { branchName: 'bug/#81098-x', filesCreated: [], filesModified: [] } as any,
+      humanFeedback: { rerunComment: 'drop finding 3', source: 'work-item-comment' as const },
+    });
+
+    expect(cfg.buildPrompt(state, ctx)).toContain('Check out the existing branch');
+  });
+});

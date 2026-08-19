@@ -246,7 +246,7 @@ async function gatherWorkDetectionInputs(
     }
 
     if (rerunPlanFeedback || fixFeedback || fixTestFeedback) {
-      checkpointScans.push({ id, rerunPlanFeedback, fixFeedback, fixTestFeedback, fixTestSource, testCaseFailures });
+      checkpointScans.push({ id, rerunPlanFeedback, fixFeedback, fixTestFeedback, fixTestSource, testCaseFailures, state });
       claimed.add(id);
     }
   }

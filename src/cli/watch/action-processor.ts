@@ -15,7 +15,7 @@ import {
   removeContainer,
 } from '../../sdk/docker.ts';
 import { notifyDiscord } from '../../sdk/discord-notify.ts';
-import { applyRerun } from './work-detector.ts';
+import { applyRerun, resolveFixTarget } from './work-detector.ts';
 import { log, logError, logWI, logWIError, releaseColor } from './watch-logger.ts';
 import {
   getPrReviewContainerEnv,
@@ -336,11 +336,18 @@ export async function executeAction(
     }
 
     case 'fix': {
+      // The Fix button is reachable on any paused or errored item, including one
+      // that never produced code. Route it the same way the comment scan does.
+      const { targetStage, fixExistingBranch } = resolveFixTarget(state);
+      if (!fixExistingBranch) {
+        logWI(action.workItemId, `Fix requested but no code exists yet — restarting ${targetStage} with the answer`);
+      }
       applyRerun(state, {
         mode: 'fix',
         feedback: action.feedback ?? '',
         source: 'dashboard',
-        targetStage: 'coding',
+        targetStage,
+        fixExistingBranch,
       });
       await stateStore.save(action.workItemId, state);
       await executeContinue(action.workItemId, stateStore, pollingConfig, watchConfig);
@@ -354,12 +361,14 @@ export async function executeAction(
       } catch (err) {
         logWI(action.workItemId, `Warning: failed to fetch test case failures: ${err}`);
       }
+      const fixTestTarget = resolveFixTarget(state);
       applyRerun(state, {
         mode: 'fix-test',
         feedback: action.feedback ?? '',
         source: 'dashboard',
-        targetStage: 'coding',
+        targetStage: fixTestTarget.targetStage,
         testCaseFailures: dashboardTestCaseFailures,
+        fixExistingBranch: fixTestTarget.fixExistingBranch,
       });
       await stateStore.save(action.workItemId, state);
       await executeContinue(action.workItemId, stateStore, pollingConfig, watchConfig);

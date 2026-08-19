@@ -425,7 +425,9 @@ describe('summarizeStalledLoop on the planning loop', () => {
     const out = formatErrorComment(81098, 'planning', err, stateWithPlanReviews(rounds));
 
     expect(out).toContain('Why it is stuck');
-    expect(out).toContain('/fix');
+    // `/rerun-plan`, not `/fix` — see "the reply command matches the stalled
+    // loop" below. `/fix` rewinds to coding, which planning never reached.
+    expect(out).toContain('/rerun-plan');
     // The bare form promoted a plain resume as "preferred"; with a diagnostic
     // attached, answering the reviewer is the option that changes anything.
     expect(out).not.toContain('(preferred)');
@@ -527,5 +529,53 @@ describe('recurring objections', () => {
 
     expect(out).toContain('…');
     expect(out).not.toContain(long);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The reply command must match the loop that stalled
+//
+// WI 81098: the planning loop ran out of budget, and both the error comment and
+// the markdown report told the human to answer with `/fix`. `/fix` is wired to
+// rewind to `coding`, which had never run, so the coder's fix prompt read a
+// branch name off a changeset that did not exist and the stage died with
+// "undefined is not an object (evaluating 'changeset.branchName')". The
+// pipeline instructed a human straight into a crash.
+// ---------------------------------------------------------------------------
+
+describe('the reply command matches the stalled loop', () => {
+  const planningState = stateWithPlanReviews([
+    [{ severity: 'critical', description: 'The guard is not self-healing.', relatedObject: 'Dispatch Context' }],
+    [{ severity: 'critical', description: 'The guard is not self-healing.', relatedObject: 'Dispatch Context' }],
+  ]);
+
+  test('a stalled planning loop asks for /rerun-plan, never /fix', () => {
+    const md = formatStalledLoopComment(
+      81098, 'planning', 'Revision loop "planning" exhausted 5 attempts without approval', planningState,
+    )!;
+    expect(md).toContain('/rerun-plan');
+    expect(md).not.toContain('/fix');
+  });
+
+  test('the planning error comment offers /rerun-plan as the answer-and-resume option', () => {
+    const html = formatErrorComment(
+      81098, 'planning',
+      new Error('Revision loop "planning" exhausted 5 attempts without approval'),
+      planningState,
+    );
+    expect(html).toContain('/rerun-plan');
+    expect(html).not.toContain('/fix');
+  });
+
+  test('a stalled coding loop still asks for /fix', () => {
+    const codingState = stateWithReviews([
+      [{ severity: 'critical', comment: 'Missing permission set.' }],
+      [{ severity: 'critical', comment: 'Missing permission set.' }],
+    ]);
+    const md = formatStalledLoopComment(
+      63396, 'coding', 'Revision loop "coding" exhausted 2 attempts without approval', codingState,
+    )!;
+    expect(md).toContain('/fix');
+    expect(md).not.toContain('/rerun-plan');
   });
 });
