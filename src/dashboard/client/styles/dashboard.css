@@ -350,6 +350,27 @@ body {
   color: var(--color-text-secondary);
 }
 
+.session-card__status {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  color: var(--color-text-muted);
+}
+/* The -text tokens, not the border-weight ones: #3b82f6 and #ef4444 fail WCAG AA
+   as small text, and this label is 11px uppercase. Borders keep the saturated
+   colours a few lines above; only the glyphs move. */
+.session-card__status--running { color: var(--color-info-text); }
+.session-card__status--checkpoint-waiting { color: var(--color-accent); }
+.session-card__status--failed { color: var(--color-error-text); }
+.session-card__status--stalled { color: var(--color-warning); }
+.session-card__status--completed { color: var(--color-stage-pending); }
+/* A wait long enough to be worth a look reads as loudly as an error, because by
+   then it is one: nothing is coming to move it along on its own. */
+.session-card__status--stale { color: var(--color-error-text); font-weight: 600; }
+
 .session-card__time {
   font-size: 0.8rem;
   color: var(--color-text-muted);

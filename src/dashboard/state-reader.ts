@@ -1,6 +1,7 @@
 import type { IStateStore } from '../pipeline/state-store.interface.ts';
 import type { IPRReviewStore } from '../pipeline/pr-review-store.interface.ts';
 import type { IActionStore } from '../pipeline/action-store.interface.ts';
+import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
 import type { PipelineState, PipelineStatus, PipelineConfig, ActiveAgentMarker } from '../types/pipeline.types.ts';
 import type { DashboardSession, DashboardPRReview, DashboardPRReviewDetail, StageProgress } from './types.ts';
 import { getAvailableActions } from './actions.ts';
@@ -57,7 +58,38 @@ const STAGE_DEFS: {
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function readAllSessions(stateStore: IStateStore): Promise<DashboardSession[]> {
+/**
+ * `runningIds` is the watcher's live slot list (`runner_status.status.workItemIds`).
+ * Passing it is what lets a session be called `running` at all — see `deriveStatus`.
+ * Omit it and the reader falls back to the age heuristic alone, which is what the
+ * dashboard did before and is still the right behaviour when the slot list cannot
+ * be read: degraded, not blind.
+ */
+/**
+ * The work items the watcher currently holds a slot for, or `undefined` when
+ * that cannot be established.
+ *
+ * The distinction matters: an EMPTY set says "nothing is running" and turns
+ * every timestamp-fresh session stalled, while `undefined` says "we do not
+ * know" and leaves the age heuristic in charge. A failed read must produce the
+ * second, never the first.
+ */
+export async function currentRunningIds(
+  runnerStatus: IRunnerStatus | undefined,
+): Promise<ReadonlySet<number> | undefined> {
+  if (!runnerStatus) return undefined;
+  try {
+    const status = await runnerStatus.readStatus();
+    return status ? new Set(status.workItemIds) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function readAllSessions(
+  stateStore: IStateStore,
+  runningIds?: ReadonlySet<number>,
+): Promise<DashboardSession[]> {
   const sessions: DashboardSession[] = [];
 
   let workItemIds: number[];
@@ -68,7 +100,7 @@ export async function readAllSessions(stateStore: IStateStore): Promise<Dashboar
   }
 
   for (const workItemId of workItemIds) {
-    const session = await readSession(workItemId, stateStore);
+    const session = await readSession(workItemId, stateStore, runningIds);
     if (session) sessions.push(session);
   }
 
@@ -78,13 +110,14 @@ export async function readAllSessions(stateStore: IStateStore): Promise<Dashboar
 export async function readSession(
   workItemId: number,
   stateStore: IStateStore,
+  runningIds?: ReadonlySet<number>,
 ): Promise<DashboardSession | null> {
   const state = await stateStore.load(workItemId);
   if (!state) return null;
 
   const config = await stateStore.loadConfig(workItemId);
 
-  return toSession(workItemId, state, config);
+  return toSession(workItemId, state, config, runningIds?.has(workItemId));
 }
 
 // ---------------------------------------------------------------------------
@@ -94,15 +127,39 @@ export async function readSession(
 /** How long since last telemetry activity before we consider a pipeline stalled */
 const STALLED_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 
-function deriveStatus(state: PipelineState): PipelineStatus {
+/** How long a checkpoint may wait before the card says so. */
+const STALE_WAIT_DAYS = 3;
+
+/** Whole days since `enteredAt`, or null when it is missing or unparseable. */
+function daysWaiting(enteredAt: string | undefined): number | null {
+  const ms = parseMs(enteredAt);
+  if (ms == null) return null;
+  return Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * @param isRunning Whether the watcher currently holds a slot for this work item
+ *   (`runner_status.status.workItemIds`). `undefined` means the slot list was not
+ *   available to the caller, NOT that the item is idle.
+ */
+function deriveStatus(state: PipelineState, isRunning?: boolean): PipelineStatus {
   if (state.completedAt) return 'completed';
   if (state.error) return 'failed';
   if (state.checkpoint) return 'checkpoint-waiting';
 
-  // Detect stalled pipelines: no completion, no error, no checkpoint,
-  // and no telemetry activity for a while (container likely crashed)
+  // The slot list is the only direct evidence that work is happening. Timestamps
+  // describe the past; a container that died leaves them exactly as they were on
+  // its last good turn, which is how a dead run kept reporting itself as running.
+  // When the list IS available it decides, in both directions.
+  if (isRunning === true) return 'running';
+  if (isRunning === false) return 'stalled';
+
+  // No slot list — fall back to the age heuristic. Note the null case: a row with
+  // neither telemetry nor a startedAt has no activity to be recent, and "we know
+  // nothing about this row" is not a reason to call it running.
   const lastActivity = getLastActivityTime(state);
-  if (lastActivity && Date.now() - lastActivity > STALLED_THRESHOLD_MS) return 'stalled';
+  if (lastActivity == null) return 'stalled';
+  if (Date.now() - lastActivity > STALLED_THRESHOLD_MS) return 'stalled';
 
   return 'running';
 }
@@ -244,8 +301,9 @@ function toSession(
   workItemId: number,
   state: PipelineState,
   config: PipelineConfig | null,
+  isRunning?: boolean,
 ): DashboardSession {
-  const status = deriveStatus(state);
+  const status = deriveStatus(state, isRunning);
   const session: DashboardSession = {
     workItemId,
     status,
@@ -262,10 +320,17 @@ function toSession(
   if (state.error) session.error = state.error;
 
   if (state.checkpoint) {
+    // How long this checkpoint has been waiting, and whether that is long enough
+    // to be worth a human's attention. A convergence escalation sat for 14 days
+    // and the card looked the same on day 1 as on day 14 — nothing in the state
+    // row ages, so the reader has to derive it.
+    const waitingDays = daysWaiting(state.checkpoint.enteredAt);
     session.checkpoint = {
       name: state.checkpoint.name,
       enteredAt: state.checkpoint.enteredAt,
       lastPolledAt: state.checkpoint.lastPolledAt,
+      ...(waitingDays != null ? { waitingDays } : {}),
+      ...(waitingDays != null && waitingDays >= STALE_WAIT_DAYS ? { waitingStale: true as const } : {}),
     };
   }
 

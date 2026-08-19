@@ -41,7 +41,15 @@ export interface DashboardSession {
   stages: StageProgress[];
   telemetry: TelemetryData;
   error?: { type: string; stage: string; message: string; timestamp: string };
-  checkpoint?: { name: string; enteredAt: string; lastPolledAt?: string };
+  checkpoint?: {
+    name: string;
+    enteredAt: string;
+    lastPolledAt?: string;
+    /** Whole days this checkpoint has been waiting. Derived — nothing in the state row ages. */
+    waitingDays?: number;
+    /** True once the wait is long enough to be worth a human's attention. */
+    waitingStale?: true;
+  };
   revisionFeedback?: { source: string; feedback: string; targetStage: string };
   config?: { organization: string; project: string; sessionRoot: string };
   availableActions?: ActionType[];

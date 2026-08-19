@@ -16,6 +16,33 @@ function statusBorderClass(status: string): string {
   return map[status] ?? '';
 }
 
+/**
+ * The card carried its status as a border colour and nothing else, so "running",
+ * "waiting" and "stalled" differed by a few pixels of hue — and a stalled run,
+ * which nobody is working on, looked like a live one. The mobile card has said
+ * this in words all along; this is the same map.
+ */
+function statusLabel(status: string): string {
+  const map: Record<string, string> = {
+    running: 'RUNNING',
+    'checkpoint-waiting': 'WAITING',
+    failed: 'ERROR',
+    completed: 'DONE',
+    stalled: 'STALLED',
+  };
+  return map[status] ?? status.toUpperCase();
+}
+
+/**
+ * "Waiting" says nothing about how long. A convergence escalation sat for 14 days
+ * looking exactly as it did on the first afternoon, which is how it got missed.
+ */
+function waitingSuffix(session: DashboardSession): string {
+  const days = session.checkpoint?.waitingDays;
+  if (session.status !== 'checkpoint-waiting' || days == null || days < 1) return '';
+  return ` ${days}d`;
+}
+
 interface Props {
   session: DashboardSession;
 }
@@ -49,6 +76,12 @@ export function SessionCard({ session }: Props) {
       <div class="session-card__row">
         <StageProgression stages={session.stages} rewindStage={rewindStage} />
         <div class="session-card__right">
+          <span
+            class={`session-card__status session-card__status--${session.status}${session.checkpoint?.waitingStale ? ' session-card__status--stale' : ''}`}
+            title={session.checkpoint?.waitingStale ? 'Waiting long enough to be worth a look' : undefined}
+          >
+            {statusLabel(session.status)}{waitingSuffix(session)}
+          </span>
           {session.telemetry.totalCostUsd > 0 && (
             <span class="session-card__cost">{formatCost(session.telemetry.totalCostUsd)}</span>
           )}

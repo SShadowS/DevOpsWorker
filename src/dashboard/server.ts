@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
 import type postgres from 'postgres';
-import { readAllSessions, readSession, readPRReviews, readPRReviewDetail } from './state-reader.ts';
+import { readAllSessions, readSession, readPRReviews, readPRReviewDetail, currentRunningIds } from './state-reader.ts';
 import { SessionPoller } from './session-poller.ts';
 import { validateAction } from './actions.ts';
 import type { PipelineAction } from './actions.ts';
@@ -139,14 +139,14 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
 
   // Wire up SSE broadcasts on state changes (same-process writes)
   stateStore.onChange = async (workItemId) => {
-    const session = await readSession(workItemId, stateStore);
+    const session = await readSession(workItemId, stateStore, await currentRunningIds(runnerStatus));
     if (session) broadcastSSE('session-update', session);
   };
 
   // Poll for new/changed sessions from other processes (pipeline containers write directly to DB).
   // Gated behind a cheap watermark inside SessionPoller — the full readAllSessions() scan only
   // runs when pipeline_state's row count or max(updated_at) has moved since the last poll.
-  const sessionPoller = new SessionPoller(stateStore, broadcastSSE);
+  const sessionPoller = new SessionPoller(stateStore, broadcastSSE, runnerStatus);
   const sessionPollInterval = setInterval(() => { void sessionPoller.poll(); }, 5_000);
 
   // Poll for PR review changes (new completions, status transitions)
@@ -460,7 +460,7 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
 
       // JSON API: all sessions
       if (path === '/api/sessions') {
-        return Response.json(await readAllSessions(stateStore));
+        return Response.json(await readAllSessions(stateStore, await currentRunningIds(runnerStatus)));
       }
 
       // JSON API: PR reviews
@@ -563,7 +563,7 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
       const sessionMatch = path.match(/^\/api\/sessions\/(\d+)$/);
       if (sessionMatch) {
         const id = parseInt(sessionMatch[1]!, 10);
-        const session = await readSession(id, stateStore);
+        const session = await readSession(id, stateStore, await currentRunningIds(runnerStatus));
         if (!session) return Response.json({ error: 'Not found' }, { status: 404 });
         return Response.json(session);
       }

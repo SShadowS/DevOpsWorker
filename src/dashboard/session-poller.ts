@@ -1,5 +1,6 @@
-import { readAllSessions } from './state-reader.ts';
+import { readAllSessions, currentRunningIds } from './state-reader.ts';
 import { sessionChangeKey } from './session-key.ts';
+import type { IRunnerStatus } from '../pipeline/runner-status.interface.ts';
 import type { IStateStore, StateWatermark } from '../pipeline/state-store.interface.ts';
 
 // Evict entries not seen recently once the known-sessions map grows large, so a
@@ -31,7 +32,15 @@ export class SessionPoller {
   constructor(
     private readonly stateStore: IStateStore,
     private readonly broadcast: (event: string, data: unknown) => void,
+    /**
+     * Reads the watcher's live slot list. Optional so existing callers and tests
+     * keep working: without it the reader falls back to the age heuristic, which
+     * is the behaviour this class had before.
+     */
+    private readonly runnerStatus?: IRunnerStatus,
   ) {}
+
+
 
   async poll(): Promise<void> {
     try {
@@ -46,7 +55,7 @@ export class SessionPoller {
       }
 
       const now = Date.now();
-      const allSessions = await readAllSessions(this.stateStore);
+      const allSessions = await readAllSessions(this.stateStore, await currentRunningIds(this.runnerStatus));
       for (const session of allSessions) {
         const key = sessionChangeKey(session);
         const existing = this.knownSessions.get(session.workItemId);

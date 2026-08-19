@@ -366,10 +366,13 @@ describe('state-reader: session structure', () => {
       currentStage: 'checkpoint:plan-approved',
       checkpoint: { name: 'plan-approved', enteredAt: '2024-01-01T00:20:00.000Z', lastPolledAt: '2024-01-01T00:25:00.000Z' },
     }));
-    expect(session.checkpoint).toEqual({
+    // waitingDays/waitingStale are derived from the clock, so this pins the
+    // passed-through fields and the fact that a 2024 checkpoint reads as stale.
+    expect(session.checkpoint).toMatchObject({
       name: 'plan-approved',
       enteredAt: '2024-01-01T00:20:00.000Z',
       lastPolledAt: '2024-01-01T00:25:00.000Z',
+      waitingStale: true,
     });
   });
 
@@ -558,5 +561,117 @@ describe('state-reader: readAllSessions', () => {
     const sessions = await readAllSessions(store);
     expect(sessions).toHaveLength(1);
     expect(sessions[0]!.workItemId).toBe(42);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A row cannot be "running" when nothing is running it.
+//
+// deriveStatus used to decide from the state row alone: no completedAt, no
+// error, no checkpoint, recent-enough timestamps => running. Nothing asked
+// whether a container existed. The watcher already publishes the answer —
+// `runner_status.status.workItemIds` is the live slot list — so an item absent
+// from it is, by definition, not being worked on, whatever its timestamps say.
+// ---------------------------------------------------------------------------
+describe('state-reader: running requires a live slot', () => {
+  afterEach(cleanup);
+
+  test('an item holding a slot is running, even with old timestamps', async () => {
+    const store = setup();
+    const state = freshState({ startedAt: '2020-01-01T00:00:00.000Z' });
+    store.save(42, state);
+    const session = (await readSession(42, store, new Set([42])))!;
+    expect(session.status).toBe('running');
+  });
+
+  test('an item with NO slot is stalled, however fresh it looks', async () => {
+    const store = setup();
+    // Timestamped now: the age heuristic alone would call this running.
+    const state = freshState({ startedAt: new Date().toISOString() });
+    store.save(42, state);
+    const session = (await readSession(42, store, new Set([99])))!;
+    expect(session.status).toBe('stalled');
+  });
+
+  test('an error still outranks the slot list', async () => {
+    const store = setup();
+    const state = freshState({ error: { type: 'ContainerError', stage: 'coding', message: 'exit 137', timestamp: new Date().toISOString() } });
+    store.save(42, state);
+    expect((await readSession(42, store, new Set([42])))!.status).toBe('failed');
+  });
+
+  test('a checkpoint still outranks the slot list', async () => {
+    const store = setup();
+    const state = freshState({ checkpoint: { name: 'pr-published', enteredAt: new Date().toISOString() } });
+    store.save(42, state);
+    expect((await readSession(42, store, new Set([42])))!.status).toBe('checkpoint-waiting');
+  });
+
+  test('with no slot list at all the old age heuristic still applies', async () => {
+    // The dashboard must not go blind if runner_status is unreadable.
+    const store = setup();
+    store.save(42, freshState({ startedAt: new Date().toISOString() }));
+    expect((await readSession(42, store))!.status).toBe('running');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// "No activity data" must never mean "running".
+//
+// getLastActivityTime returns null when a row has neither telemetry nor a
+// startedAt, and the stalled branch was guarded by `if (lastActivity && ...)`.
+// A row in that shape therefore skipped the staleness check entirely and
+// reported `running` forever.
+// ---------------------------------------------------------------------------
+describe('state-reader: unknown activity is not running', () => {
+  afterEach(cleanup);
+
+  test('a row with no timestamps at all is stalled, not running', async () => {
+    const store = setup();
+    const state = { currentStage: 'analyzer' } as PipelineState;
+    store.save(42, state);
+    expect((await readSession(42, store))!.status).toBe('stalled');
+  });
+
+  test('unless it is actually holding a slot', async () => {
+    const store = setup();
+    const state = { currentStage: 'analyzer' } as PipelineState;
+    store.save(42, state);
+    expect((await readSession(42, store, new Set([42])))!.status).toBe('running');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A checkpoint that has waited a long time should say so.
+//
+// A convergence escalation sat for 14 days with nothing chasing it, and the
+// card looked identical on day 1 and day 14.
+// ---------------------------------------------------------------------------
+describe('state-reader: waiting age', () => {
+  afterEach(cleanup);
+
+  function daysAgo(n: number): string {
+    return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  test('reports how long a checkpoint has been waiting', async () => {
+    const store = setup();
+    store.save(42, freshState({ checkpoint: { name: 'pr-published', enteredAt: daysAgo(14) } }));
+    const session = (await readSession(42, store))!;
+    expect(session.checkpoint?.waitingDays).toBe(14);
+  });
+
+  test('flags a checkpoint that has waited past the threshold', async () => {
+    const store = setup();
+    store.save(42, freshState({ checkpoint: { name: 'convergence:coding', enteredAt: daysAgo(14) } }));
+    expect((await readSession(42, store))!.checkpoint?.waitingStale).toBe(true);
+  });
+
+  test('does not flag one that has just started waiting', async () => {
+    const store = setup();
+    store.save(42, freshState({ checkpoint: { name: 'plan-approved', enteredAt: daysAgo(1) } }));
+    const cp = (await readSession(42, store))!.checkpoint!;
+    expect(cp.waitingDays).toBe(1);
+    expect(cp.waitingStale).toBeFalsy();
   });
 });
