@@ -11,6 +11,15 @@
         ],
         "createdAt": "2026-08-10T13:21:50.815Z",
         "reason": "Stripes encode state (error/warning/success/info/pending/accent), not decoration; vocabulary documented in the file and pinned by tests/dashboard/stripe-vocabulary.test.ts"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/sdk/ado/attachments.ts"
+        ],
+        "createdAt": "2026-08-19T12:01:45.804Z",
+        "reason": "Claude: file is a Node/TS module with no markup; the flagged line is the regex literal /<img\\b[^>]*?\\bsrc\\s*=.../ used to PARSE img tags out of Azure DevOps work item HTML, not to render one"
       }
     ]
   }

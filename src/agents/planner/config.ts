@@ -5,6 +5,7 @@ import type { AgentConfig } from '../../types/agent.types.ts';
 import { DevPlanSchema, type DevPlan } from './schema.ts';
 import { agentStage } from '../../pipeline/stage.ts';
 import { buildHumanFeedbackSection } from '../../pipeline/human-feedback.ts';
+import { buildWorkItemImagesSection } from '../../pipeline/work-item-images.ts';
 import { azureDevOpsMcp, TOOL_SETS, MCP_TOOLS, resolveAlLspPlugin } from '../../sdk/mcp-configs.ts';
 import type { SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 import type { PlanReview } from '../plan-reviewer/schema.ts';
@@ -180,6 +181,10 @@ export function createPlannerConfig(config: PipelineConfig): AgentConfig<typeof 
         ``,
         `## Enriched Context (from Analyzer)`,
         `${JSON.stringify(readiness.enrichedContext, null, 2)}`,
+        // The planner never receives the description itself, so without this the
+        // only way a screenshot reaches it is if the analyzer happened to
+        // describe the picture in prose. The files are on disk either way.
+        ...buildWorkItemImagesSection(ctx.workItem.images),
         ``,
         `## Instructions`,
         ``,

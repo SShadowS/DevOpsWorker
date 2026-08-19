@@ -145,6 +145,24 @@ export interface PipelineContext {
   reportActiveAgent?: (state: PipelineState, marker: ActiveAgentMarker | null) => Promise<void>;
 }
 
+/**
+ * An image from a work item, already downloaded to local disk.
+ *
+ * Work item descriptions embed screenshots as `<img>` tags pointing at Azure
+ * DevOps attachment URLs. Those URLs need PAT authentication, and the reading
+ * agents have no tool that can fetch one — so the URL alone tells an agent that
+ * a picture exists and nothing about what is in it. Downloading first turns it
+ * into a file path the `Read` tool can open and actually look at.
+ */
+export interface WorkItemImage {
+  /** Absolute path of the downloaded file. */
+  path: string;
+  /** File name as Azure DevOps named it (often just `image.png`). */
+  fileName: string;
+  /** The attachment URL it came from — the same string that appears in the description HTML. */
+  sourceUrl: string;
+}
+
 /** Minimal work item shape from Azure DevOps */
 export interface WorkItem {
   id: number;
@@ -157,6 +175,13 @@ export interface WorkItem {
   areaPath: string;
   iterationPath: string;
   assignedTo?: string;
+  /**
+   * Images embedded in the description, downloaded to local disk.
+   *
+   * Absent when nothing has downloaded them yet; empty when the work item has
+   * none, or when every download failed (a failure is logged, never fatal).
+   */
+  images?: WorkItemImage[];
   /** Raw fields map for anything not explicitly modelled */
   fields: Record<string, unknown>;
 }

@@ -4,6 +4,7 @@ import type { PipelineConfig, PipelineState, PipelineContext, Stage } from '../.
 import type { AgentConfig } from '../../types/agent.types.ts';
 import { ReadinessReportSchema, type ReadinessReport } from './schema.ts';
 import { agentStage } from '../../pipeline/stage.ts';
+import { buildWorkItemImagesSection } from '../../pipeline/work-item-images.ts';
 import { PipelineError } from '../../sdk/errors.ts';
 import { azureDevOpsMcp, TOOL_SETS, MCP_TOOLS, resolveAlLspPlugin } from '../../sdk/mcp-configs.ts';
 import type { SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
@@ -78,9 +79,10 @@ export function createAnalyzerConfig(config: PipelineConfig): AgentConfig<typeof
         `- **Description:** ${ctx.workItem.description ?? '(none)'}`,
         `- **Acceptance Criteria:** ${ctx.workItem.acceptanceCriteria ?? '(none)'}`,
         `- **Tags:** ${ctx.workItem.tags?.join(', ') ?? '(none)'}`,
+        ...buildWorkItemImagesSection(ctx.workItem.images),
         ``,
         `## Instructions`,
-        `1. Read the work item details above carefully`,
+        `1. Read the work item details above carefully, including any screenshots listed above`,
         `2. If the description references a pipeline build URL (buildId=NNN), fetch that build's logs using pipeline_timeline + get_pipeline_log to understand the actual compiler warnings or errors`,
         `3. Search the codebase for relevant context (use local tools, not DevOps code search)`,
         `4. Check for linked/related work items via Azure DevOps MCP`,
