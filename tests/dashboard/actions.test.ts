@@ -261,3 +261,30 @@ describe('getAvailableActions - reprovision-env', () => {
     expect(getAvailableActions(state)).not.toContain('reprovision-env');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix on a stalled test-cases loop
+//
+// /fix now rewinds to the loop that stalled, so a stalled test-cases loop is
+// answerable — but the dashboard only offered the button for coding stages, so
+// the one place a human is actually looking had no way to answer it.
+// ---------------------------------------------------------------------------
+
+describe('actions: fix on a stalled test-cases loop', () => {
+  const stalled = (stage: string): PipelineState => freshState({
+    currentStage: stage,
+    error: { type: 'revision-exhausted', stage, message: 'exhausted', timestamp: '2024-01-01T00:30:00.000Z' },
+  });
+
+  test('valid when the test-cases loop ran out of budget', () => {
+    expect(validateAction(makeAction({ type: 'fix' }), stalled('test-cases')).valid).toBe(true);
+  });
+
+  test('valid when the failure is attributed to the reviewer stage', () => {
+    expect(validateAction(makeAction({ type: 'fix' }), stalled('test-case-reviewer')).valid).toBe(true);
+  });
+
+  test('the button is offered alongside continue', () => {
+    expect(getAvailableActions(stalled('test-cases'))).toContain('fix');
+  });
+});

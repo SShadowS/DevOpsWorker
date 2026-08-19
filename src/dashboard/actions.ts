@@ -48,11 +48,11 @@ export function validateAction(
     case 'fix':
       if (
         state.checkpoint?.name === 'pr-published' ||
-        (state.error && isCodingStage(state.error.stage))
+        (state.error && (isCodingStage(state.error.stage) || isTestCasesStage(state.error.stage)))
       ) {
         return { valid: true };
       }
-      return { valid: false, reason: 'Pipeline is not at PR checkpoint or failed during coding' };
+      return { valid: false, reason: 'Pipeline is not at PR checkpoint or failed during coding or test cases' };
 
     case 'continue':
       if (!state.error) {
@@ -102,10 +102,11 @@ export function getAvailableActions(state: PipelineState): ActionType[] {
     actions.push('rerun-plan');
   }
 
-  // fix: at PR checkpoint OR failed during coding
+  // fix: at PR checkpoint OR failed during coding or test cases. A /fix rewinds
+  // to whichever loop stalled, so the test-cases loop is answerable too.
   if (
     state.checkpoint?.name === 'pr-published' ||
-    (state.error && isCodingStage(state.error.stage))
+    (state.error && (isCodingStage(state.error.stage) || isTestCasesStage(state.error.stage)))
   ) {
     actions.push('fix');
   }
@@ -138,6 +139,11 @@ function isPlanningStage(stage: string): boolean {
 
 function isCodingStage(stage: string): boolean {
   return stage === 'coding' || stage === 'code-reviewer' || stage === 'draft-pr';
+}
+
+/** The test-cases revision loop and its reviewer. */
+function isTestCasesStage(stage: string): boolean {
+  return stage === 'test-cases' || stage === 'test-case-reviewer';
 }
 
 const STALLED_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes

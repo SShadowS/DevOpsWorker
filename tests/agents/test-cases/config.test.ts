@@ -204,3 +204,66 @@ describe('test-cases buildPrompt', () => {
     expect(prompt).toContain('Add error scenario test cases for invalid customer input');
   });
 });
+
+// ---------------------------------------------------------------------------
+// The human's answer has to reach this agent
+//
+// A stalled test-cases loop asks the human which findings are real. `/fix` now
+// rewinds here instead of re-running the whole implementation — but the answer
+// only helps if the prompt carries it. This agent read the reviewer's own
+// instructions and nothing else, so a human reply landed in state and was never
+// shown to anyone. The loop's resetState also clears testCaseReviews, so by the
+// time this runs there is no "last review" left to fall back on.
+// ---------------------------------------------------------------------------
+
+describe('test-cases buildPrompt — human feedback', () => {
+  const agentConfig = createTestCasesConfig(minimalConfig());
+  const ctx = minimalContext();
+
+  const CHANGESET = {
+    branchName: 'bug/#12345-x',
+    filesCreated: [],
+    filesModified: ['Cloud/AL/src/Codeunit.Post.al'],
+  } as unknown as PipelineState['changeset'];
+
+  const ANSWER = 'case 3 is out of scope; case 5 is right, keep it';
+
+  test('revision mode carries the human answer', () => {
+    const state = freshState({
+      changeset: CHANGESET,
+      devPlan: { summary: 's', objects: [], testScenarios: [], risks: [] } as any,
+      testCases: { testCases: [{ id: 1, title: 'Verify posting' }] } as any,
+      // resetState has already cleared the reviews by the time the loop re-runs.
+      testCaseReviews: [],
+      humanFeedback: { rerunComment: ANSWER, source: 'work-item-comment' as const },
+    });
+
+    const prompt = agentConfig.buildPrompt(state, ctx);
+    expect(prompt).toContain(ANSWER);
+    // And it must not tell the agent the code was patched, which nobody did.
+    expect(prompt).not.toContain('The implementation was patched');
+  });
+
+  test('create mode carries it too, when the loop stalled before any case existed', () => {
+    const state = freshState({
+      changeset: CHANGESET,
+      devPlan: { summary: 's', objects: [], testScenarios: ['Verify X'], risks: [] } as any,
+      humanFeedback: { rerunComment: ANSWER, source: 'work-item-comment' as const },
+    });
+
+    expect(agentConfig.buildPrompt(state, ctx)).toContain(ANSWER);
+  });
+
+  test('with a reviewer verdict and no human answer, the wording is unchanged', () => {
+    const state = freshState({
+      changeset: CHANGESET,
+      devPlan: { summary: 's', objects: [], testScenarios: [], risks: [] } as any,
+      testCases: { testCases: [{ id: 1, title: 'Verify posting' }] } as any,
+      testCaseReviews: [{ verdict: 'revise', feedback: 'f', issues: [], revisionInstructions: 'Split case 1.' }] as any,
+    });
+
+    const prompt = agentConfig.buildPrompt(state, ctx);
+    expect(prompt).toContain('The test case reviewer requested changes.');
+    expect(prompt).toContain('Split case 1.');
+  });
+});

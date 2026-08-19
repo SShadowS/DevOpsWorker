@@ -252,8 +252,8 @@ export interface StalledLoopSummary {
  * the run with "undefined is not an object (evaluating 'changeset.branchName')".
  * `/rerun-plan` rewinds to `planning`, where the planner reads the answer.
  *
- * The test-cases loop runs after coding, so a changeset exists by then and
- * `/fix` is the right command: it re-runs the coder, and the test cases follow.
+ * `/fix` covers coding and test-cases both, because it rewinds to whichever
+ * loop actually stalled (see `resolveFixTarget`) rather than always to coding.
  */
 const REPLY_COMMAND_BY_LOOP: Record<string, string> = {
   planning: '/rerun-plan',

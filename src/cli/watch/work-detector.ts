@@ -186,26 +186,39 @@ const REVISION_LOOPS = new Set(['planning', 'coding', 'test-cases']);
  * Where a `/fix` (or `/fix-test`) can actually go, and whether the coder may
  * take its fix-the-existing-branch path.
  *
- * `/fix` means "fix the code on the existing branch". That branch only exists
- * once coding has produced a changeset. On work item 81098 the *planning* loop
- * ran out of budget, the error comment told the human to answer with `/fix`,
- * and `/fix` rewound to a coding stage that had never run — the coder's fix
- * prompt then read a branch name off an absent changeset and the stage died
- * with "undefined is not an object (evaluating 'changeset.branchName')".
+ * Two rules, in order.
  *
- * With no changeset the answer belongs to the stage that actually stopped, and
- * that stage runs its normal prompt, which already renders `humanFeedback`.
+ * **The answer goes to the loop that asked the question.** Every revision loop
+ * that runs out of budget asks the human the same thing — which findings are
+ * real, which are wrong. Sending that answer to `coding` regardless was wrong
+ * in both directions: on work item 81098 the *planning* loop stalled, `/fix`
+ * rewound to a coding stage that had never run, and the coder's fix prompt read
+ * a branch name off an absent changeset ("undefined is not an object
+ * (evaluating 'changeset.branchName')"); and a stalled *test-cases* loop re-ran
+ * the entire implementation — coder, CI, env deploy, then the code-review loop
+ * — to act on feedback about test case wording.
+ *
+ * **Otherwise `/fix` means what it always meant**: fix the code on the existing
+ * branch. That is the ordinary use, a `/fix` at the pr-published checkpoint with
+ * no error at all. Without a changeset there is no branch to fix, so the answer
+ * goes to whichever stage could still use it, running its normal prompt.
+ *
+ * `fixExistingBranch` is what sets `rerunMode`, and `rerunMode` only means
+ * anything to the coder — so it is false whenever the coder is not the target.
  * A null state means the caller has nothing to judge on, so keep the old
- * behaviour — the gather layer always has state, only fixtures do not.
+ * behaviour: the gather layer always has state, only fixtures do not.
  */
 export function resolveFixTarget(
   state: PipelineState | null | undefined,
 ): { targetStage: string; fixExistingBranch: boolean } {
+  const stalled = state?.error?.stage;
+  if (stalled && REVISION_LOOPS.has(stalled)) {
+    return { targetStage: stalled, fixExistingBranch: stalled === 'coding' && state!.changeset != null };
+  }
+
   if (!state || state.changeset) return { targetStage: 'coding', fixExistingBranch: true };
 
-  const stopped = state.error?.stage;
-  const targetStage = stopped === 'planning' || !state.devPlan ? 'planning' : 'coding';
-  return { targetStage, fixExistingBranch: false };
+  return { targetStage: state.devPlan ? 'coding' : 'planning', fixExistingBranch: false };
 }
 
 const RERUN_COMMAND_PREFIX: Record<RerunMode, RegExp> = {

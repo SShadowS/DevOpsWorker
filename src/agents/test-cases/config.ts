@@ -4,6 +4,7 @@ import type { PipelineConfig, PipelineState, PipelineContext, Stage } from '../.
 import type { AgentConfig, McpServerConfig } from '../../types/agent.types.ts';
 import { TestCasesOutputSchema, type TestCasesOutput } from './schema.ts';
 import { agentStage } from '../../pipeline/stage.ts';
+import { buildHumanFeedbackSection } from '../../pipeline/human-feedback.ts';
 import { azureDevOpsMcp, TOOL_SETS, MCP_TOOLS, resolveAlLspPlugin, bcMcp, BC_MCP_TOOLS } from '../../sdk/mcp-configs.ts';
 import type { SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 
@@ -60,9 +61,15 @@ export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeo
           .join('\n');
 
         const lastReview = state.testCaseReviews?.at(-1);
+        // A `/fix` that lands here is a human answering THIS loop, and the loop's
+        // resetState has already cleared the reviews — so "no review" no longer
+        // implies the code was patched. Saying it did would send the agent looking
+        // for code changes nobody made.
         const revisionSource = lastReview
           ? `The test case reviewer requested changes.`
-          : `The implementation was patched after a /fix request.`;
+          : state.humanFeedback
+            ? `A human answered the test case reviewer — their reply is below.`
+            : `The implementation was patched after a /fix request.`;
         const revisionInstructions = lastReview && 'revisionInstructions' in lastReview && lastReview.revisionInstructions
           ? `\n\n## Reviewer Feedback\n${lastReview.revisionInstructions}`
           : '';
@@ -71,6 +78,9 @@ export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeo
           `## Task`,
           `Review and revise the existing test cases for work item #${ctx.workItemId}.`,
           revisionSource,
+          // Ahead of the reviewer's own instructions: where both are present the
+          // human's decision is what settles the disagreement.
+          ...buildHumanFeedbackSection(state),
           ``,
           `## Existing Test Cases (as last reported — may be INCOMPLETE)`,
           existingIds,
@@ -104,6 +114,7 @@ export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeo
       return [
         `## Task`,
         `Create manual Test Case work items in Azure DevOps for work item #${ctx.workItemId}.`,
+        ...buildHumanFeedbackSection(state),
         ``,
         `## Work Item`,
         `- **ID:** ${ctx.workItemId}`,

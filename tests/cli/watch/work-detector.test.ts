@@ -530,3 +530,78 @@ describe('detectWork — /fix routes to the stage that can use it', () => {
     expect(a.stateDelta!.rerunMode).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// The answer goes to the loop that asked the question
+//
+// Every revision loop that stalls asks the human the same thing: which findings
+// are real, which are wrong. Sending that answer to `coding` regardless meant a
+// stalled test-cases loop re-ran the whole implementation — coder, CI, env
+// deploy, then the code-review loop — to act on feedback about test case
+// wording. The loop that stalled is the one that can use the answer.
+// ---------------------------------------------------------------------------
+
+describe('detectWork — /fix targets the loop that stalled', () => {
+  test('test-cases stalled: goes to test-cases, not back through coding', () => {
+    const state = baseState({
+      changeset: CHANGESET,
+      testCases: { testCases: [] } as unknown as PipelineState['testCases'],
+      error: { type: 'revision-exhausted', stage: 'test-cases', message: 'exhausted', timestamp: 't' },
+      revisionAttempts: { coding: 2, 'test-cases': 3 },
+    });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 350, fixFeedback: '/fix case 3 is out of scope', state })] }))[0]!;
+
+    expect(a.stateDelta!.revisionFeedback!.targetStage).toBe('test-cases');
+    // rerunMode is a coder concept. The coder is not the target here.
+    expect(a.stateDelta!.rerunMode).toBeUndefined();
+    expect(a.stateDelta!.revisionAttempts!['test-cases']).toBe(0);
+    expect(a.stateDelta!.revisionAttempts!.coding).toBe(2);
+    expect(a.stateDelta!.humanFeedback!.rerunComment).toBe('case 3 is out of scope');
+  });
+
+  test('planning stalled after code already exists: still goes to planning', () => {
+    // Reachable: /rerun-plan from the pr-published checkpoint rewinds an item
+    // that has a changeset, and planning can then stall.
+    const state = baseState({
+      changeset: CHANGESET,
+      devPlan: {} as PipelineState['devPlan'],
+      error: { type: 'revision-exhausted', stage: 'planning', message: 'exhausted', timestamp: 't' },
+      revisionAttempts: { planning: 5 },
+    });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 351, fixFeedback: '/fix redo the design', state })] }))[0]!;
+    expect(a.stateDelta!.revisionFeedback!.targetStage).toBe('planning');
+    expect(a.stateDelta!.rerunMode).toBeUndefined();
+  });
+
+  test('coding stalled: unchanged — coding, on the fix-the-branch path', () => {
+    const state = baseState({
+      changeset: CHANGESET,
+      error: { type: 'revision-exhausted', stage: 'coding', message: 'exhausted', timestamp: 't' },
+      revisionAttempts: { coding: 5 },
+    });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 352, fixFeedback: '/fix drop finding 2', state })] }))[0]!;
+    expect(a.stateDelta!.revisionFeedback!.targetStage).toBe('coding');
+    expect(a.stateDelta!.rerunMode).toBe('fix');
+    expect(a.stateDelta!.revisionAttempts!.coding).toBe(0);
+  });
+
+  test('the ordinary case is untouched: /fix at the PR checkpoint, no error at all', () => {
+    const state = baseState({
+      changeset: CHANGESET,
+      checkpoint: { name: 'pr-published', enteredAt: 't' },
+    });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 353, fixFeedback: '/fix null-ref in codeunit', state })] }))[0]!;
+    expect(a.stateDelta!.revisionFeedback!.targetStage).toBe('coding');
+    expect(a.stateDelta!.rerunMode).toBe('fix');
+  });
+
+  test('an error outside any revision loop falls back to fixing the code', () => {
+    const state = baseState({
+      changeset: CHANGESET,
+      error: { type: 'ContainerError', stage: 'container', message: 'died', timestamp: 't' },
+    });
+    const a = detectWork(inputs({ checkpointScans: [scan({ id: 354, fixFeedback: '/fix retry it', state })] }))[0]!;
+    expect(a.stateDelta!.revisionFeedback!.targetStage).toBe('coding');
+    expect(a.stateDelta!.rerunMode).toBe('fix');
+  });
+});
