@@ -340,6 +340,51 @@ export async function likePRComment(
 }
 
 /**
+ * Fetch a single PR comment thread.
+ *
+ * Deliberately the single-thread resource rather than the list endpoint: the
+ * caller needs one thread's comments to decide whether it is an orphan, and
+ * pulling every thread on the PR to answer that would grow with the size of the
+ * review it is trying not to disturb.
+ */
+export async function fetchPRThread(
+  prId: number,
+  threadId: number,
+  config: PipelineConfig,
+): Promise<{ id: number; comments?: Array<{ id: number; content?: string }> }> {
+  return adoFetch<{ id: number; comments?: Array<{ id: number; content?: string }> }>(
+    config.azureDevOps,
+    `git/repositories/${config.azureDevOps.repositoryId}/pullrequests/${prId}/threads/${threadId}?api-version=7.0`,
+  );
+}
+
+/**
+ * Close a PR comment thread.
+ *
+ * Sends only `status`, so the thread's comments are left exactly as they are —
+ * a PATCH carrying `comments` would rewrite them. `closed` is the same state
+ * `postPRComment` creates informational threads in: visible, but needing no
+ * resolution from a human.
+ *
+ * Whether a thread SHOULD be closed is the caller's decision, not this
+ * function's — see the orphan check in the watcher's review dispatch.
+ */
+export async function closePRThread(
+  prId: number,
+  threadId: number,
+  config: PipelineConfig,
+): Promise<void> {
+  await adoFetch<unknown>(
+    config.azureDevOps,
+    `git/repositories/${config.azureDevOps.repositoryId}/pullrequests/${prId}/threads/${threadId}?api-version=7.0`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'closed' }),
+    },
+  );
+}
+
+/**
  * Post a comment thread on a pull request.
  * Uses status=4 (closed) so it shows as informational without requiring resolution.
  */

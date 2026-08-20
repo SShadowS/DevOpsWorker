@@ -4,7 +4,7 @@ import type { IPRReviewStore } from '../../pipeline/pr-review-store.interface.ts
 import type { PipelineConfig, TestCaseFailure } from '../../types/pipeline.types.ts';
 import type { PipelineAction } from '../../dashboard/actions.ts';
 import { addWorkItemTags, fetchTestCaseFailures } from '../../sdk/azure-devops-client.ts';
-import { likePRComment } from '../../sdk/ado/pull-requests.ts';
+import { likePRComment, fetchPRThread, closePRThread } from '../../sdk/ado/pull-requests.ts';
 import { parseCommentKey } from '../../webhook-server/parse.ts';
 import { findRepoByRepositoryId } from '../../config/repos.ts';
 import {
@@ -216,6 +216,35 @@ export async function executeAction(
         log(`[PR #${prId}] Acknowledged /review comment ${payload.commentKey} with a Like`);
       } catch (err) {
         log(`[PR #${prId}] Could not Like /review comment ${payload.commentKey}: ${err}`);
+      }
+
+      // The thread that carried the command is an orphan once the Like has
+      // acknowledged it — it exists only to issue `/review` and needs no
+      // resolution from anyone. Close it so the PR's thread list is not left
+      // with a permanently unresolved bot-triggering comment.
+      //
+      // ONLY when the command is the thread's sole comment. `/review` typed as a
+      // reply inside a live discussion is not an orphan, and closing there would
+      // mark someone else's conversation resolved — a change nobody made, hard
+      // to notice and irritating to undo. When in doubt, leave it open.
+      //
+      // Separate try from the Like above: these are independent courtesies, and
+      // a failed reaction should not cost the cleanup (or vice versa). Both are
+      // cosmetic — neither may stop a review.
+      try {
+        const thread = await fetchPRThread(prId, triggerComment.threadId, prConfig);
+        const commentCount = thread.comments?.length ?? 0;
+        if (commentCount === 1) {
+          await closePRThread(prId, triggerComment.threadId, prConfig);
+          log(`[PR #${prId}] Closed orphan /review thread ${triggerComment.threadId}`);
+        } else {
+          log(
+            `[PR #${prId}] Left thread ${triggerComment.threadId} open — ` +
+              `/review was one of ${commentCount} comments, not an orphan`,
+          );
+        }
+      } catch (err) {
+        log(`[PR #${prId}] Could not close /review thread ${triggerComment.threadId}: ${err}`);
       }
     } else if (payload.commentKey) {
       log(`[PR #${prId}] Malformed commentKey '${payload.commentKey}' — skipping the Like`);

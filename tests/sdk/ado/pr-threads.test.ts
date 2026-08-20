@@ -6,6 +6,8 @@ import {
   updateThreadComment,
   appendToThread,
   likePRComment,
+  fetchPRThread,
+  closePRThread,
 } from '../../../src/sdk/ado/pull-requests.ts';
 
 const realFetch = globalThis.fetch;
@@ -234,5 +236,69 @@ describe('postInlineThread anchor', () => {
     const sent = JSON.parse(bodies[0]!);
     expect(sent.threadContext.rightFileStart).toEqual({ line: 12, offset: 1 });
     expect(sent.threadContext.rightFileEnd).toEqual({ line: 14, offset: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Closing the thread a `/review` command created
+//
+// The pipeline Likes a `/review` comment to signal it was picked up. The thread
+// that carried the command has no further purpose once that happens — but only
+// when the command was posted as its own thread. Typed as a reply inside a live
+// discussion, closing would resolve someone else's conversation, so the caller
+// checks first and these two functions stay dumb.
+// ---------------------------------------------------------------------------
+
+describe('fetchPRThread', () => {
+  test('GETs the single thread, not the whole thread list', async () => {
+    let url: string | undefined;
+    let method: string | undefined;
+    globalThis.fetch = mock((u: string, init: any) => {
+      url = u;
+      method = init?.method;
+      return Promise.resolve(new Response(JSON.stringify({ id: 7, comments: [{ id: 3 }] }), { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    const thread = await fetchPRThread(1, 7, config);
+
+    expect(method ?? 'GET').toBe('GET');
+    // The single-thread resource. A substring check on "/threads" alone would
+    // also pass against the list endpoint, which returns a different shape.
+    expect(url).toContain('/pullrequests/1/threads/7?api-version=7.0');
+    expect(thread.comments).toHaveLength(1);
+  });
+});
+
+describe('closePRThread', () => {
+  test('PATCHes the thread to closed', async () => {
+    let url: string | undefined;
+    let init: any;
+    globalThis.fetch = mock((u: string, i: any) => {
+      url = u;
+      init = i;
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await closePRThread(1, 7, config);
+
+    expect(init.method).toBe('PATCH');
+    expect(url).toContain('/pullrequests/1/threads/7?api-version=7.0');
+    // 'closed' is what postPRComment already uses (as numeric 4) for
+    // informational threads that need no resolution.
+    expect(JSON.parse(init.body).status).toBe('closed');
+  });
+
+  test('sends only the status — never touches the thread comments', async () => {
+    let init: any;
+    globalThis.fetch = mock((_u: string, i: any) => {
+      init = i;
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await closePRThread(1, 7, config);
+
+    const body = JSON.parse(init.body);
+    expect(Object.keys(body)).toEqual(['status']);
+    expect(body.comments).toBeUndefined();
   });
 });
