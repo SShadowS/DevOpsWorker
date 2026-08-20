@@ -79,6 +79,7 @@ STAGING="$(mktemp -d "${CACHE_DIR}/.al-ext-staging-XXXXXX")"
 cleanup_staging() { rm -rf "${STAGING}" /tmp/al-vsix-extract "${VSIX_FILE}"; }
 trap cleanup_staging EXIT
 
+rm -rf /tmp/al-vsix-extract
 unzip -q -o "${VSIX_FILE}" "extension/bin/*" -d /tmp/al-vsix-extract || {
   echo "ERROR: failed to extract AL extension VSIX"
   exit 1
