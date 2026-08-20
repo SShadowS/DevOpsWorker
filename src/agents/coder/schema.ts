@@ -33,6 +33,13 @@ export const ChangesetSchema = z.object({
     'codeunits and they ALL passed this iteration. False/undefined if any test ' +
     'failed or you did not run tests. This is an APPROVAL CONDITION alongside envPublished.',
   ),
+  envSkipReason: z.string().optional().describe(
+    'Set ONLY when you took the documented CI-only fallback because the BC environment was ' +
+    'genuinely unusable: state what you observed (e.g. "env Stopped; ran env start at HH:MM; ' +
+    'still not Running after 20 min"). Setting this makes the round approvable WITHOUT ' +
+    'envPublished/envTestsPassed, and it is shown to the humans reviewing the PR — never set ' +
+    'it to dodge env work on a usable environment.',
+  ),
   wizardActivated: z.boolean().optional().describe(
     'True if you ran the BC setup wizard during this iteration (sets state.environment.activated). ' +
     'Set to true when you successfully drove the wizard to completion or confirmed already-complete. ' +

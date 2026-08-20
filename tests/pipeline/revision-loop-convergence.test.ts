@@ -314,3 +314,67 @@ describe('formatConvergenceEscalation', () => {
     expect(formatConvergenceEscalation(1, freshState())).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Gate-failure feedback: when the reviewer approves but the loop's gate does
+// not, the coder previously got NO signal which conjunct failed (WI 76447's
+// recorded finding, then live again on 81098 where the env conjuncts made
+// every round unapprovable). explainGate names the reason into state so the
+// next round's prompt can show it.
+// ---------------------------------------------------------------------------
+
+describe('revisionLoop explainGate', () => {
+  test('stores the explanation on a failed gate and clears it on approval', async () => {
+    let round = 0;
+    const producer: Stage = { name: 'p', canRun: () => true, execute: async (s) => { round++; return { state: s }; } };
+    const reviewer: Stage = { name: 'r', canRun: () => true, execute: async (s) => ({ state: s }) };
+
+    const seen: Array<string | undefined> = [];
+    const stage = revisionLoop({
+      name: 'coding', producer, reviewer, maxAttempts: 2,
+      // Gate passes only on round 2 — round 1 is the reviewer-approved-but-gate-failed case.
+      isApproved: () => round >= 2,
+      explainGate: () => 'Reviewer approved but the gate failed: envPublished=false (environment e-1 exists).',
+    });
+
+    const result = await stage.execute({
+      currentStage: 'coding',
+      telemetry: { totalCostUsd: 0, totalDurationMs: 0, stages: [] },
+      startedAt: 'now',
+      // capture what the producer would see next round via a probe producer? —
+      // instead assert on the returned state transitions below.
+    } as any, {
+      workItemId: 1, workItem: {} as any, workItemType: 'Bug', config: {} as any,
+      logger: { log: (m: string) => seen.push(m), setAgentName: () => {} } as any,
+    } as any);
+
+    // Approved on round 2 → the explanation must not survive into the final state.
+    expect((result.state as any).gateFailure).toBeUndefined();
+    // And the failure WAS observed in round 1 — the log carries it.
+    expect(seen.some(l => (l ?? '').includes('envPublished=false'))).toBe(true);
+  });
+
+  test('the producer sees the explanation on the round after a failed gate', async () => {
+    let round = 0;
+    const gateFailuresSeen: Array<string | undefined> = [];
+    const producer: Stage = {
+      name: 'p', canRun: () => true,
+      execute: async (s) => { round++; gateFailuresSeen.push((s as any).gateFailure); return { state: s }; },
+    };
+    const reviewer: Stage = { name: 'r', canRun: () => true, execute: async (s) => ({ state: s }) };
+
+    const stage = revisionLoop({
+      name: 'coding', producer, reviewer, maxAttempts: 2,
+      isApproved: () => round >= 2,
+      explainGate: () => 'gate: env conjunct failed',
+    });
+    await stage.execute({
+      currentStage: 'coding',
+      telemetry: { totalCostUsd: 0, totalDurationMs: 0, stages: [] },
+      startedAt: 'now',
+    } as any, { workItemId: 1, workItem: {} as any, workItemType: 'Bug', config: {} as any } as any);
+
+    expect(gateFailuresSeen[0]).toBeUndefined();          // round 1: nothing failed yet
+    expect(gateFailuresSeen[1]).toBe('gate: env conjunct failed');  // round 2 sees round 1's gate failure
+  });
+});

@@ -420,6 +420,18 @@ export function createCoderConfig(config: PipelineConfig): AgentConfig<typeof Ch
       parts.push(...buildCodeRevisionSection(state));
       parts.push(...buildHumanFeedbackSection(state, 'coding'));
 
+      // The previous round was APPROVED by the reviewer but refused by the
+      // loop's gate. Without this the coder keeps polishing code the reviewer
+      // already accepted while the actual blocker stays invisible (WI 76447,
+      // then WI 81098).
+      if (state.gateFailure) {
+        parts.push(
+          ``,
+          `## 🚧 WHY THE LAST ROUND WAS NOT ACCEPTED (read first)`,
+          state.gateFailure,
+        );
+      }
+
       // Add environment info if available
       if (state.environment) {
         const envConfig = config.environment;
@@ -442,18 +454,19 @@ export function createCoderConfig(config: PipelineConfig): AgentConfig<typeof Ch
           `After coding and committing, deploy and test on the BC environment.`,
           `**Note:** env-provision has already installed deps + deployed the product app baseline from \`master\` and run core activation. You only need to upgrade with your branch changes.`,
           `1. Check env status: \`${cliPath} env get ${state.environment.envId} --json\``,
-          `2. If status is not "Running", poll every 15s until ready`,
-          `3. Deploy your branch (upgrades the existing app): \`${cliPath} deploy ${state.environment.envId} ${repoKey}/${layout.appRoot} --json\``,
-          `4. Deploy test code: \`${cliPath} deploy ${state.environment.envId} ${repoKey}/${layout.testAppRoot} --json\``,
-          `5. Run task-specific tests: \`${cliPath} test run ${state.environment.envId} <codeunitId>\``,
-          `6. If tests fail, fix code, re-deploy, and re-test until green`,
-          `7. Then trigger the CI pipeline as final validation`,
+          `2. If status is "Stopped" or "Draft", START it first: \`${cliPath} env start ${state.environment.envId}\` — a stopped env NEVER becomes Running on its own, polling it forever is wasted turns. Then poll \`env get\` every 30s until it reports Running.`,
+          `3. If status is a transitional state (Starting/Provisioning), poll every 30s until Running.`,
+          `4. Deploy your branch (upgrades the existing app): \`${cliPath} deploy ${state.environment.envId} ${repoKey}/${layout.appRoot} --json\``,
+          `5. Deploy test code: \`${cliPath} deploy ${state.environment.envId} ${repoKey}/${layout.testAppRoot} --json\``,
+          `6. Run task-specific tests: \`${cliPath} test run ${state.environment.envId} <codeunitId>\``,
+          `7. If tests fail, fix code, re-deploy, and re-test until green`,
+          `8. Then trigger the CI pipeline as final validation`,
           ``,
           `**Recovery:** If deploy fails with "missing symbols" or similar, run \`${cliPath} deps install ${state.environment.envId} <appPath> --json\` and \`${cliPath} deps download ${state.environment.envId} <appPath> --json\` for the affected app, then retry deploy.`,
           ``,
           `**Important:** Run deploy commands from the session root directory, not from inside ${repoKey}/.`,
           `**Important:** BC does not support parallel test jobs. Run tests sequentially.`,
-          `**Fallback:** If the environment fails to reach Running status within 20 minutes, skip env testing and proceed with CI-only validation.`,
+          `**Fallback:** If the environment is still not Running 20 minutes after your \`env start\` (or, for an env already Starting/Provisioning, 20 minutes after you first observed it), skip env testing and proceed with CI-only validation — and DECLARE the skip by setting \`envSkipReason\` in your final output, stating what you observed and when you started the env. An undeclared skip (envPublished false with no envSkipReason) makes the round unapprovable no matter what the reviewer says; the declared reason is shown to the humans reviewing the PR.`,
         );
 
         // Wizard reference — coder runs the wizard during its first iteration when

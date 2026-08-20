@@ -280,6 +280,15 @@ export interface PipelineState extends Partial<PipelineStateSlices> {
   };
 
   /**
+   * Why the last revision-loop gate refused an otherwise-approved round — e.g.
+   * the reviewer approved but an env conjunct was false. Rendered into the next
+   * round's producer prompt; without it the producer gets no signal which
+   * conjunct failed (WI 76447's recorded finding, live again on WI 81098 where
+   * the env conjuncts made every round unapprovable). Cleared on approval.
+   */
+  gateFailure?: string;
+
+  /**
    * Issue counts per round, keyed by loop name. The convergence trigger's input.
    * Reset when a human answers an escalation — their input is a new starting
    * condition, and carrying the old plateau forward would re-escalate at once.
@@ -608,6 +617,14 @@ export interface RevisionLoopConfig {
   reviewer: Stage;
   maxAttempts: number;
   isApproved: (state: PipelineState) => boolean;
+  /**
+   * When `isApproved` refuses a round, name why — but only when the refusal
+   * would otherwise be invisible (e.g. the reviewer approved and a non-review
+   * conjunct failed). Return undefined when the reviewer's own revision
+   * instructions already carry the reason. Stored as `state.gateFailure` for
+   * the next round's producer prompt; cleared on approval.
+   */
+  explainGate?: (state: PipelineState) => string | undefined;
   resetState?: (state: PipelineState) => PipelineState;
   /** Optional hook that runs after the producer and before the reviewer on each iteration. */
   postProducer?: (state: PipelineState, context: PipelineContext) => Promise<PipelineState>;

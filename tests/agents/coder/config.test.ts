@@ -517,3 +517,47 @@ describe('coder buildPrompt — rerunMode with no changeset', () => {
     expect(cfg.buildPrompt(state, ctx)).toContain('Check out the existing branch');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Env lifecycle in the coder prompt, and the gate-failure banner
+//
+// WI 81098: the env auto-stopped during an outage, the prompt only said "poll
+// until ready" (a Stopped env never self-starts), the coder took the documented
+// CI-only fallback — and the gate forbade that fallback, so every later round
+// was unapprovable with no explanation. Three prompt-level guarantees pinned:
+// ---------------------------------------------------------------------------
+
+describe('coder buildPrompt — env lifecycle and gate feedback', () => {
+  const cfg = createCoderConfig(mockPipelineConfig());
+  const ctx = { workItemId: 81098, workItemType: 'Bug', config: mockPipelineConfig() } as unknown as PipelineContext;
+  const withEnv = (extra?: Partial<PipelineState>) => freshState({
+    devPlan: { summary: 'x' } as any,
+    environment: { envId: 'env-1', url: 'https://x', activated: false } as any,
+    ...extra,
+  });
+
+  test('a Stopped env gets started, then waited on until Running', () => {
+    const prompt = cfg.buildPrompt(withEnv(), ctx);
+    expect(prompt).toContain('env start env-1');
+    expect(prompt).toContain('NEVER becomes Running on its own');
+    expect(prompt).toContain('until it reports Running');
+  });
+
+  test('the fallback demands a declared envSkipReason, with the consequence spelled out', () => {
+    const prompt = cfg.buildPrompt(withEnv(), ctx);
+    expect(prompt).toContain('envSkipReason');
+    expect(prompt).toContain('unapprovable');
+  });
+
+  test('a gate failure from the previous round is rendered prominently', () => {
+    const prompt = cfg.buildPrompt(withEnv({
+      gateFailure: 'The reviewer APPROVED this round, but the coding gate refused it: envPublished is not true.',
+    }), ctx);
+    expect(prompt).toContain('WHY THE LAST ROUND WAS NOT ACCEPTED');
+    expect(prompt).toContain('envPublished is not true');
+  });
+
+  test('no gate failure, no banner', () => {
+    expect(cfg.buildPrompt(withEnv(), ctx)).not.toContain('WHY THE LAST ROUND');
+  });
+});

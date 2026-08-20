@@ -142,6 +142,9 @@ export function formatChangesetSummary(changeset: Changeset, ciRunUrl?: string):
     `### Changes`,
     ``,
     `**Branch:** \`${changeset.branchName}\``,
+    ...(changeset.envSkipReason?.trim()
+      ? [`**⚠️ BC env validation skipped:** ${changeset.envSkipReason} — this change was validated by CI only, not on a live environment.`]
+      : []),
     ``,
   ];
 

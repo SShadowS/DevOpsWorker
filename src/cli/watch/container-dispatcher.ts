@@ -395,6 +395,23 @@ export async function executeContinue(
 
   logWI(workItemId, `Continuing pipeline with repo "${repoKey}"`);
 
+  // Kick the BC environment awake before the container starts. Demo envs
+  // auto-stop when idle, and a resume often follows exactly the kind of pause
+  // that idles them out (WI 81098: an 11-hour hang stopped its env, and the
+  // resumed coder could only poll a Stopped env it had no way to start).
+  // startEnv is fire-and-forget on the provider — the env boots while the
+  // container clones and warms up, and the coder's own env-start instruction
+  // remains the in-run fallback. Best-effort: a failure here must never block
+  // the resume, and idempotent on an already-Running env (same call the
+  // dashboard's Start button makes unconditionally).
+  const stateForEnv = await stateStore.load(workItemId);
+  if (stateForEnv?.environment?.envId) {
+    const { executeEnvStart } = await import('./env-actions.ts');
+    executeEnvStart(workItemId, stateForEnv, stateStore).catch((err) => {
+      logWI(workItemId, `Env pre-start failed (continuing anyway): ${err instanceof Error ? err.message : err}`);
+    });
+  }
+
   // Remove any stale container (but reuse existing workspace volume)
   await removeStaleContainer(workItemId);
 

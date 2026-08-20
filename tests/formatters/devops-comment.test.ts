@@ -561,3 +561,22 @@ describe('formatPlanComment — deferred acceptance criteria', () => {
     expect(out).not.toContain('Deferred');
   });
 });
+
+describe('formatChangesetSummary — declared env skip', () => {
+  const base = {
+    branchName: 'bug/#81098-x', branchUrl: 'u', filesCreated: [], filesModified: [],
+    commitMessage: 'm', ciResult: 'passed',
+  };
+
+  test('renders the skip so PR readers know env validation did not happen', () => {
+    const out = formatChangesetSummary({ ...base, envSkipReason: 'env Stopped; started 14:02; not Running by 14:25' } as any);
+    expect(out).toContain('env validation skipped');
+    expect(out).toContain('not Running by 14:25');
+    expect(out).toContain('CI only');
+  });
+
+  test('absent or blank reason renders nothing', () => {
+    expect(formatChangesetSummary(base as any)).not.toContain('skipped');
+    expect(formatChangesetSummary({ ...base, envSkipReason: '  ' } as any)).not.toContain('skipped');
+  });
+});

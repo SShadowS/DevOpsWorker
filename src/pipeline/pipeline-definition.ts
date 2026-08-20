@@ -24,10 +24,9 @@ import { docsWriterStage } from '../agents/docs-writer/config.ts';
 
 /**
  * Coding revision loop gate. Requires reviewer approval AND CI success, plus — when a BC
- * test environment was provisioned — successful env-publish AND passing env tests. The
- * env conditions are skipped only when no environment exists (so env-less pipelines aren't
- * permanently blocked); when an env is present, publishing + testing on a real BC env are
- * hard approval conditions.
+ * test environment was provisioned — successful env-publish AND passing env tests, OR a
+ * declared skip (`envSkipReason`) when the env was genuinely unusable. The env conditions
+ * are waived entirely only when no environment exists.
  */
 export function codingIsApproved(state: PipelineState): boolean {
   const lastReview = state.codeReviews?.at(-1);
@@ -35,11 +34,52 @@ export function codingIsApproved(state: PipelineState): boolean {
   const ciPassed = state.changeset?.ciResult === 'passed';
 
   const envExists = state.environment?.envId != null;
+  // A DECLARED skip (envSkipReason non-empty) satisfies the env conjunct: the
+  // coder's prompt documents a CI-only fallback for an unreachable env, and a
+  // gate that forbade the documented fallback made every post-fallback round
+  // unapprovable regardless of code quality (WI 81098: env auto-stopped during
+  // the LSP outage, fallback taken at 14:50, budget exhausted at 19:28 on a
+  // gate no round could pass). The skip is visible — formatChangesetSummary
+  // renders it — so the human approving the PR sees env validation was skipped.
+  const envSkipDeclared = Boolean(state.changeset?.envSkipReason?.trim());
   const envValidated =
     !envExists ||
+    envSkipDeclared ||
     (state.changeset?.envPublished === true && state.changeset?.envTestsPassed === true);
 
   return reviewerApproved && ciPassed && envValidated;
+}
+
+/**
+ * Name the conjunct that refused an otherwise-approved coding round.
+ *
+ * Only speaks when the reviewer approved — a `revise` verdict carries its own
+ * revisionInstructions and this would be noise beside them. Feeds the loop's
+ * `explainGate` hook, which stores it as `state.gateFailure` for the next
+ * round's coder prompt.
+ */
+export function explainCodingGate(state: PipelineState): string | undefined {
+  const lastReview = state.codeReviews?.at(-1);
+  if (lastReview?.verdict !== 'approve') return undefined;
+  if (codingIsApproved(state)) return undefined;
+
+  const failed: string[] = [];
+  if (state.changeset?.ciResult !== 'passed') {
+    failed.push(`ciResult=${state.changeset?.ciResult ?? 'undefined'} (must be 'passed')`);
+  }
+  const envExists = state.environment?.envId != null;
+  const envSkipDeclared = Boolean(state.changeset?.envSkipReason?.trim());
+  if (envExists && !envSkipDeclared) {
+    if (state.changeset?.envPublished !== true) failed.push('envPublished is not true');
+    if (state.changeset?.envTestsPassed !== true) failed.push('envTestsPassed is not true');
+  }
+  if (failed.length === 0) return undefined;
+  return (
+    `The reviewer APPROVED this round, but the coding gate refused it: ${failed.join('; ')}. `
+    + `Fix these conditions — the review feedback is not what is blocking you. `
+    + `If the BC environment is genuinely unusable, start it (env start), and only after a `
+    + `bounded wait declare the skip via envSkipReason.`
+  );
 }
 
 /**
@@ -202,6 +242,7 @@ export function buildDefaultPipeline(config: PipelineConfig): PipelineDefinition
       reviewer: codeReviewerStage(config),
       maxAttempts: config.revisionLoops.maxAttempts,
       isApproved: codingIsApproved,
+      explainGate: explainCodingGate,
       resetState: (state) => ({ ...state, codeReviews: [] }),
       postProducer: buildCIVerificationHook(config),
       countIssues: countCodeReviewIssues,
@@ -331,6 +372,7 @@ export function buildPipeline(config: PipelineConfig, repo: RepoConfig): Pipelin
       reviewer: codeReviewerStage(config),
       maxAttempts: config.revisionLoops.maxAttempts,
       isApproved: codingIsApproved,
+      explainGate: explainCodingGate,
       resetState: (state) => ({ ...state, codeReviews: [] }),
       postProducer: buildCIVerificationHook(config),
     }),

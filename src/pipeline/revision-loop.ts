@@ -185,13 +185,28 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
         if (config.isApproved(currentState)) {
           logger?.setAgentName('');
           logger?.log(`Reviewer approved on attempt ${attempt}`);
-          // Clear the budget so a later rewind to this loop starts fresh.
+          // Clear the budget so a later rewind to this loop starts fresh, and
+          // drop any stale gate-failure note — it described a round that is over.
           return {
             state: {
               ...currentState,
               revisionAttempts: { ...currentState.revisionAttempts, [config.name]: 0 },
+              gateFailure: undefined,
             },
           };
+        }
+
+        // Not approved. If the refusal would otherwise be invisible (reviewer
+        // approved, a non-review conjunct failed), name it — the next round's
+        // producer prompt renders it. Overwrites every round so it never goes
+        // stale; explainGate returning undefined clears it.
+        if (config.explainGate) {
+          const gateFailure = config.explainGate(currentState);
+          currentState = { ...currentState, gateFailure };
+          if (gateFailure) {
+            logger?.setAgentName('');
+            logger?.log(`Gate refused an approved round: ${gateFailure}`);
+          }
         }
 
         // Not approved. Before spending another round, ask whether the rounds so

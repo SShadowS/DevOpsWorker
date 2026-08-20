@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import type { PipelineConfig, PipelineState, Stage } from '../../src/types/pipeline.types.ts';
-import { buildDefaultPipeline, planningResetState, buildPipeline, codingIsApproved, countPlanReviewIssues, collectPlanReviewFindings} from '../../src/pipeline/pipeline-definition.ts';
+import { buildDefaultPipeline, planningResetState, buildPipeline, codingIsApproved, countPlanReviewIssues, collectPlanReviewFindings, explainCodingGate} from '../../src/pipeline/pipeline-definition.ts';
 import type { RepoConfig } from '../../src/config/repo-config.ts';
 
 // ---------------------------------------------------------------------------
@@ -340,5 +340,61 @@ describe('countPlanReviewIssues / collectPlanReviewFindings', () => {
       { issues: [{ description: 'AC6 undecided' }, { description: '' }] },
       { issues: [{ description: 'AC6 undecided' }, { description: 'null shape' }] },
     ]))).toEqual([['AC6 undecided'], ['AC6 undecided', 'null shape']]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The env conjuncts and the documented fallback
+//
+// The coder's prompt authorizes a CI-only fallback when the BC env is
+// unreachable, but the gate hard-required envPublished && envTestsPassed
+// whenever an environment existed — so a coder that followed the documented
+// fallback produced an unapprovable round. On 81098 the env auto-stopped
+// during the LSP outage, the coder correctly took the fallback at 14:50, and
+// every round after that was unwinnable regardless of code quality.
+// ---------------------------------------------------------------------------
+
+describe('codingIsApproved — env skip', () => {
+  const base = (changeset: Record<string, unknown>) => ({
+    codeReviews: [{ verdict: 'approve', feedback: 'f', issues: [] }],
+    changeset: { ciResult: 'passed', ...changeset },
+    environment: { envId: 'e-1' },
+  }) as any;
+
+  test('a declared skip makes the fallback approvable', () => {
+    expect(codingIsApproved(base({ envSkipReason: 'env Stopped for 3h; started, never reached Running' }))).toBe(true);
+  });
+
+  test('silently missing env validation still blocks — the skip must be declared', () => {
+    expect(codingIsApproved(base({ envPublished: false, envTestsPassed: false }))).toBe(false);
+  });
+
+  test('an empty-string reason is not a declaration', () => {
+    expect(codingIsApproved(base({ envSkipReason: '' }))).toBe(false);
+  });
+
+  test('real env validation still passes without any skip', () => {
+    expect(codingIsApproved(base({ envPublished: true, envTestsPassed: true }))).toBe(true);
+  });
+});
+
+describe('explainCodingGate', () => {
+  test('names the failing conjuncts when the reviewer approved', () => {
+    const msg = explainCodingGate({
+      codeReviews: [{ verdict: 'approve', feedback: 'f', issues: [] }],
+      changeset: { ciResult: 'passed', envPublished: false, envTestsPassed: false },
+      environment: { envId: 'e-1' },
+    } as any)!;
+    expect(msg).toContain('envPublished');
+    expect(msg).toContain('envTestsPassed');
+    expect(msg).not.toContain('ciResult');
+  });
+
+  test('silent when the reviewer asked for revision — its instructions dominate', () => {
+    expect(explainCodingGate({
+      codeReviews: [{ verdict: 'revise', feedback: 'f', issues: [] }],
+      changeset: { ciResult: 'passed' },
+      environment: { envId: 'e-1' },
+    } as any)).toBeUndefined();
   });
 });
