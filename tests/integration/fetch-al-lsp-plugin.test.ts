@@ -34,6 +34,11 @@ function headSha(repoDir: string): string {
     .stdout.toString().trim();
 }
 
+function isShallow(repoDir: string): boolean {
+  return Bun.spawnSync(['git', '-C', repoDir, 'rev-parse', '--is-shallow-repository'])
+    .stdout.toString().trim() === 'true';
+}
+
 describe('fetch-al-lsp-plugin', () => {
   test('checks out exactly the pinned ref', () => {
     const cache = mkdtempSync(join(tmpdir(), 'al-lsp-pin-'));
@@ -86,7 +91,15 @@ describe('fetch-al-lsp-plugin', () => {
         'https://github.com/SShadowS/claude-code-lsps.git', repo,
       ]);
       expect(seed.exitCode).toBe(0);
-      expect(headSha(repo)).toBe(PINNED); // shallow clone's tip is the pin's SHA today
+      // These are the two properties the test actually depends on: a
+      // shallow clone, checked out somewhere other than OLDER_VALID_COMMIT.
+      // Asserting the seed's tip equals PINNED (the default branch's tip
+      // today) would self-invalidate the moment upstream merges past the
+      // pin — the exact drift this task exists to defend against — and
+      // then fail this test for a reason that has nothing to do with the
+      // fix under test.
+      expect(isShallow(repo)).toBe(true);
+      expect(headSha(repo)).not.toBe(OLDER_VALID_COMMIT);
 
       const r = run(cache, OLDER_VALID_COMMIT);
       expect(r.exitCode).toBe(0);
