@@ -69,37 +69,42 @@ curl -sS -L --connect-timeout 15 --max-time 300 \
 
 # --- Extract only the bin directory (saves space — skip dist/, node_modules/, etc.) ---
 echo "Extracting AL extension..."
-rm -rf "${EXTENSION_DIR}/bin" /tmp/al-vsix-extract
-# VSIX contains files under extension/ prefix
-unzip -q -o "${VSIX_FILE}" "extension/bin/*" -d "/tmp/al-vsix-extract" || {
-  echo "WARNING: Failed to extract AL extension VSIX"
-  rm -f "${VSIX_FILE}"
-  exit 0
+# --- Extract to a STAGING dir; the live cache is never touched until verified ---
+#
+# The original deleted ${EXTENSION_DIR}/bin before extracting. When 18.0.2668733
+# shipped a Windows-only payload, that delete removed the working Linux server
+# out from under live containers reading the same /state volume, and the
+# post-extract check could only warn about a cache it had already destroyed.
+STAGING="$(mktemp -d "${CACHE_DIR}/.al-ext-staging-XXXXXX")"
+cleanup_staging() { rm -rf "${STAGING}" /tmp/al-vsix-extract "${VSIX_FILE}"; }
+trap cleanup_staging EXIT
+
+unzip -q -o "${VSIX_FILE}" "extension/bin/*" -d /tmp/al-vsix-extract || {
+  echo "ERROR: failed to extract AL extension VSIX"
+  exit 1
 }
+mv /tmp/al-vsix-extract/extension/bin "${STAGING}/bin"
 
-# Move bin/ to cache dir (strip the extension/ prefix)
-mv /tmp/al-vsix-extract/extension/bin "${EXTENSION_DIR}/bin"
-rm -rf /tmp/al-vsix-extract "${VSIX_FILE}"
-
-# --- Verify and fix permissions ---
-AL_BINARY="${EXTENSION_DIR}/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
-if [ ! -f "${AL_BINARY}" ]; then
-  echo "WARNING: AL Language Server binary not found after extraction"
-  exit 0
-fi
-chmod +x "${AL_BINARY}"
-
-# --- Verify + make the alc compiler executable (the VSIX ships it -x'd) ---
-# Without this the CLI fails with EACCES posix_spawn; with a corrupt alc it would
-# otherwise hang. Validate it is a real ELF and bail loud if the VSIX changed shape.
-ALC_LINUX="${EXTENSION_DIR}/bin/linux/alc"
-if is_real_alc "${ALC_LINUX}"; then
-  chmod +x "${ALC_LINUX}"
-  # --- Write version marker ---
-  echo "${TARGET_VERSION}" > "${VERSION_FILE}"
-  echo "AL extension v${TARGET_VERSION} installed to ${EXTENSION_DIR}"
-else
-  echo "WARNING: extracted alc is not a valid ELF binary at ${ALC_LINUX} — refusing to cache this version"
-  rm -f "${ALC_LINUX}" "${VERSION_FILE}"
+# --- Verify the STAGED payload before it can replace anything ---
+STAGED_HOST="${STAGING}/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+if ! is_real_alc "${STAGED_HOST}"; then
+  echo "ERROR: ${TARGET_VERSION} has no Linux language server at bin/linux/ —"
+  echo "       refusing to install it. The existing cache is left untouched."
   exit 1
 fi
+if ! is_real_alc "${STAGING}/bin/linux/alc"; then
+  echo "ERROR: ${TARGET_VERSION} has no valid Linux alc — refusing to install it."
+  exit 1
+fi
+chmod +x "${STAGED_HOST}" "${STAGING}/bin/linux/alc"
+
+# --- Swap in: verified payload replaces the live one as late as possible ---
+OLD_BIN="${EXTENSION_DIR}/bin.old.$$"
+if [ -d "${EXTENSION_DIR}/bin" ]; then
+  mv "${EXTENSION_DIR}/bin" "${OLD_BIN}"
+fi
+mv "${STAGING}/bin" "${EXTENSION_DIR}/bin"
+rm -rf "${OLD_BIN}"
+
+echo "${TARGET_VERSION}" > "${VERSION_FILE}"
+echo "AL extension v${TARGET_VERSION} installed to ${EXTENSION_DIR}"

@@ -102,3 +102,39 @@ describe('fetch-al-extension: pinned version', () => {
     }
   });
 });
+
+describe('fetch-al-extension: a bad payload must not destroy a good cache', () => {
+  // Downloads and unzips the known-bad VSIX for real — same platform gap as
+  // the pinned-version download test above (SKIP_REASON_NON_LINUX).
+  test.skipIf(skipDownloadTests)(
+    `keeps the existing cache and exits non-zero when the version has no Linux server (${SKIP_REASON_NON_LINUX})`,
+    () => {
+      const cache = mkdtempSync(join(tmpdir(), 'al-ext-bad-'));
+      try {
+        // Pre-populate a "known good" cache: an ELF-magic host plus alc.
+        const binLinux = join(cache, 'al-extension', 'bin', 'linux');
+        mkdirSync(binLinux, { recursive: true });
+        const elf = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]);
+        writeFileSync(join(binLinux, 'Microsoft.Dynamics.Nav.EditorServices.Host'), elf);
+        writeFileSync(join(binLinux, 'alc'), elf);
+        writeFileSync(join(cache, 'al-extension', '.version'), '18.0.2498801\n');
+
+        // 18.0.2668733 is Windows-only — the exact payload that broke production.
+        const r = runFetch(cache, '18.0.2668733');
+
+        expect(r.exitCode).not.toBe(0);
+
+        // The good cache survives, byte-for-byte.
+        const host = join(binLinux, 'Microsoft.Dynamics.Nav.EditorServices.Host');
+        expect(existsSync(host)).toBe(true);
+        expect(isElf(host)).toBe(true);
+        // And the marker still names the version that is actually installed.
+        expect(readFileSync(join(cache, 'al-extension', '.version'), 'utf8').trim())
+          .toBe('18.0.2498801');
+      } finally {
+        rmSync(cache, { recursive: true, force: true });
+      }
+    },
+    300_000
+  );
+});
