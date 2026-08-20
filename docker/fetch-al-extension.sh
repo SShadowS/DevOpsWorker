@@ -12,6 +12,8 @@ EXTENSION_DIR="${CACHE_DIR}/al-extension"
 VERSION_FILE="${EXTENSION_DIR}/.version"
 PUBLISHER="ms-dynamics-smb"
 EXTENSION="al"
+LOCK_FILE="${CACHE_DIR}/.al-extension.lock"
+LOCK_DIR="${LOCK_FILE}.d"
 
 mkdir -p "${EXTENSION_DIR}"
 
@@ -43,17 +45,88 @@ echo "AL extension: using pinned version ${TARGET_VERSION}"
 # --- Check if already cached ---
 # Re-extract when the version differs OR when the cached alc is corrupt — a
 # matching version marker is NOT sufficient if the binary itself is garbage.
+is_cached() {
+  [ -f "${VERSION_FILE}" ] || return 1
+  [ "$(cat "${VERSION_FILE}")" = "${TARGET_VERSION}" ] || return 1
+  is_real_alc "${EXTENSION_DIR}/bin/linux/alc"
+}
+
+# --- Cleanup, armed for the whole script. Safe to call at any point: STAGING
+# and USE_MKDIR_LOCK are only ever non-empty/1 once the corresponding
+# resource actually exists, so an exit before that point is a no-op here. ---
+STAGING=""
+VSIX_FILE=""
+USE_MKDIR_LOCK=0
+cleanup() {
+  [ -n "${STAGING}" ] && rm -rf "${STAGING}"
+  [ -n "${VSIX_FILE}" ] && rm -f "${VSIX_FILE}"
+  rm -rf /tmp/al-vsix-extract
+  if [ "${USE_MKDIR_LOCK}" = "1" ]; then
+    rmdir "${LOCK_DIR}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+# --- Fast path (unlocked): the existing cache is already at the target
+# version with a real alc. No download, no network, no lock. This must stay
+# the common case: every container start after the first hits this and
+# returns immediately. ---
+if is_cached; then
+  echo "AL extension ${TARGET_VERSION} already cached"
+  exit 0
+fi
+
 if [ -f "${VERSION_FILE}" ]; then
   CACHED_VERSION=$(cat "${VERSION_FILE}")
   if [ "${CACHED_VERSION}" = "${TARGET_VERSION}" ]; then
-    if is_real_alc "${EXTENSION_DIR}/bin/linux/alc"; then
-      echo "AL extension ${TARGET_VERSION} already cached"
-      exit 0
-    fi
     echo "WARNING: cached AL extension ${TARGET_VERSION} has a corrupt alc (not an ELF binary) — re-extracting"
   else
     echo "Upgrading AL extension from ${CACHED_VERSION} to ${TARGET_VERSION}"
   fi
+fi
+
+# --- Take an exclusive lock before touching anything on the shared cache
+# volume. A version bump is exactly the moment every container on the fleet
+# fails the fast path above at once; without this, two containers racing the
+# swap can nest one staged bin/ inside the other (bin/bin/…) instead of
+# replacing it — see fetch-al-lsp-plugin.sh, which hit the identical race on
+# its own swap. The lock covers everything from here through the download,
+# the swap, and the old-directory removal. It lives in CACHE_DIR, not inside
+# EXTENSION_DIR, so a lock file can never end up moved by the swap it is
+# guarding.
+#
+# Prefer flock (a real kernel lock: blocks efficiently, auto-releases if the
+# holder crashes) — it ships in the production image (util-linux, verified
+# present in debian:bookworm-slim, the base this runs in). Where it is not
+# available — Git Bash/MSYS2 on Windows, used to run this script's tests
+# locally, has no flock — fall back to an mkdir-based mutex. mkdir is atomic
+# on any POSIX filesystem: of N concurrent `mkdir` calls on the same path,
+# exactly one succeeds, so polling it gives the same single-winner guarantee
+# flock gives, just without kernel-assisted blocking or automatic release on
+# crash (hence the bounded wait below and the rmdir in cleanup).
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"${LOCK_FILE}"
+  flock -x 9
+else
+  USE_MKDIR_LOCK=1
+  attempts=0
+  until mkdir "${LOCK_DIR}" 2>/dev/null; do
+    attempts=$((attempts + 1))
+    if [ "${attempts}" -ge 300 ]; then
+      echo "ERROR: timed out waiting for the AL extension lock (${LOCK_DIR})"
+      exit 1
+    fi
+    sleep 0.2
+  done
+fi
+
+# --- Re-check under the lock: another container may have already staged and
+# swapped in this version while we were waiting for it. This is what makes a
+# fleet-wide version bump cost exactly one download instead of one per
+# container. ---
+if is_cached; then
+  echo "AL extension ${TARGET_VERSION} already cached (installed by a concurrent container)"
+  exit 0
 fi
 
 # --- Download VSIX ---
@@ -75,9 +148,12 @@ echo "Extracting AL extension..."
 # shipped a Windows-only payload, that delete removed the working Linux server
 # out from under live containers reading the same /state volume, and the
 # post-extract check could only warn about a cache it had already destroyed.
+#
+# STAGING is assigned into the variable the cleanup trap (armed above,
+# alongside the lock) already watches — a second `trap ... EXIT` here would
+# silently replace that handler and drop the lock release, so this reuses it
+# instead of declaring its own.
 STAGING="$(mktemp -d "${CACHE_DIR}/.al-ext-staging-XXXXXX")"
-cleanup_staging() { rm -rf "${STAGING}" /tmp/al-vsix-extract "${VSIX_FILE}"; }
-trap cleanup_staging EXIT
 
 rm -rf /tmp/al-vsix-extract
 unzip -q -o "${VSIX_FILE}" "extension/bin/*" -d /tmp/al-vsix-extract || {
