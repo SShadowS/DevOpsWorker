@@ -106,3 +106,43 @@ describe('STAGE_COMMENTS', () => {
     expect(STAGE_COMMENTS['planning']!.format).toBe('markdown');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Convergence escalation comments, per loop
+//
+// The escalation formatter reads state.convergenceEscalation regardless of
+// which loop set it. Each stage entry must therefore gate on the LOOP NAME:
+// after a /rerun-plan from a convergence:coding pause, the coding escalation
+// marker is still in state when planning completes — without the guard the
+// planning entry would post the coding escalation instead of the dev plan.
+// ---------------------------------------------------------------------------
+
+describe('STAGE_COMMENTS — convergence escalation routing', () => {
+  const escalation = (loop: string) => ({
+    loop,
+    issueCounts: [11, 11, 11],
+    recurringFindings: ['the same objection three rounds running'],
+    question: `Reply with the loop-appropriate command for ${loop}.`,
+  });
+
+  test('planning escalation posts the escalation, not the plan', () => {
+    const s = { ...stateFor('planning'), convergenceEscalation: escalation('planning') } as any;
+    const out = STAGE_COMMENTS['planning']!.fn(81493, s)!;
+    expect(out).toContain('not converging');
+    expect(out).not.toContain('Dev Plan');
+  });
+
+  test('a stale coding escalation does not hijack the planning comment', () => {
+    const s = { ...stateFor('planning'), convergenceEscalation: escalation('coding') } as any;
+    const out = STAGE_COMMENTS['planning']!.fn(81493, s)!;
+    expect(out).toContain('Dev Plan');
+    expect(out).not.toContain('not converging');
+  });
+
+  test('coding entry is symmetric: fires only for its own loop', () => {
+    const stale = { ...stateFor('coding'), convergenceEscalation: escalation('planning') } as any;
+    expect(STAGE_COMMENTS['coding']!.fn(81493, stale)).toBeNull();
+    const own = { ...stateFor('coding'), convergenceEscalation: escalation('coding') } as any;
+    expect(STAGE_COMMENTS['coding']!.fn(81493, own)).toContain('not converging');
+  });
+});

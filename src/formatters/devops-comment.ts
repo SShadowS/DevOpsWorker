@@ -74,6 +74,24 @@ export function formatPlanComment(
   L.push(`## 🤖 Dev Plan — Work Item #${workItemId}`, '');
   L.push(plan.summary.trim(), '');
 
+  // Deferred ACs come BEFORE everything else: the plan-approval checkpoint is
+  // where a human decides them, and approving the plan approves the deferral.
+  // Buried at the bottom, a deferral is a silent scope cut nobody saw.
+  const deferred = plan.deferredAcceptanceCriteria ?? [];
+  if (deferred.length > 0) {
+    L.push(`### ⚠️ Deferred acceptance criteria — your decision`, '');
+    L.push(
+      `The plan deliberately does not implement the item(s) below; each needs a scope `
+        + `decision only a human can make. **Approving this plan approves the deferral.** `
+        + `If any must be in scope, reply \`/rerun-plan\` saying which.`,
+      '',
+    );
+    for (const d of deferred) {
+      L.push(`- **${d.criterion}** — ${d.reason}`);
+    }
+    L.push('');
+  }
+
   // Objects overview table
   const verb = plan.objects.some(o => o.action === 'create') ? 'create/' : '';
   L.push(`### Objects to ${verb}modify`, '');

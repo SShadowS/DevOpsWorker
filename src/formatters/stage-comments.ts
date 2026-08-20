@@ -33,14 +33,24 @@ export const STAGE_COMMENTS: Record<string, StageComment> = {
     fn: (wid, s) => (s.readiness ? formatReadinessComment(wid, s.readiness) : null),
     format: 'html',
   },
+  // Both loop entries gate the escalation comment on the LOOP NAME, not just on
+  // the marker's presence: after a /rerun-plan from a convergence:coding pause,
+  // the coding escalation marker is still in state when planning completes, and
+  // an unguarded check would post the coding escalation instead of the plan.
   planning: {
-    fn: (wid, s) => (s.devPlan ? formatPlanComment(wid, s.devPlan) : null),
+    fn: (wid, s) =>
+      s.convergenceEscalation?.loop === 'planning'
+        ? formatConvergenceEscalation(wid, s)
+        : s.devPlan
+          ? formatPlanComment(wid, s.devPlan)
+          : null,
     format: 'markdown',
   },
-  // Fires only when the loop escalated — the formatter returns null otherwise,
-  // so a normal `coding` completion posts nothing.
+  // Fires only when THIS loop escalated — null otherwise, so a normal `coding`
+  // completion posts nothing.
   coding: {
-    fn: formatConvergenceEscalation,
+    fn: (wid, s) =>
+      s.convergenceEscalation?.loop === 'coding' ? formatConvergenceEscalation(wid, s) : null,
     format: 'markdown',
   },
 };

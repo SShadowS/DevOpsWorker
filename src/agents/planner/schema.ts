@@ -31,6 +31,11 @@ export const RiskAssessmentSchema = z.object({
   mitigations: z.array(z.string()),
 });
 
+export const DeferredAcceptanceCriterionSchema = z.object({
+  criterion: z.string().describe('The acceptance criterion being deferred, quoted or numbered as the work item states it'),
+  reason: z.string().describe('The scope/product decision a human must make — why this cannot be settled by revising the plan'),
+});
+
 export const DevPlanSchema = z.object({
   summary: z.string().describe('High-level summary of the implementation approach'),
   objects: z.array(ALObjectChangeSchema).describe('AL objects to create or modify'),
@@ -38,6 +43,12 @@ export const DevPlanSchema = z.object({
   riskAssessment: RiskAssessmentSchema,
   estimatedComplexity: z.enum(['trivial', 'simple', 'moderate', 'complex', 'very-complex']),
   dependencies: z.array(z.string()).describe('External dependencies or prerequisite changes'),
+  // The formal exit from the include/exclude/self-authorize triple bind: an AC
+  // whose inclusion is a scope decision gets deferred to the human at the
+  // plan-approval checkpoint instead of being re-litigated every review round.
+  // Work items 81098 and 81493 each burned planning rounds for lack of this.
+  deferredAcceptanceCriteria: z.array(DeferredAcceptanceCriterionSchema).optional()
+    .describe('ACs deliberately NOT implemented by this plan, pending a human scope decision at plan approval'),
   notes: z.string().optional().describe('Additional notes or considerations'),
 });
 

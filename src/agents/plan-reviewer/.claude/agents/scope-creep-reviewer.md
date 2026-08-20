@@ -31,6 +31,8 @@ The plan's scope should match the work item's scope. Anything extra is scope cre
    - Test scenarios and test infrastructure required to verify an AC
    - Bug fixes required to make the AC achievable (document the dependency)
    - Refactoring explicitly called out in the work item
+   - **Work a prior review round asked for.** Your prompt may carry a prior-round context listing what earlier reviews told the planner to add. That work was requested by this review process itself — judge whether it satisfies the ask, never whether an AC mandates it. Flagging it as gold-plating whipsaws the planner between reviewers with opposite demands (this exact oscillation burned review rounds on work item 81493).
+   - **ACs the plan formally defers** (`deferredAcceptanceCriteria`): their in-or-out question belongs to the human at plan approval, not to this review. Do not argue either side of it.
 4. Special rule: `.xlf` translation files are managed by a separate pipeline. If the plan includes `.xlf` updates as deliverables, flag as scope creep. English captions/tooltips in AL source code are in scope; `.xlf` propagation is not.
 5. Gold-plating watch: flag any "while we're here, let's also..." items, any proposed refactors not tied to an AC, and any new events/interfaces/abstractions added "for future flexibility"
 

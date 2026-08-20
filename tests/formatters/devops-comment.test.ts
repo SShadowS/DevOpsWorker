@@ -520,3 +520,44 @@ describe('formatTelemetrySummary', () => {
     expect(out).toContain('0.0s');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Deferred acceptance criteria on the plan comment
+//
+// A deferred AC is a scope decision the planner formally handed to a human.
+// The plan-approval checkpoint is where that human decides — so the comment
+// must surface deferrals prominently, or approving the plan silently approves
+// a scope cut nobody saw. (Work items 81098 and 81493 each burned planning
+// rounds because an undecidable AC had no way OUT of the review loop.)
+// ---------------------------------------------------------------------------
+
+describe('formatPlanComment — deferred acceptance criteria', () => {
+  const basePlan = {
+    summary: 'Fix the token expiry arithmetic.',
+    objects: [{ action: 'modify', objectType: 'codeunit', objectId: 1, objectName: 'OAuth Mgt', description: 'fix', filePath: 'src/OAuth.Codeunit.al' }],
+    testScenarios: [],
+    riskAssessment: { level: 'low', factors: [], mitigations: [] },
+    estimatedComplexity: 'simple',
+    dependencies: [],
+  };
+
+  test('renders each deferral with its reason, before the objects table', () => {
+    const out = formatPlanComment(81493, {
+      ...basePlan,
+      deferredAcceptanceCriteria: [
+        { criterion: 'AC6: hardening bundle (refresh margins, retry path)', reason: 'Shipping three shared-table changes inside a hotfix is a scope decision.' },
+      ],
+    } as any);
+    expect(out).toContain('AC6: hardening bundle');
+    expect(out).toContain('scope decision');
+    // Prominence: the deferral section must come before the objects table.
+    expect(out.indexOf('Deferred')).toBeLessThan(out.indexOf('Objects to'));
+    // The reader is told what approving means and how to override.
+    expect(out).toContain('/rerun-plan');
+  });
+
+  test('no deferrals, no section — the common case stays clean', () => {
+    const out = formatPlanComment(81493, basePlan as any);
+    expect(out).not.toContain('Deferred');
+  });
+});

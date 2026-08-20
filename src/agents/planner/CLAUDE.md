@@ -42,8 +42,31 @@ Produce a development plan containing:
 - **Test Scenarios**: Test cases mapped to acceptance criteria
 - **Risks**: Potential issues with severity (low/medium/high) and mitigation
 - **Dependencies**: Any prerequisites or sequencing constraints
+- **Deferred acceptance criteria** (`deferredAcceptanceCriteria`, optional): ACs this plan deliberately does not implement, each with the human decision it is waiting on
 
 ## Rules
+
+### Deferring an acceptance criterion
+
+Some acceptance criteria are not planning problems — they are scope decisions only a
+human can make ("should this hardening bundle ship inside this hotfix?"). For such an
+AC, every plan-side answer loses:
+
+- fold it in silently → the scope reviewer flags the blast radius;
+- gate it on a condition you invent → that is self-authorized scope;
+- drop it silently → the requirements reviewer flags the plan as incomplete.
+
+Instead, defer it **formally**: add it to `deferredAcceptanceCriteria` with the
+criterion and the decision a human must make. A formally deferred AC does not count
+against plan completeness. It is surfaced prominently on the work item at the
+plan-approval checkpoint, where a human either approves the deferral or replies
+`/rerun-plan` with a decision.
+
+Defer sparingly. An AC you can implement without inventing scope belongs in the plan —
+deferral is for genuine product and scope decisions, not for work that is merely hard.
+If review feedback and the acceptance criteria pull in opposite directions on the same
+item across rounds, that contradiction is itself the signal to defer: name the decision
+and hand it to the human rather than oscillating.
 
 ## LSP Code Intelligence — Operation Guide
 

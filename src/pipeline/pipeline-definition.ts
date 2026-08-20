@@ -55,6 +55,40 @@ export function countCodeReviewIssues(state: PipelineState): number | undefined 
   return Array.isArray(last?.issues) ? last.issues.length : undefined;
 }
 
+/** Issue count of the newest plan review — feeds the planning convergence trigger. */
+export function countPlanReviewIssues(state: PipelineState): number | undefined {
+  const last = state.planReviews?.at(-1) as { issues?: unknown[] } | undefined;
+  return Array.isArray(last?.issues) ? last.issues.length : undefined;
+}
+
+/** Finding texts per plan-review round, oldest first. Plan-review issues carry
+ *  `description` where code-review issues carry `comment` — same information,
+ *  different spelling (see REVIEWS_BY_LOOP's normaliser for the third variant). */
+export function collectPlanReviewFindings(state: PipelineState): string[][] {
+  return (state.planReviews ?? []).map((r) => {
+    const issues = (r as { issues?: Array<{ description?: string }> }).issues ?? [];
+    return issues.map((i) => i.description ?? '').filter(Boolean);
+  });
+}
+
+/** Convergence config for the planning loop — shared by both pipeline builders.
+ *
+ *  Extended beyond coding on 2026-08-20: work items 81098 and 81493 each
+ *  exhausted five planning rounds. Honestly noted: their counts wobbled
+ *  downward (13→9→12→10→8), which the strict non-decreasing plateau test does
+ *  NOT catch — those two runs were cured by the deferred-AC mechanism instead.
+ *  This trigger is the backstop for the genuinely flat case, where asking a
+ *  human one round earlier is strictly cheaper than burning the budget. */
+const PLANNING_CONVERGENCE = {
+  window: 3,
+  question:
+    'The plan review has run several rounds without the finding count going down, '
+    + 'so it is not converging on its own. Please look at the recurring findings above '
+    + 'and reply with a decision: which of them should actually be fixed, which are '
+    + 'wrong or out of scope, and anything the reviewers are missing. '
+    + 'Reply with `/rerun-plan <your answer>` to resume the planner with that direction.',
+};
+
 /** Finding texts per code-review round, oldest first. */
 export function collectCodeReviewFindings(state: PipelineState): string[][] {
   return (state.codeReviews ?? []).map((r) => {
@@ -143,6 +177,9 @@ export function buildDefaultPipeline(config: PipelineConfig): PipelineDefinition
         return lastReview?.verdict === 'approve';
       },
       resetState: planningResetState,
+      countIssues: countPlanReviewIssues,
+      collectFindingTexts: collectPlanReviewFindings,
+      convergence: PLANNING_CONVERGENCE,
     }),
 
     // 3. CHECKPOINT: Human approves plan
@@ -169,9 +206,9 @@ export function buildDefaultPipeline(config: PipelineConfig): PipelineDefinition
       postProducer: buildCIVerificationHook(config),
       countIssues: countCodeReviewIssues,
       collectFindingTexts: collectCodeReviewFindings,
-      // Only the coding loop for now: it is the one observed not converging, and
-      // the trigger is unproven. Planning and test-cases keep budget-exhaustion as
-      // their sole non-approval exit until this earns wider use.
+      // Planning gained the same trigger on 2026-08-20 (see PLANNING_CONVERGENCE);
+      // test-cases keeps budget-exhaustion as its sole non-approval exit until a
+      // stall is actually observed there.
       convergence: {
         window: 3,
         question:
@@ -266,6 +303,9 @@ export function buildPipeline(config: PipelineConfig, repo: RepoConfig): Pipelin
       maxAttempts: config.revisionLoops.maxAttempts,
       isApproved: (state) => state.planReviews?.at(-1)?.verdict === 'approve',
       resetState: planningResetState,
+      countIssues: countPlanReviewIssues,
+      collectFindingTexts: collectPlanReviewFindings,
+      convergence: PLANNING_CONVERGENCE,
     }),
 
     // 3. Always: Plan approval checkpoint

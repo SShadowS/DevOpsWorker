@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import type { PipelineConfig, PipelineState, Stage } from '../../src/types/pipeline.types.ts';
-import { buildDefaultPipeline, planningResetState, buildPipeline, codingIsApproved } from '../../src/pipeline/pipeline-definition.ts';
+import { buildDefaultPipeline, planningResetState, buildPipeline, codingIsApproved, countPlanReviewIssues, collectPlanReviewFindings} from '../../src/pipeline/pipeline-definition.ts';
 import type { RepoConfig } from '../../src/config/repo-config.ts';
 
 // ---------------------------------------------------------------------------
@@ -313,5 +313,32 @@ describe('buildPipeline', () => {
     expect(indexOf('test-case-activation')).toBeLessThan(indexOf('checkpoint:pr-completed'));
     expect(indexOf('checkpoint:pr-completed')).toBeLessThan(indexOf('documenter'));
     expect(indexOf('docs-writer')).toBeGreaterThan(indexOf('documenter'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Planning convergence helpers
+// ---------------------------------------------------------------------------
+
+describe('countPlanReviewIssues / collectPlanReviewFindings', () => {
+  const state = (planReviews: unknown) => ({ planReviews }) as any;
+
+  test('counts the newest review round only', () => {
+    expect(countPlanReviewIssues(state([
+      { issues: [{}, {}, {}] },
+      { issues: [{}] },
+    ]))).toBe(1);
+  });
+
+  test('undefined before any review — the trigger has nothing to measure', () => {
+    expect(countPlanReviewIssues(state(undefined))).toBeUndefined();
+    expect(countPlanReviewIssues(state([{ verdict: 'revise' }]))).toBeUndefined();
+  });
+
+  test('collects description texts per round, oldest first, dropping empties', () => {
+    expect(collectPlanReviewFindings(state([
+      { issues: [{ description: 'AC6 undecided' }, { description: '' }] },
+      { issues: [{ description: 'AC6 undecided' }, { description: 'null shape' }] },
+    ]))).toEqual([['AC6 undecided'], ['AC6 undecided', 'null shape']]);
   });
 });

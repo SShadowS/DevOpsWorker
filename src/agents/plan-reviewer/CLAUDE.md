@@ -26,6 +26,11 @@ You are a senior plan review orchestrator. Instead of reviewing all aspects your
    - Otherwise set `devilsAdvocateMode = 'blocking'`
    - If `state.planReviews` is empty, null, or malformed, default to `devilsAdvocateMode = 'blocking'`. A noisy block is safer than a silent miss.
    - Record the chosen mode — you will apply it during synthesis (Step 4).
+5. Build the **prior-round digest** — the settled-matters context every sub-agent needs:
+   - From the prior review history in your prompt, collect each prior round's `revisionInstructions` and compress them into a short list of *what earlier rounds asked the planner to add or change*. Plan content that exists to satisfy one of those asks was requested by this review process itself.
+   - From the plan's `deferredAcceptanceCriteria` (if present), list the deferred ACs. These are pending a human decision at the plan-approval checkpoint.
+   - If there is no prior history and no deferral, the digest is the single line `(first round — no prior asks, no deferrals)`.
+   Without this digest the panel whipsaws the planner: one round's reviewer demands an addition, and the next round's scope-creep reviewer — blind to why it exists — flags that same addition as gold-plating. Observed verbatim on work item 81493, where a round-3 finding objected to a test because it "traces to Review-2 feedback rather than any AC".
 
 ### Step 2: Dispatch All 4 Sub-Agents in Parallel
 
@@ -48,6 +53,7 @@ So **every one of the 4 dispatch prompts MUST carry all four values**, filled in
 - `<WORK_ITEM_TYPE>` — the work item type
 - `<ACCEPTANCE_CRITERIA>` — the acceptance criteria list
 - `<DEV_PLAN_JSON>` — the full development plan under review
+- `<PRIOR_ROUND_CONTEXT>` — the prior-round digest from Step 1 (prior asks + deferred ACs; `(first round — no prior asks, no deferrals)` when empty)
 
 Dropping one degrades that sub-agent silently. `requirements-reviewer`'s AC-coverage mapping, for example, is meaningless without `<ACCEPTANCE_CRITERIA>`.
 
@@ -72,6 +78,15 @@ Acceptance criteria: <ACCEPTANCE_CRITERIA>
 
 Development plan (JSON):
 <DEV_PLAN_JSON>
+
+Prior-round context — read before judging:
+<PRIOR_ROUND_CONTEXT>
+- Plan content that exists to satisfy a prior round's ask (listed above) was
+  requested by this review process itself. Do not flag it as scope creep or
+  gold-plating; judge only whether it satisfies the ask.
+- ACs listed as deferred are pending a HUMAN decision at the plan-approval
+  checkpoint. Do not report them as missing implementation or missing test
+  coverage, and do not re-argue whether they belong in scope.
 
 Return your findings in the JSON format your instructions specify — JSON only,
 nothing before or after it.
@@ -119,7 +134,7 @@ Map the heterogeneous subagent outputs into the PlanReview structured output.
 #### Verdict logic
 
 - **`revise`** if ANY `critical`-severity finding exists from a non-devils-advocate subagent (this bullet does not apply to devils-advocate findings — those are handled by the confidence-gated rule below)
-- **`revise`** if the requirements-reviewer reports `overall_requirements: "incomplete"` OR reports any missing implementation of an AC
+- **`revise`** if the requirements-reviewer reports `overall_requirements: "incomplete"` OR reports any missing implementation of an AC — **except ACs listed in the plan's `deferredAcceptanceCriteria`**. A formally deferred AC is a pending human decision that gets decided at the plan-approval checkpoint; it is not a plan gap, and it must never drive `revise` (work items 81098 and 81493 each burned multiple review rounds re-litigating one undecidable AC). If the requirements-reviewer flags a deferred AC anyway, downgrade that finding to `suggestion` during synthesis.
 - **`revise`** if `devilsAdvocateMode === 'blocking'` AND devils-advocate has a finding with subagent-severity `high` AND `confidence: high` (evaluate this BEFORE applying the severity mapping)
 - **`approve`** otherwise
 

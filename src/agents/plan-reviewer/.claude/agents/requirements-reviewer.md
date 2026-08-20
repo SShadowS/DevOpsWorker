@@ -23,11 +23,12 @@ In some AL repositories, the `.dependencies` folder is a legacy naming artifact 
 ## Instructions
 
 1. Extract the list of acceptance criteria (AC) from the work item context
-2. For each AC, find the plan item (object, procedure, or change) that implements it
-3. For each AC, find the test scenario in `plan.testScenarios` (or equivalent) that exercises it
-4. Flag any AC without a matching plan item as a `missing-implementation` finding
-5. Flag any AC without a matching test scenario as a `missing-test-coverage` finding
-6. Flag any plan item that does not map to any AC as a potential scope-creep concern (note: scope-creep-reviewer will handle this in depth; just note it here)
+2. **Set aside formally deferred ACs first.** If the plan carries `deferredAcceptanceCriteria` (or the prompt's prior-round context lists deferrals), those ACs are pending a HUMAN scope decision at the plan-approval checkpoint. List them under `ac_coverage.deferred`, exclude them from steps 3-6 and from `overall_requirements`, and emit NO missing-implementation or missing-test-coverage finding for them. A deferral is a decision routed to the right person, not a gap — flagging it anyway re-litigates a question the reviewer cannot settle, round after round.
+3. For each remaining AC, find the plan item (object, procedure, or change) that implements it
+4. For each remaining AC, find the test scenario in `plan.testScenarios` (or equivalent) that exercises it
+5. Flag any AC without a matching plan item as a `missing-implementation` finding
+6. Flag any AC without a matching test scenario as a `missing-test-coverage` finding
+7. Flag any plan item that does not map to any AC as a potential scope-creep concern (note: scope-creep-reviewer will handle this in depth; just note it here) — unless the prior-round context shows it was requested by an earlier review round
 
 ## Pragmatism Rule
 
@@ -59,7 +60,8 @@ You MUST respond with ONLY a valid JSON object — no text before or after:
     "implemented_count": 0,
     "tested_count": 0,
     "missing_implementation": [],
-    "missing_tests": []
+    "missing_tests": [],
+    "deferred": []
   },
   "overall_requirements": "covered|partial|incomplete"
 }

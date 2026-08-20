@@ -46,9 +46,15 @@ export function createPlanReviewerConfig(config: PipelineConfig): AgentConfig<ty
       const readiness = state.readiness!;
       const devPlan = state.devPlan!;
       const layout = ctx.config.layout;
+      // revisionInstructions rides along so the orchestrator can build the
+      // prior-round digest for its sub-agents: without it, one round's reviewer
+      // demands an addition and the next round's scope-creep reviewer — blind
+      // to why the addition exists — flags it as gold-plating (watched happen
+      // on work item 81493, rounds 2→3).
       const priorReviews = (state.planReviews ?? []).slice(-2).map((r) => ({
         verdict: r.verdict,
         domainAnalyses: (r as { domainAnalyses?: unknown }).domainAnalyses,
+        revisionInstructions: (r as { revisionInstructions?: string }).revisionInstructions,
       }));
 
       return [
