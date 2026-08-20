@@ -56,7 +56,7 @@ export type { WatchConfig };
 // ---------------------------------------------------------------------------
 
 const DEFAULT_INTERVAL_MINUTES = 15;
-const DEFAULT_CONCURRENCY = 3;
+const DEFAULT_CONCURRENCY = 5;
 const DEFAULT_STATE_VOLUME = process.env['DO_STATE_VOLUME'] ?? 'do-pipeline-state';
 const DEFAULT_IMAGE_NAME = process.env['DO_PIPELINE_IMAGE'] ?? 'devopsworker:latest';
 

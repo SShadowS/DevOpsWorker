@@ -72,13 +72,13 @@ describe('parseWatchArgs', () => {
   test('returns defaults with no args', () => {
     const result = parseWatchArgs([]);
     expect(result.intervalMinutes).toBe(15);
-    expect(result.concurrency).toBe(3);
+    expect(result.concurrency).toBe(5);
   });
 
   test('parses --interval', () => {
     const result = parseWatchArgs(['--interval', '5']);
     expect(result.intervalMinutes).toBe(5);
-    expect(result.concurrency).toBe(3);
+    expect(result.concurrency).toBe(5);
   });
 
   test('parses --concurrency', () => {
