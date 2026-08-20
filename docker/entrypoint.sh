@@ -262,20 +262,10 @@ fi
 # volume so only the first compile pays the ~60MB download).
 export CONTINIA_ALC_CACHE="${AL_TOOLS_DIR}/alc"
 
-# --- Fetch AL LSP plugin (cached on state volume) ---
-# The SDK resolveAlLspPlugin() reads AL_LSP_DIR to find the plugin binary.
-# We shallow-clone the marketplace repo and point AL_LSP_DIR at the plugin directory.
+# --- Fetch AL LSP plugin (pinned, cached on state volume) ---
+/fetch-al-lsp-plugin.sh "${AL_TOOLS_DIR}"
 AL_LSP_CACHE="${AL_TOOLS_DIR}/al-lsp-plugin"
 AL_LSP_PLUGIN_DIR="${AL_LSP_CACHE}/al-language-server-go-linux"
-if [ ! -d "${AL_LSP_CACHE}/.git" ]; then
-  echo "Cloning AL LSP plugin..."
-  git clone --depth 1 https://github.com/SShadowS/claude-code-lsps.git "${AL_LSP_CACHE}" || {
-    echo "WARNING: Could not clone AL LSP plugin — agents will run without LSP"
-  }
-else
-  echo "Updating AL LSP plugin..."
-  cd "${AL_LSP_CACHE}" && git pull --ff-only 2>/dev/null || true && cd /app
-fi
 if [ -d "${AL_LSP_PLUGIN_DIR}" ]; then
   # resolveAlLspPlugin() expects: AL_LSP_DIR/<version>/ with plugin.json inside
   # The repo has: al-language-server-go-linux/plugin.json — read version and create version dir
