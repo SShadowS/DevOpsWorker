@@ -398,3 +398,55 @@ describe('explainCodingGate', () => {
     } as any)).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// A rewind to planning must give downstream loops a fresh start
+//
+// WI 79748: coding exhausted its 5 attempts on Aug 5 against an old plan. A
+// /rerun-plan produced a NEW approved plan — but planningResetState cleared
+// only the outputs (codeReviews, changeset), not the bookkeeping. The coding
+// loop's fail-fast then saw 5 spent attempts and threw RevisionExhaustedError
+// before the coder ran even once against the plan it had never seen.
+// ---------------------------------------------------------------------------
+
+describe('planningResetState — downstream bookkeeping', () => {
+  const spent = () => ({
+    currentStage: 'planning',
+    telemetry: { totalCostUsd: 0, totalDurationMs: 0, stages: [] },
+    startedAt: 'now',
+    planReviews: [{ verdict: 'revise' }],
+    changeset: { branchName: 'old' },
+    codeReviews: [{ verdict: 'revise' }],
+    revisionAttempts: { planning: 3, coding: 5, 'test-cases': 2 },
+    revisionIssueCounts: { planning: [7], coding: [14, 16, 13], 'test-cases': [4] },
+    gateFailure: 'stale: envPublished is not true',
+  }) as any;
+
+  test('zeroes the coding and test-cases budgets — a new plan is a new start', () => {
+    const out = planningResetState(spent());
+    expect(out.revisionAttempts?.coding).toBe(0);
+    expect(out.revisionAttempts?.['test-cases']).toBe(0);
+  });
+
+  test("leaves planning's own budget alone — the loop manages it", () => {
+    expect(planningResetState(spent()).revisionAttempts?.planning).toBe(3);
+  });
+
+  test('clears downstream convergence history, keeps planning history', () => {
+    const out = planningResetState(spent());
+    expect(out.revisionIssueCounts?.coding).toEqual([]);
+    expect(out.revisionIssueCounts?.['test-cases']).toEqual([]);
+    expect(out.revisionIssueCounts?.planning).toEqual([7]);
+  });
+
+  test('drops a stale gate-failure banner from the old coding rounds', () => {
+    expect(planningResetState(spent()).gateFailure).toBeUndefined();
+  });
+
+  test('still clears the outputs it always cleared', () => {
+    const out = planningResetState(spent());
+    expect(out.codeReviews).toEqual([]);
+    expect(out.changeset).toBeUndefined();
+    expect(out.planReviews).toEqual([]);
+  });
+});

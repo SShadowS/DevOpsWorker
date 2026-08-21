@@ -164,7 +164,21 @@ export function buildCIVerificationHook(config: PipelineConfig) {
   };
 }
 
-/** Reset planning state: clears plan reviews + all downstream outputs */
+/** Reset planning state: clears plan reviews + all downstream outputs AND
+ *  downstream loop bookkeeping.
+ *
+ *  The bookkeeping half exists because of WI 79748: coding had exhausted its
+ *  5 attempts against an old plan on Aug 5; a /rerun-plan sixteen days later
+ *  produced a new approved plan, but only the OUTPUTS were reset — the spent
+ *  budget survived, and the coding loop's fail-fast threw RevisionExhaustedError
+ *  before the coder ran even once against the plan it had never seen. A new
+ *  plan is a new starting condition for every loop downstream of it: budget,
+ *  convergence history, and any stale gate-failure banner all describe rounds
+ *  against a plan that no longer exists.
+ *
+ *  Planning's own budget is deliberately untouched — the loop manages it, and
+ *  zeroing it here would let a rewind refill the very budget the loop is
+ *  spending. */
 export function planningResetState(state: PipelineState): PipelineState {
   return {
     ...state,
@@ -177,6 +191,9 @@ export function planningResetState(state: PipelineState): PipelineState {
     docsWriterDrafts: undefined,
     workItemUpdate: undefined,
     learnedRules: undefined,
+    revisionAttempts: { ...state.revisionAttempts, coding: 0, 'test-cases': 0 },
+    revisionIssueCounts: { ...state.revisionIssueCounts, coding: [], 'test-cases': [] },
+    gateFailure: undefined,
   };
 }
 
