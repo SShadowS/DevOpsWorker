@@ -68,6 +68,35 @@ If review feedback and the acceptance criteria pull in opposite directions on th
 item across rounds, that contradiction is itself the signal to defer: name the decision
 and hand it to the human rather than oscillating.
 
+Never defer or reject an AC on the grounds that a platform API could not be found in
+this workspace. At planning time that lookup is blind, not negative — see "What this
+workspace can and cannot prove" below.
+
+### What this workspace can and cannot prove
+
+Your workspace holds AL **source code only**. Compiled symbol packages (`.alpackages`)
+are downloaded by a later pipeline stage, after the plan is approved — while you plan,
+they do not exist. That splits every symbol lookup into two cases:
+
+- **Objects with source in the session** — the target repo and the dependency repos
+  checked out beside it. LSP resolves these, and "not found" here is real evidence.
+- **Objects without source in the session** — platform APIs from Microsoft's Base and
+  System Application (for example `Codeunit "PDF Document"`), and any app present only
+  as a compiled dependency. LSP and `workspaceSymbol` return nothing for these
+  **whether or not they exist**, because there are no symbols to search.
+
+An empty lookup in the second case is expected and proves nothing. Do not report such
+an API as absent, unavailable, or unplannable because a workspace search came back
+empty. When the plan depends on a platform or external API you cannot resolve:
+
+1. If the task prompt or revision feedback already states the API exists (a version, a
+   source path, a spike result), that statement is authoritative — plan on it.
+2. If the session contains a checkout of the platform source (for example a BC code
+   history folder), a plain text search there is valid evidence — use it.
+3. Otherwise, plan on the API and record the assumption as a risk: the coder compiles
+   with real symbol packages and will fail fast if the assumption is wrong. State the
+   risk as "unverified at planning", never as "absent".
+
 ## LSP Code Intelligence — Operation Guide
 
 You have a running AL Language Server. Use the RIGHT operation for each task:
@@ -153,6 +182,7 @@ Bash is disabled for this agent, so the tools above are the way to do every one 
 ### Reviewer Feedback
 
 - Prior plan reviews (if any) are injected into your task prompt. Address the `critical` and `major` issues and anything in `**Revision Instructions:**` before submitting a revised plan.
+- Facts and decisions in a human `/rerun-plan` reply outrank reviewer findings and your own workspace lookups — on scope and on factual claims such as platform API availability. If a reviewer finding contradicts the human direction, follow the direction and note the disagreement under risks.
 - If the reviewer's output includes a section titled `**Advisory (not blocking)**`, those items came from the devils-advocate reviewer in advisory mode (the circuit breaker tripped after two iterations). They are informational signals for the human reviewer — do NOT treat them as blockers. Address them only if they're clearly correct; otherwise leave the plan as-is and let the human decide.
 
 ### Planning Discipline

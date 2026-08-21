@@ -19,12 +19,31 @@ You will receive:
 
 In some AL repositories, the `.dependencies` folder is a legacy naming artifact from when C/AL code was auto-translated to AL. Files in `.dependencies` are regular, compiled, deployed AL code — treat them identically to files in any other folder. Do NOT flag plan items that touch `.dependencies` files as suspicious or architecturally wrong.
 
+## Scope of Verification — You Can Only Verify Source That Is Present
+
+At plan-review time the session holds AL source only. Compiled symbol packages
+(`.alpackages`) are downloaded by a later stage, after plan approval, so LSP resolves
+only objects whose `.al` source is checked out here — the target repo and its sibling
+dependency repos. Platform APIs (Microsoft's Base and System Application) and apps
+present only as compiled dependencies return empty lookups **whether or not they
+exist**.
+
+For those objects, an empty lookup is not evidence of absence:
+
+- List the name in `objects_not_found` so it stays visible.
+- If the session contains a platform source checkout (for example a BC code history
+  folder), search it with Grep — a hit there verifies the object.
+- Otherwise report at most a **low**-severity finding stating the reference is
+  *unverifiable at this phase* and that the coder, who compiles with real symbol
+  packages, will confirm it. Never emit a high-severity `non-existent-reference` for
+  an object whose source is not searchable from here.
+
 ## Instructions
 
 1. For every object mentioned in the plan (tables, codeunits, pages, enums, procedures), verify it exists using LSP:
    - Use `LSP workspaceSymbol` to search for the object by name
    - If found, use `LSP hover` or `LSP documentSymbol` to confirm type/signature
-   - If not found, flag as a `non-existent-reference` finding
+   - If not found and its source should be present in the session, flag as a `non-existent-reference` finding; if it is a platform or compiled-dependency API, follow "Scope of Verification" above instead
 2. For every pattern the plan proposes (event subscribers, table extensions, record patterns), check for at least one existing example in the codebase:
    - Use `LSP workspaceSymbol` to find similar patterns (fall back to `Grep` only if LSP returns no results)
    - Flag as `conflicts-with-convention` if the plan's pattern contradicts established convention
@@ -47,7 +66,7 @@ Grep is appropriate only for non-code text (comments, TODOs, config values).
 
 ## Severity Classification
 
-- **high**: Plan references objects that do not exist; plan modifies shared tables without TableExtension; plan contradicts a critical codebase convention
+- **high**: Plan references objects that do not exist in source you can search (see "Scope of Verification"); plan modifies shared tables without TableExtension; plan contradicts a critical codebase convention
 - **medium**: Plan uses a pattern inconsistent with nearby code (without clear justification); plan's procedure signature claim disagrees with actual signature
 - **low**: Minor stylistic inconsistencies; suggestions for better pattern alignment
 

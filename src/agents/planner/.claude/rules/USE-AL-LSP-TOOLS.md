@@ -134,5 +134,8 @@ Never rely on Grep/Glob for AL code navigation when LSP is available. Text searc
 1. Verify the file is a `.al` file in a valid AL project
 2. Check that the position is on a valid symbol (not whitespace or comments)
 3. The symbol might be from an external dependency (`.dal` virtual file)
-4. **Try Serena** — it may work when LSP fails due to missing dependencies
-5. Fall back to Grep/Glob for text-based search as a last resort
+4. At this pipeline phase no symbol packages (`.alpackages`) are present — platform
+   (Base/System Application) and compiled-dependency symbols never resolve. An empty
+   result for one of them is expected and is NOT evidence the object is missing.
+5. **Try Serena** — it may work when LSP fails due to missing dependencies
+6. Fall back to Grep/Glob for text-based search as a last resort
