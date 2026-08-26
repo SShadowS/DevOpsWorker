@@ -614,3 +614,89 @@ describe('revisionLoop', () => {
     expect(result.planReviews?.at(-1)?.verdict).toBe('approve');
   });
 });
+
+// ---------------------------------------------------------------------------
+// preLoop — a gate that runs before the loop, not inside it
+//
+// Placement is the whole point. The attempt counter increments INSIDE the
+// iteration, so a gate running per-iteration would spend a life every time it
+// blocked. For a gate whose whole job is "stop and ask a human to free a branch
+// name", that means each retry while they sort it out burns budget, and the loop
+// exhausts itself waiting for the answer it asked for.
+// ---------------------------------------------------------------------------
+
+describe('revisionLoop preLoop gate', () => {
+  const approving = (): Stage => ({
+    name: 'reviewer',
+    canRun: () => true,
+    execute: async (s) => ({ state: { ...s, planReviews: [{ verdict: 'approve' as const, feedback: 'ok' }] } }),
+  });
+
+  test('runs once before the first attempt and can amend state', async () => {
+    let calls = 0;
+    const loop = revisionLoop({
+      name: 'coding',
+      producer: { name: 'p', canRun: () => true, execute: async (s) => ({ state: s }) },
+      reviewer: approving(),
+      maxAttempts: 3,
+      isApproved: (s) => s.planReviews?.at(-1)?.verdict === 'approve',
+      preLoop: async (s) => { calls++; return { ...s, priorBranches: ['seen'] }; },
+    });
+
+    const result = await loop.execute(freshState(), mockContext());
+
+    expect(calls).toBe(1);
+    expect(result.state.priorBranches).toEqual(['seen']);
+  });
+
+  test('a throwing gate stops the loop without running the producer', async () => {
+    let producerCalls = 0;
+    const loop = revisionLoop({
+      name: 'coding',
+      producer: { name: 'p', canRun: () => true, execute: async (s) => { producerCalls++; return { state: s }; } },
+      reviewer: approving(),
+      maxAttempts: 3,
+      isApproved: () => true,
+      preLoop: async () => { throw new PipelineError('needs-input', 'coding', 'branch taken'); },
+    });
+
+    await expect(loop.execute(freshState(), mockContext())).rejects.toThrow('branch taken');
+    expect(producerCalls).toBe(0);
+  });
+
+  test('a blocked run spends no revision budget', async () => {
+    // THE REASON FOR THE PLACEMENT. Retrying while a human frees the branch name
+    // must be free; otherwise asking for help costs the budget needed to use it.
+    const loop = revisionLoop({
+      name: 'coding',
+      producer: { name: 'p', canRun: () => true, execute: async (s) => ({ state: s }) },
+      reviewer: approving(),
+      maxAttempts: 3,
+      isApproved: () => true,
+      preLoop: async () => { throw new PipelineError('needs-input', 'coding', 'branch taken'); },
+    });
+
+    let attemptsAfter: number | undefined;
+    try {
+      await loop.execute(freshState(), mockContext());
+    } catch (err) {
+      attemptsAfter = (err as PipelineError & { partialState?: PipelineState })
+        .partialState?.revisionAttempts?.['coding'];
+    }
+
+    expect(attemptsAfter).toBeUndefined();
+  });
+
+  test('a loop without a gate is unaffected', async () => {
+    const loop = revisionLoop({
+      name: 'coding',
+      producer: { name: 'p', canRun: () => true, execute: async (s) => ({ state: s }) },
+      reviewer: approving(),
+      maxAttempts: 3,
+      isApproved: (s) => s.planReviews?.at(-1)?.verdict === 'approve',
+    });
+
+    const result = await loop.execute(freshState(), mockContext());
+    expect(result.state.planReviews?.at(-1)?.verdict).toBe('approve');
+  });
+});

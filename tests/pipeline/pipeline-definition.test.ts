@@ -450,3 +450,49 @@ describe('planningResetState — downstream bookkeeping', () => {
     expect(out.planReviews).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The branch a rewind to planning leaves behind
+//
+// `planningResetState` clears `changeset` — correct, the plan is being redone.
+// But `/rerun-plan` is armed at the pr-published checkpoint, so it fires exactly
+// when coding has already PUSHED a branch. Without remembering the name, coding
+// re-enters with no changeset, meets its own branch on the remote, and reads it
+// as a stranger's — then advises deleting a branch whose pull request is open.
+// ---------------------------------------------------------------------------
+
+describe('planningResetState — priorBranches', () => {
+  test('remembers the branch before discarding the changeset that names it', () => {
+    const out = planningResetState({
+      currentStage: 'coding',
+      changeset: { branchName: 'bug/#123-fix' },
+    } as never);
+
+    expect(out.changeset).toBeUndefined();
+    expect(out.priorBranches).toEqual(['bug/#123-fix']);
+  });
+
+  test('accumulates across repeated replans without duplicating', () => {
+    // A work item can be sent back to planning more than once, each round
+    // leaving another branch on the remote.
+    const first = planningResetState({
+      currentStage: 'coding', changeset: { branchName: 'bug/#123-a' },
+    } as never);
+    const second = planningResetState({
+      ...first, changeset: { branchName: 'bug/#123-b' },
+    } as never);
+    const repeat = planningResetState({
+      ...second, changeset: { branchName: 'bug/#123-b' },
+    } as never);
+
+    expect(second.priorBranches).toEqual(['bug/#123-a', 'bug/#123-b']);
+    expect(repeat.priorBranches).toEqual(['bug/#123-a', 'bug/#123-b']);
+  });
+
+  test('leaves the list alone when there was no branch to remember', () => {
+    // A rewind from plan-approved, before coding ever ran.
+    const out = planningResetState({ currentStage: 'planning' } as never);
+
+    expect(out.priorBranches).toBeUndefined();
+  });
+});

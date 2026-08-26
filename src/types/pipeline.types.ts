@@ -252,6 +252,20 @@ export interface PipelineState extends Partial<PipelineStateSlices> {
   planReviews?: ReviewVerdict[];
   codeReviews?: ReviewVerdict[];
   testCaseReviews?: ReviewVerdict[];
+  /**
+   * Feature branches this run pushed before a rewind to planning discarded the
+   * changeset that named them.
+   *
+   * A rewind to planning clears `changeset` (see `planningResetState`), which is
+   * correct — the plan is being redone, so the old changeset is stale. But the
+   * BRANCH it pushed is still on the remote, and `/rerun-plan` is armed at the
+   * pr-published checkpoint, i.e. precisely when coding has already pushed one.
+   * Without this list, coding re-enters with no changeset, finds a branch that
+   * matches the work item, and cannot tell its own branch from a stranger's —
+   * so it reports a leftover from "an earlier run" and offers to delete a branch
+   * that still has an open pull request on it.
+   */
+  priorBranches?: string[];
   testCaseActivation?: { activatedAt: string };
   learnedRules?: unknown;
 
@@ -626,6 +640,16 @@ export interface RevisionLoopConfig {
    */
   explainGate?: (state: PipelineState) => string | undefined;
   resetState?: (state: PipelineState) => PipelineState;
+  /**
+   * Optional gate that runs ONCE before the first attempt, and may throw to stop
+   * the loop before it starts.
+   *
+   * Deliberately once-per-loop rather than per-iteration, and deliberately
+   * before the attempt counter is incremented: a gate that blocks a resume must
+   * not spend budget doing it, or repeatedly asking a human to fix something
+   * would exhaust the loop that is waiting for them.
+   */
+  preLoop?: (state: PipelineState, context: PipelineContext) => Promise<PipelineState>;
   /** Optional hook that runs after the producer and before the reviewer on each iteration. */
   postProducer?: (state: PipelineState, context: PipelineContext) => Promise<PipelineState>;
   /**

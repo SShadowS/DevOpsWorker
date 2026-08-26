@@ -118,6 +118,15 @@ export function revisionLoop(config: RevisionLoopConfig): Stage {
         throw new RevisionExhaustedError(config.name, config.maxAttempts, currentState);
       }
 
+      // Gate the whole loop before the first attempt is recorded. Placed here on
+      // purpose: the attempt counter increments inside the iteration below, so a
+      // gate that stops a resume — waiting on a human to free a branch name, say
+      // — would otherwise spend a life every time they retried, and exhaust the
+      // loop that is waiting for them.
+      if (config.preLoop) {
+        currentState = await config.preLoop(currentState, context);
+      }
+
       for (let attempt = priorAttempts + 1; attempt <= config.maxAttempts; attempt++) {
         // Record the attempt in state BEFORE running so a crash mid-iteration
         // still counts against the budget (reportActiveAgent persists currentState).

@@ -3,6 +3,7 @@ import type { RepoConfig } from '../config/repo-config.ts';
 import { revisionLoop } from './revision-loop.ts';
 import { checkpoint } from './checkpoint.ts';
 import { verifyCIResult } from './ci-verification.ts';
+import { buildBranchCollisionGate } from './branch-collision-gate.ts';
 import { resolvePipeline } from '../overlay/index.ts';
 
 // Agent stage imports (will be implemented per-agent)
@@ -182,6 +183,15 @@ export function buildCIVerificationHook(config: PipelineConfig) {
 export function planningResetState(state: PipelineState): PipelineState {
   return {
     ...state,
+    // Remember the branch before the changeset that names it is discarded.
+    // `/rerun-plan` is armed at the pr-published checkpoint, so this runs
+    // precisely when coding has already pushed one. Without the stash, coding
+    // re-enters with no changeset, meets its OWN branch on the remote, and
+    // cannot tell it from a stranger's — so it would offer to delete a branch
+    // that still has an open pull request on it.
+    priorBranches: state.changeset?.branchName
+      ? [...new Set([...(state.priorBranches ?? []), state.changeset.branchName])]
+      : state.priorBranches,
     planReviews: [],
     changeset: undefined,
     codeReviews: [],
@@ -261,6 +271,7 @@ export function buildDefaultPipeline(config: PipelineConfig): PipelineDefinition
       isApproved: codingIsApproved,
       explainGate: explainCodingGate,
       resetState: (state) => ({ ...state, codeReviews: [] }),
+      preLoop: buildBranchCollisionGate(config),
       postProducer: buildCIVerificationHook(config),
       countIssues: countCodeReviewIssues,
       collectFindingTexts: collectCodeReviewFindings,
@@ -391,6 +402,7 @@ export function buildPipeline(config: PipelineConfig, repo: RepoConfig): Pipelin
       isApproved: codingIsApproved,
       explainGate: explainCodingGate,
       resetState: (state) => ({ ...state, codeReviews: [] }),
+      preLoop: buildBranchCollisionGate(config),
       postProducer: buildCIVerificationHook(config),
     }),
   );
