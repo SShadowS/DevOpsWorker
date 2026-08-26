@@ -57,6 +57,18 @@ describe('coder comment guidance', () => {
     expect(CODER_PROMPT.toLowerCase()).toMatch(/settle it in the review|belongs in the review|answer .* in the review/);
   });
 
+  test('gives the invited categories a size', () => {
+    // The gap this rule opened by itself. "Why this shape, not the obvious one"
+    // invites exactly the longest offender measured so far: six lines of
+    // "this write is deliberately unguarded... the residual is accepted",
+    // answering a reviewer who asked why it was not wrapped in a TryFunction.
+    // That IS why-this-shape — a legitimate instance of a category the rule
+    // asks for, at a paragraph instead of a sentence. Without a size, the rule
+    // licenses the thing it exists to stop.
+    expect(CODER_PROMPT.toLowerCase()).toMatch(/sentence or two|a sentence, not a paragraph/);
+    expect(CODER_PROMPT.toLowerCase()).toContain('paragraph');
+  });
+
   test('the guidance itself is not a wall of text', () => {
     // A long rule about being concise invites the obvious retort, and a prompt
     // section nobody finishes reading binds no better than the one it replaced.

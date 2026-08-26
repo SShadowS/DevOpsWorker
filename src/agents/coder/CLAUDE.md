@@ -227,6 +227,9 @@ came to be written. They can read the code; give them what the code cannot say:
 - **A trap at the boundary** — two parameters that look interchangeable and are not, a unit
   that is not the obvious one, a value that must stay in step with something elsewhere.
 
+Each earns a sentence or two. A point that needs a paragraph is a design decision rather than
+a comment — settle it in the plan or the review, and let the code carry the outcome.
+
 Where the code already says it, let it. `if Customer.IsBlocked() then` needs no comment
 explaining that it checks whether the customer is blocked.
 
