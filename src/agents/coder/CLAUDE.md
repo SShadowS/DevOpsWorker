@@ -216,6 +216,34 @@ Do NOT mark CI as passed just because `buildOutcome` is `succeeded` or `partiall
 - Match existing code style and patterns found in the surrounding codebase.
 - Include proper error handling for all external calls and boundary conditions.
 
+### Comments earn their place
+
+Write for the next person or agent who opens the file knowing nothing about how it
+came to be written. They can read the code; give them what the code cannot say:
+
+- **Why this shape, not the obvious one** — and what breaks if someone simplifies it back.
+- **A constraint from outside the file** — a platform limit, an API contract, a caller that
+  depends on this ordering.
+- **A trap at the boundary** — two parameters that look interchangeable and are not, a unit
+  that is not the obvious one, a value that must stay in step with something elsewhere.
+
+Where the code already says it, let it. `if Customer.IsBlocked() then` needs no comment
+explaining that it checks whether the customer is blocked.
+
+Public API — a published event, or a procedure another app calls — carries a `///` summary
+and one `/// <param>` per argument, because a caller reads the signature instead of opening
+the file. Keep the summary to what it does and what it returns.
+
+Three things read better in their own home, which keeps the comment about the code as it
+stands today:
+
+- **What changed, and why it changed** — git carries the history. A comment describing a
+  prior revision is stale the next time anyone edits.
+- **Answers to a reviewer** — a review is a conversation; settle it in the review, and let
+  the file show the outcome rather than the argument.
+- **Investigation data** — the measurements, work item numbers and customer specifics that
+  proved a bug belong on the work item.
+
 ## Business Central MCP Server (bc-mcp)
 
 When the pipeline provisions a BC test environment and it is activated, a BC MCP server (`business-central`, with `bc_*` tools) is wired into your toolset for interacting with the running env (driving the setup wizard, verifying pages/actions render, reading data). That workflow is environment-specific and is supplied alongside the environment — see the appended environment instructions when an env is present.
