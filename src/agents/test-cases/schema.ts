@@ -13,7 +13,17 @@ export const TestCaseEntrySchema = z.object({
 
 export const TestCasesOutputSchema = z.object({
   testCases: z.array(TestCaseEntrySchema).describe('Created test case work items'),
-  summary: z.string().describe('Summary of test coverage created'),
+  summary: z
+    .string()
+    .describe(
+      'What a technical writer or solution specialist should know about this change, and what the test cases ask them to check',
+    ),
+  leftToAutomatedTests: z
+    .array(z.string())
+    .default([])
+    .describe(
+      'Behaviour you considered and deliberately did NOT write a test case for, because the automated tests already check it. Name the behaviour and the test that covers it. Without this, a short list of test cases and a lazy run look the same.',
+    ),
 });
 
 export type TestCaseEntry = z.infer<typeof TestCaseEntrySchema>;

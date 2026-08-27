@@ -119,6 +119,7 @@ describe('test-cases buildPrompt', () => {
           { id: 101, title: 'Verify error on invalid input', stepCount: 3, derivedFrom: 'Scenario 2' },
         ],
         summary: 'Created 2 test cases',
+        leftToAutomatedTests: [],
       },
     });
 
@@ -154,6 +155,7 @@ describe('test-cases buildPrompt', () => {
       testCases: {
         testCases: [{ id: 200, title: 'Test case A', stepCount: 2, derivedFrom: 'S1' }],
         summary: 'One test case',
+        leftToAutomatedTests: [],
       },
     });
 
@@ -174,6 +176,7 @@ describe('test-cases buildPrompt', () => {
       testCases: {
         testCases: [{ id: 300, title: 'Test B', stepCount: 1, derivedFrom: 'S2' }],
         summary: 'One test case',
+        leftToAutomatedTests: [],
       },
     });
 
@@ -190,6 +193,7 @@ describe('test-cases buildPrompt', () => {
       testCases: {
         testCases: [{ id: 100, title: 'Test A', stepCount: 3, derivedFrom: 'S1' }],
         summary: 'One test case',
+        leftToAutomatedTests: [],
       },
       testCaseReviews: [{
         verdict: 'revise',

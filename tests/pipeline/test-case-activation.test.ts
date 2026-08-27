@@ -54,6 +54,7 @@ describe('testCaseActivation', () => {
       testCases: {
         testCases: [{ id: 100, title: 'T', stepCount: 2, derivedFrom: 'S1' }],
         summary: 'ok',
+        leftToAutomatedTests: [],
       },
     });
     expect(stage.canRun(state)).toBe(true);
@@ -79,6 +80,7 @@ describe('testCaseActivation', () => {
           { id: 101, title: 'Test B', stepCount: 2, derivedFrom: 'S2' },
         ],
         summary: 'Two test cases',
+        leftToAutomatedTests: [],
       },
     });
 
@@ -123,6 +125,7 @@ describe('testCaseActivation', () => {
           { id: 101, title: 'TC: Second', stepCount: 2, derivedFrom: 'AC2' },
         ],
         summary: 'Two test cases',
+        leftToAutomatedTests: [],
       },
       draftPR: { id: 50, url: 'http://test', isDraft: false, sourceBranch: 'b', targetBranch: 'master', title: 'T', description: 'D', linkedWorkItemId: 42 },
     });
@@ -154,6 +157,7 @@ describe('testCaseActivation', () => {
           { id: 100, title: 'TC: First', stepCount: 3, derivedFrom: 'AC1' },
         ],
         summary: 'One test case',
+        leftToAutomatedTests: [],
       },
       // No draftPR
     });
@@ -176,6 +180,7 @@ describe('testCaseActivation', () => {
       testCases: {
         testCases: [{ id: 100, title: 'TC: Test', stepCount: 1, derivedFrom: 'AC1' }],
         summary: 'One test case',
+        leftToAutomatedTests: [],
       },
     });
 

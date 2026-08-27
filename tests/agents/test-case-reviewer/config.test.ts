@@ -81,6 +81,7 @@ describe('test-case-reviewer buildPrompt', () => {
           { id: 101, title: 'Verify error on invalid input', stepCount: 3, derivedFrom: 'Scenario 2' },
         ],
         summary: 'Created 2 test cases',
+        leftToAutomatedTests: [],
       },
     });
 
@@ -105,6 +106,7 @@ describe('test-case-reviewer buildPrompt', () => {
       testCases: {
         testCases: [{ id: 200, title: 'Test A', stepCount: 3, derivedFrom: 'Scenario A' }],
         summary: 'One test case',
+        leftToAutomatedTests: [],
       },
     });
 
@@ -125,6 +127,7 @@ describe('test-case-reviewer buildPrompt', () => {
       testCases: {
         testCases: [{ id: 300, title: 'Test', stepCount: 2, derivedFrom: 'S1' }],
         summary: 'One test',
+        leftToAutomatedTests: [],
       },
     });
 
@@ -144,6 +147,7 @@ describe('testCaseReviewerStage', () => {
       testCases: {
         testCases: [{ id: 100, title: 'T', stepCount: 2, derivedFrom: 'S1' }],
         summary: 'ok',
+        leftToAutomatedTests: [],
       },
     });
     expect(stage.canRun(state)).toBe(true);

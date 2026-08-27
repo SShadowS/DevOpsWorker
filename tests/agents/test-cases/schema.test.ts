@@ -41,7 +41,8 @@ describe('TestCasesOutputSchema', () => {
       ],
       summary: 'Created 2 test cases covering happy path and error scenarios',
     };
-    expect(TestCasesOutputSchema.parse(output)).toEqual(output);
+    // `leftToAutomatedTests` defaults, so the parsed value is the input plus it.
+    expect(TestCasesOutputSchema.parse(output)).toEqual({ ...output, leftToAutomatedTests: [] });
   });
 
   test('accepts empty test cases array', () => {
@@ -49,7 +50,7 @@ describe('TestCasesOutputSchema', () => {
       testCases: [],
       summary: 'No test cases needed',
     };
-    expect(TestCasesOutputSchema.parse(output)).toEqual(output);
+    expect(TestCasesOutputSchema.parse(output)).toEqual({ ...output, leftToAutomatedTests: [] });
   });
 
   test('rejects missing summary', () => {
