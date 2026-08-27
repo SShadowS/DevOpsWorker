@@ -21,6 +21,9 @@ import {
   postInlineThread,
   updateThreadComment,
   appendToThread,
+  closePRThread,
+  isApprovedRecommendation,
+  findBotSummaryThread,
   fetchPRMetadata,
   fetchPRDiff,
   type ReviewThread,
@@ -1523,6 +1526,30 @@ export async function reviewPR(args: string[]): Promise<void> {
     let inlineThreads: Awaited<ReturnType<typeof applyInlineFindings>> | null = null;
     if (!noPost && result.output?.findingsList?.length) {
       inlineThreads = await applyInlineFindings(prId, result.output.findingsList, config, route.path === 'sanity' ? { suppressStale: true } : {});
+    }
+
+    // An approved review leaves its summary open, so a reader has to open the
+    // thread to learn there is nothing to do. Close it instead — the thread status
+    // then says it at a glance.
+    //
+    // Only on `approve`. The other two verdicts are asking the author for
+    // something, and closing a thread that wants an answer is how the answer
+    // stops arriving.
+    //
+    // Never fatal: the review is already done and saved-or-about-to-be, and
+    // failing it over a thread-status call would throw away the work.
+    if (!noPost && isApprovedRecommendation(result.output?.recommendation)) {
+      try {
+        const summary = findBotSummaryThread(await fetchReviewThreadsRaw(prId, config));
+        if (summary) {
+          await closePRThread(prId, summary.id, config);
+          console.log(`[review-pr] approved — closed summary thread ${summary.id}`);
+        } else {
+          console.log('[review-pr] approved, but no summary thread found to close');
+        }
+      } catch (err) {
+        console.warn(`[review-pr] could not close the summary thread: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     if (prReviewStore) {

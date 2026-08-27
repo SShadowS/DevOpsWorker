@@ -369,6 +369,42 @@ export async function fetchPRThread(
  * Whether a thread SHOULD be closed is the caller's decision, not this
  * function's — see the orphan check in the watcher's review dispatch.
  */
+/**
+ * Did the reviewer approve outright?
+ *
+ * Deliberately an exact match rather than "contains approve". The reviewer emits
+ * one of three values — measured over 60 days: `approve` 494, `request changes`
+ * 233, `needs discussion` 188 — but a substring test would also accept
+ * "approve with changes requested", and closing a thread that is asking the
+ * author for work is how the answer stops arriving.
+ */
+export function isApprovedRecommendation(recommendation: string | null | undefined): boolean {
+  return recommendation?.trim().toLowerCase() === 'approve';
+}
+
+/**
+ * The reviewer's own summary thread, or null when it has not posted one.
+ *
+ * Matched on the heading the prompt templates, the same way every other consumer
+ * of PR discussion identifies the bot's comment. Anchored to the start of a line
+ * so a human writing "can you redo the code review" does not get their thread
+ * closed.
+ *
+ * The final summary wins over the in-progress placeholder: a run normally
+ * replaces the placeholder in place, but one that posted a fresh summary leaves
+ * both, and closing the placeholder would leave the real one open.
+ */
+export function findBotSummaryThread(threads: readonly ReviewThread[]): ReviewThread | null {
+  const heading = new RegExp(`^#{1,2} ${BOT_SUMMARY_HEADING_TEXT}\\b`, 'm');
+  const mine = threads.filter((t) => heading.test(t.rawContent));
+  if (mine.length === 0) return null;
+
+  const finals = mine.filter((t) => !/^#{1,2} Code Review In Progress\b/m.test(t.rawContent));
+  const pool = finals.length > 0 ? finals : mine;
+  // Threads come back oldest-first; a re-review's summary is the later one.
+  return pool[pool.length - 1]!;
+}
+
 export async function closePRThread(
   prId: number,
   threadId: number,
