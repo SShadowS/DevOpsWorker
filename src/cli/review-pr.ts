@@ -1293,6 +1293,10 @@ export async function reviewPR(args: string[]): Promise<void> {
   // overwrite it with what they actually did.
   let treeSource: string = 'default-branch';
   let treeDetail: string | undefined;
+  // The tree the agents actually read, as git resolves it — recorded even when
+  // the review fails, same contract as treeSource. Stays null only if no
+  // checkout ever ran.
+  let reviewedCommitSha: string | null = null;
 
   try {
     let result: AgentResult<PRReviewResult> | AgentResult<BackportReview>;
@@ -1315,6 +1319,12 @@ export async function reviewPR(args: string[]): Promise<void> {
       const tree = await checkoutReviewTree(repoDir, prId, prMetadata);
       treeSource = tree.source;
       treeDetail = tree.detail;
+      // Ground truth over payload: whatever rung won — merge preview, source
+      // head, target tip, or the default-branch fallback — HEAD after the walk
+      // IS what the agents are about to read. This also makes a force-push a
+      // non-question; no iteration number is needed when the resolved commit
+      // itself is recorded.
+      reviewedCommitSha = await resolveRef(repoDir, 'HEAD');
       return runPRReview(
         {
           prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId,
@@ -1348,12 +1358,14 @@ export async function reviewPR(args: string[]): Promise<void> {
         reviewedMergeCommit = true;
         treeSource = 'merge-commit';
         treeDetail = checkout.sha.slice(0, 12);
+        reviewedCommitSha = checkout.sha;
       } else {
         // The sanity path DID move the tree — onto the PR's own branch. Leaving
         // `treeSource` at 'default-branch' here made every backport row claim a
         // tree it did not have, against this column's own contract.
         treeSource = 'source-branch';
         treeDetail = checkout.sha.slice(0, 12);
+        reviewedCommitSha = checkout.sha;
       }
     }
 
@@ -1580,6 +1592,8 @@ export async function reviewPR(args: string[]): Promise<void> {
           inlineThreads,
           reviewPath: reviewPath,
           treeSource,
+          reviewedCommitSha,
+          baseCommitSha: prMetadata?.lastMergeTargetCommit ?? null,
           appliedLevers,
           imageSha: process.env['BUILD_SHA'] ?? null,
           isTest: isTestRun(),
@@ -1639,6 +1653,8 @@ export async function reviewPR(args: string[]): Promise<void> {
         // ran: a failed review still read from a real tree, and which one is
         // exactly what a human debugging the failure needs.
         treeSource,
+        reviewedCommitSha,
+        baseCommitSha: prMetadata?.lastMergeTargetCommit ?? null,
         appliedLevers,
         imageSha: process.env['BUILD_SHA'] ?? null,
         isTest: isTestRun(),

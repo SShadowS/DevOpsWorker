@@ -81,6 +81,15 @@ export interface PRReviewRow {
    * before the full path checked anything out stay valid.
    */
   treeSource?: string | null;
+  /**
+   * `git rev-parse HEAD` after the checkout this review performed — the tree
+   * the agents actually read, whichever path and fallback produced it. Null for
+   * rows written before this was captured; never backfilled, because "same
+   * reviewed commit" is exactly the trust this column exists to provide.
+   */
+  reviewedCommitSha?: string | null;
+  /** Target-branch tip the diff was computed against (lastMergeTargetCommit). */
+  baseCommitSha?: string | null;
   /** File-modification counts from the eval-only `PR_REVIEW_*` hooks that were
    *  enabled this run. Null for a production review (no lever env vars set)
    *  or a row recorded before this was captured — never a map of zeros, which

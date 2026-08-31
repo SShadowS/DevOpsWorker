@@ -6,7 +6,7 @@ export class PgPRReviewStore implements IPRReviewStore {
 
   async save(row: Omit<PRReviewRow, 'id'>): Promise<number> {
     const [result] = await this.sql`
-      INSERT INTO pr_reviews (pr_id, repo_key, source_branch, target_branch, title, recommendation, findings, findings_count, comment_id, cost_usd, duration_ms, turns, tool_calls, session_id, error, review_body, action_id, review_run_id, sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, applied_levers, image_sha, is_test, observed_cherry_pick, observed_cherry_pick_source)
+      INSERT INTO pr_reviews (pr_id, repo_key, source_branch, target_branch, title, recommendation, findings, findings_count, comment_id, cost_usd, duration_ms, turns, tool_calls, session_id, error, review_body, action_id, review_run_id, sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, reviewed_commit_sha, base_commit_sha, applied_levers, image_sha, is_test, observed_cherry_pick, observed_cherry_pick_source)
       VALUES (
         ${row.prId}, ${row.repoKey}, ${row.sourceBranch}, ${row.targetBranch},
         ${row.title}, ${row.recommendation},
@@ -21,6 +21,8 @@ export class PgPRReviewStore implements IPRReviewStore {
         ${row.inlineThreads ? this.sql.json(row.inlineThreads as unknown as postgres.JSONValue) : null},
         ${row.reviewPath ?? null},
         ${row.treeSource ?? null},
+        ${row.reviewedCommitSha ?? null},
+        ${row.baseCommitSha ?? null},
         ${row.appliedLevers ? this.sql.json(row.appliedLevers as unknown as postgres.JSONValue) : null},
         ${row.imageSha ?? null},
         ${row.isTest},
@@ -38,7 +40,7 @@ export class PgPRReviewStore implements IPRReviewStore {
              recommendation, findings, findings_count, comment_id,
              cost_usd, duration_ms, turns, tool_calls, session_id,
              error, review_body, created_at::text, action_id, review_run_id,
-             sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, applied_levers, image_sha, is_test,
+             sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, reviewed_commit_sha, base_commit_sha, applied_levers, image_sha, is_test,
              observed_cherry_pick, observed_cherry_pick_source
       FROM pr_reviews
       ORDER BY created_at DESC
@@ -53,7 +55,7 @@ export class PgPRReviewStore implements IPRReviewStore {
              recommendation, findings, findings_count, comment_id,
              cost_usd, duration_ms, turns, tool_calls, session_id,
              error, review_body, created_at::text, action_id, review_run_id,
-             sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, applied_levers, image_sha, is_test,
+             sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, reviewed_commit_sha, base_commit_sha, applied_levers, image_sha, is_test,
              observed_cherry_pick, observed_cherry_pick_source
       FROM pr_reviews
       WHERE action_id = ${actionId}
@@ -69,7 +71,7 @@ export class PgPRReviewStore implements IPRReviewStore {
              recommendation, findings, findings_count, comment_id,
              cost_usd, duration_ms, turns, tool_calls, session_id,
              error, review_body, created_at::text, action_id, review_run_id,
-             sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, applied_levers, image_sha, is_test,
+             sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, reviewed_commit_sha, base_commit_sha, applied_levers, image_sha, is_test,
              observed_cherry_pick, observed_cherry_pick_source
       FROM pr_reviews
       WHERE id = ${id}
@@ -84,7 +86,7 @@ export class PgPRReviewStore implements IPRReviewStore {
              recommendation, findings, findings_count, comment_id,
              cost_usd, duration_ms, turns, tool_calls, session_id,
              error, review_body, created_at::text, action_id, review_run_id,
-             sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, applied_levers, image_sha, is_test,
+             sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, reviewed_commit_sha, base_commit_sha, applied_levers, image_sha, is_test,
              observed_cherry_pick, observed_cherry_pick_source
       FROM pr_reviews
       WHERE pr_id = ${prId}
@@ -130,6 +132,8 @@ export function rowToPRReview(r: any): PRReviewRow {
     inlineThreads: r.inline_threads ?? null,
     reviewPath: r.review_path ?? null,
     treeSource: r.tree_source ?? null,
+    reviewedCommitSha: r.reviewed_commit_sha ?? null,
+    baseCommitSha: r.base_commit_sha ?? null,
     appliedLevers: r.applied_levers ?? null,
     imageSha: r.image_sha ?? null,
     isTest: r.is_test ?? false,

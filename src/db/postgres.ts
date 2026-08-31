@@ -129,6 +129,16 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS review_path TEXT;
 -- flag being set: a run recording 'merge-preview' whose reads still resolve to the
 -- default branch did not bind.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS tree_source TEXT;
+-- The commit the review actually read: git rev-parse HEAD after the checkout the
+-- review path performed (full path's ladder walk or the sanity checkout). Ground
+-- truth rather than the PR payload's lastMergeSourceCommit, which can drift
+-- between fetch and checkout and is not the reviewed tree for a merge preview.
+-- Null for every row written before 2026-08-31 — deliberately never backfilled,
+-- because a guessed SHA poisons the one question this exists to answer: "did
+-- these two runs read the same code?"
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS reviewed_commit_sha TEXT;
+-- The target-branch tip the diff was computed against (lastMergeTargetCommit).
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS base_commit_sha TEXT;
 -- File-modification counts from the eval-only PR_REVIEW_* hooks (agent set,
 -- routing, scoped payload, BC-only security, sub-agent model override, tool
 -- rule) that were ENABLED this run, keyed by lever name. Null for a production
