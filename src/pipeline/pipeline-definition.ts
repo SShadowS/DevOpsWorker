@@ -177,9 +177,18 @@ export function buildCIVerificationHook(config: PipelineConfig) {
  *  convergence history, and any stale gate-failure banner all describe rounds
  *  against a plan that no longer exists.
  *
- *  Planning's own budget is deliberately untouched — the loop manages it, and
- *  zeroing it here would let a rewind refill the very budget the loop is
- *  spending. */
+ *  Planning's own ATTEMPT BUDGET is deliberately untouched — the loop manages
+ *  it, and zeroing it here would let a rewind refill the very budget the loop is
+ *  spending. Planning's convergence HISTORY is a different thing and IS cleared:
+ *  a rewind means a human gave direction and a new plan is coming, so the counts
+ *  from rounds against the old plan describe nothing that still exists. Keeping
+ *  them let a plateau accumulate ACROSS separate human-steered replans (WI 77666:
+ *  [12, 6, 8, 10] against one surviving review) and escalate — asking the human
+ *  to answer the question they had just answered. The loop already clears these
+ *  counts when resuming from an escalation, for the reason stated there; this
+ *  makes the checkpoint path agree. A loop genuinely spinning on its own still
+ *  escalates, because counts accumulate across iterations WITHIN one entry and
+ *  resetState runs only at entry. */
 export function planningResetState(state: PipelineState): PipelineState {
   return {
     ...state,
@@ -202,7 +211,7 @@ export function planningResetState(state: PipelineState): PipelineState {
     workItemUpdate: undefined,
     learnedRules: undefined,
     revisionAttempts: { ...state.revisionAttempts, coding: 0, 'test-cases': 0 },
-    revisionIssueCounts: { ...state.revisionIssueCounts, coding: [], 'test-cases': [] },
+    revisionIssueCounts: { ...state.revisionIssueCounts, planning: [], coding: [], 'test-cases': [] },
     gateFailure: undefined,
   };
 }

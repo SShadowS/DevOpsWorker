@@ -432,11 +432,21 @@ describe('planningResetState — downstream bookkeeping', () => {
     expect(planningResetState(spent()).revisionAttempts?.planning).toBe(3);
   });
 
-  test('clears downstream convergence history, keeps planning history', () => {
+  test('clears convergence history for every loop, planning included', () => {
+    // CHANGED 2026-08-31, deliberately: this asserted `planning: [7]` survives.
+    // That was the WI 79748 shape — the entry added downstream resets and left
+    // planning's alone by symmetry with its attempt budget. WI 77666 showed the
+    // symmetry is wrong. Counts outlived the `planReviews` that produced them,
+    // so a plateau accumulated across four separate human-steered replans
+    // ([12, 6, 8, 10] against ONE surviving review) and escalated — asking the
+    // human to re-answer what they had answered twelve minutes earlier, and
+    // citing "recurring findings" it could no longer show because the reviews
+    // were deleted. The budget argument still holds and is tested above; it
+    // never applied to the counts.
     const out = planningResetState(spent());
     expect(out.revisionIssueCounts?.coding).toEqual([]);
     expect(out.revisionIssueCounts?.['test-cases']).toEqual([]);
-    expect(out.revisionIssueCounts?.planning).toEqual([7]);
+    expect(out.revisionIssueCounts?.planning).toEqual([]);
   });
 
   test('drops a stale gate-failure banner from the old coding rounds', () => {
@@ -494,5 +504,74 @@ describe('planningResetState — priorBranches', () => {
     const out = planningResetState({ currentStage: 'planning' } as never);
 
     expect(out.priorBranches).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The plateau a human already broke
+//
+// planningResetState wiped `planReviews` on every /rerun-plan but kept
+// `revisionIssueCounts.planning`. Across human-steered replans the counts
+// accumulated while the reviews backing them were deleted, so the convergence
+// trigger read a plateau spanning FOUR DIFFERENT PLANS and escalated — asking
+// the human to answer a question they had answered twelve minutes earlier.
+//
+// WI 77666: counts [12, 6, 8, 10] against exactly ONE surviving plan review.
+// The escalation comment then said "no finding repeated across rounds" and
+// listed no recurring findings, because three of the four rounds it was
+// reasoning about no longer existed in state.
+//
+// The loop already gets this right on its other entry path (revision-loop.ts:
+// "the answer is a new starting condition, and carrying the old plateau
+// forward would re-escalate on the very next round"). This makes the checkpoint
+// path agree with it.
+// ---------------------------------------------------------------------------
+
+describe('planningResetState — convergence history', () => {
+  const withCounts = (counts: Record<string, number[]>): PipelineState => ({
+    currentStage: 'planning',
+    revisionIssueCounts: counts,
+    telemetry: { totalCostUsd: 0, totalDurationMs: 0, stages: [] },
+    startedAt: new Date().toISOString(),
+  } as PipelineState);
+
+  test('a new plan starts planning convergence from scratch', () => {
+    const out = planningResetState(withCounts({ planning: [12, 6, 8, 10] }));
+
+    expect(out.revisionIssueCounts?.['planning']).toEqual([]);
+  });
+
+  test('the counts and the reviews backing them are cleared together', () => {
+    // The defect was the asymmetry, not either half. A count whose review is
+    // gone cannot be explained to the human the escalation interrupts.
+    const out = planningResetState({
+      ...withCounts({ planning: [12, 6, 8, 10] }),
+      planReviews: [{ verdict: 'revise', feedback: 'r' }],
+    } as PipelineState);
+
+    expect(out.planReviews).toEqual([]);
+    expect(out.revisionIssueCounts?.['planning']).toEqual([]);
+  });
+
+  test('still clears the downstream loops it already cleared', () => {
+    const out = planningResetState(withCounts({
+      planning: [5], coding: [3, 3], 'test-cases': [1],
+    }));
+
+    expect(out.revisionIssueCounts?.['coding']).toEqual([]);
+    expect(out.revisionIssueCounts?.['test-cases']).toEqual([]);
+  });
+
+  test('leaves planning\'s attempt budget alone', () => {
+    // Deliberate and unchanged: the loop manages its own budget, and zeroing it
+    // on a rewind would refill the very budget the loop is spending. That
+    // argument is about attempts; it was never about the counts.
+    const out = planningResetState({
+      ...withCounts({ planning: [9] }),
+      revisionAttempts: { planning: 2, coding: 4, 'test-cases': 1 },
+    } as PipelineState);
+
+    expect(out.revisionAttempts?.['planning']).toBe(2);
+    expect(out.revisionAttempts?.['coding']).toBe(0);
   });
 });
