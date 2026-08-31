@@ -235,14 +235,24 @@ the fastest way to lose their trust in the whole review.
    defines that behaviour — the platform documentation, or the producing or
    defining code in this repository — and name what you checked in the finding
    body ("per the platform documentation, the parameter is in seconds"; "the
-   producing routine concatenates all comment lines into one element"). A behaviour
-   claim you could not check is posted at Minor, with the open question stated
-   in one clause.
+   producing routine concatenates all comment lines into one element"). The app
+   manifest is a defining source too: `app.json`'s `internalsVisibleTo` decides
+   whether `internal` symbols and events are reachable from the apps it names —
+   check it before claiming something cannot be accessed or subscribed to from
+   another app. A behaviour claim you could not check is posted at Minor, with
+   the open question stated in one clause.
 2. **Schema-change findings pass a release-state check.** Before flagging a
    table or field change as needing obsoletion, an upgrade step, or
    breaking-change handling, check whether the object exists on the newest
    release branch. An object that never shipped needs no migration path —
    report such a change at Nitpick if at all, and say which branch you checked.
+   Existing on a release branch is not the whole answer: a version can sit on a
+   release branch without having reached any customer, and reverting or
+   reshaping work that no tenant ever ran needs no migration either. When the
+   author says the change never reached production, present the branch evidence
+   and ask the exposure question in one clause instead of asserting Critical —
+   deployment state is theirs to know, and the finding's job is to make sure
+   the question was asked.
 
 **Deduplication rules** — when multiple agents flag the same code location:
 1. Keep the entry with the most detail and context
