@@ -227,6 +227,23 @@ a stale global that no shipped code path reaches. Say so in one clause ("latent
 from a latent one has to re-derive that themselves for every finding, which is
 the fastest way to lose their trust in the whole review.
 
+**Carry the recorded disposition.** Before you assign a severity, look for this
+finding's history: the existing PR comments fetched in Phase 2, the prompt's
+"Findings already tracked on this PR" list, and — when the description or a
+thread names a predecessor PR this one continues — that PR's threads too. When
+the team already answered it ("by design", "intended", "accepted", "follow-up
+work item", "will fix next week", "duplicate of round N"), post it at **Minor**,
+open with their answer in one clause, and name what this round adds —
+"dispositioned on !55395 as a follow-up; restated because the code is unchanged
+and the successor PR carries it". A finding the author has already decided is
+a reminder, and a reminder that arrives at 🔴 Critical reads as a reviewer that
+did not listen, which is what turns the next reply into one word.
+
+Keep the original severity in exactly two cases, and say which one applies:
+this PR's diff changed the impact (wider population, new call site, a mitigation
+removed), or the disposition's stated premise no longer holds ("deferred because
+unreleased — this PR releases it"). Absent one of those, Minor.
+
 **Evidence gates — a finding keeps Critical or Major by passing these:**
 
 1. **Behaviour claims cite their defining source.** When the severity rests on a
@@ -253,6 +270,35 @@ the fastest way to lose their trust in the whole review.
    and ask the exposure question in one clause instead of asserting Critical —
    deployment state is theirs to know, and the finding's job is to make sure
    the question was asked.
+3. **AL language and test-framework claims rest on the documented rule.** When
+   a finding's severity depends on what the AL compiler, the runtime, or the
+   test framework does, cite the Microsoft Learn page that states it and name
+   that page in the finding body. These five are settled — treat them as known
+   facts rather than re-deriving them, because each one has produced a Critical
+   or Major finding the team refuted:
+   - **Procedure overload is supported.** Two procedures may share a name in one
+     object when their parameters differ in type, order, or number; the return
+     type is not part of the signature (Learn, "Procedure overload"). Read a
+     repeated name as an overload, and compare the parameter lists before
+     calling it a compile error.
+   - **`TestField(Field, Value)` asserts equality.** It errors when the field
+     does not match `Value`, so a `TestField(F, 0)` guard proves the value is
+     zero at that point. The one-argument `TestField(F)` is the form that
+     requires a non-zero, non-blank value (Learn, "Record.TestField").
+   - **`Codeunit.Run` raises the codeunit's error when its return value is
+     unused.** A call that consumes the Boolean — `if Codeunit.Run(…) then` —
+     is the form that turns the error into `false` (Learn, "Codeunit.Run").
+     Reserve the swallowed-error finding for call sites that consume the Boolean.
+   - **Every handler named in `[HandlerFunctions]` must be called at least
+     once**, or the test fails (Learn, "Create handler methods"). Read a
+     declared handler as an assertion that its dialog fires.
+   - **An `[InternalEvent]` is subscribable from every app named in the
+     publisher's `internalsVisibleTo`.** The InternalEvent attribute page says
+     only "the same module"; the app.json reference's `internalsVisibleTo`
+     entry is what grants the named apps internal access. Read that manifest
+     list before judging an event unreachable across apps.
+   A claim of this kind that you did not settle against a Learn page is posted
+   at **Minor**, with the open question stated in one clause.
 
 **Deduplication rules** — when multiple agents flag the same code location:
 1. Keep the entry with the most detail and context
