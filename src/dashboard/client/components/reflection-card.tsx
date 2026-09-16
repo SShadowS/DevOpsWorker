@@ -86,6 +86,35 @@ const decisionError = signal<string | null>(null);
  *  stale arm never survives past the request it was arming for. */
 const decisionArmed = signal<Decision | null>(null);
 
+/** The proposal open in full, or null for "the newest". Kept across refetches,
+ *  so a decision leaves the person looking at the proposal they just decided. */
+const selectedProposalId = signal<number | null>(null);
+
+/** The proposal the card shows in full: the selected one while it is still in
+ *  the list, otherwise the newest. `proposals` is newest-first and non-empty. */
+export function chooseShownProposal(proposals: ReflectionProposal[], selectedId: number | null): ReflectionProposal {
+  return proposals.find((p) => p.id === selectedId) ?? proposals[0]!;
+}
+
+/** Proposals still waiting on a decision other than the one on screen, oldest
+ *  first. Cycles run on the 1st and the 15th, so a newer proposal can land on
+ *  top of an undecided one; the older one's buttons are only reachable by
+ *  opening it, so the card names it. A failed run is left out: it has no
+ *  decision to make. */
+export function awaitingDecisionElsewhere(proposals: ReflectionProposal[], shownId: number): ReflectionProposal[] {
+  return proposals
+    .filter((p) => p.id !== shownId && p.status === 'pending' && !p.error)
+    .reverse();
+}
+
+/** Open a proposal in full. An armed Approve/Reject belongs to the proposal it
+ *  was armed on, so it is dropped here rather than carried to another one. */
+function selectProposal(id: number): void {
+  selectedProposalId.value = id;
+  decisionArmed.value = null;
+  decisionError.value = null;
+}
+
 export async function loadReflections(): Promise<void> {
   listState.value = { status: 'loading' };
   decisionArmed.value = null;
@@ -570,15 +599,16 @@ function ReflectionDecisionArea({ proposal }: { proposal: ReflectionProposal }) 
   );
 }
 
-/** The newest proposal, shown in full: every section below reads straight
- *  off the object regardless of status, INCLUDING a failed or already-decided
- *  one — a reviewer deciding whether to trust "Applied" still wants to see
- *  what shipped, and a failed row's sections simply render their own empty
- *  state (every content array on a failed row is `[]`, per reflect.ts's
- *  catch block) rather than needing a special-cased failure layout. */
+/** The proposal open in full (the newest unless another was opened): every
+ *  section below reads straight off the object regardless of status,
+ *  INCLUDING a failed or already-decided one — a reviewer deciding whether to
+ *  trust "Applied" still wants to see what shipped, and a failed row's sections
+ *  simply render their own empty state (every content array on a failed row is
+ *  `[]`, per reflect.ts's catch block) rather than needing a special-cased
+ *  failure layout. */
 function ReflectionProposalDetail({ proposal }: { proposal: ReflectionProposal }) {
   return (
-    <article class="reflection-proposal reflection-proposal--newest">
+    <article class="reflection-proposal">
       <div class="stats-slot__header">
         <span class="reflection-proposal__cycle">Cycle {proposal.cycleDate}</span>
         <span class="stats-slot__window" title="Days of history this cycle reviewed">{proposal.windowDays}-day window</span>
@@ -603,16 +633,34 @@ function ReflectionProposalDetail({ proposal }: { proposal: ReflectionProposal }
   );
 }
 
-/** Older proposals: status + date only, per the brief — the newest section
- *  above is where the detail lives. `title` on the badge carries the error
- *  text for a failed older cycle, the same "don't hide it, don't spell it out
- *  in a fifth column either" trade-off the PR review list makes for its own
- *  truncated error line. */
+/** Named at the top of the card when a proposal other than the one on screen
+ *  still needs a decision — its buttons live in its own full view, so the
+ *  notice opens it. */
+function AwaitingDecisionNotice({ proposals }: { proposals: ReflectionProposal[] }) {
+  if (proposals.length === 0) return null;
+  return (
+    <ReflectionSection title="Still waiting for a decision" attention>
+      {proposals.map((p) => (
+        <p key={p.id} class="reflection-section__summary">
+          The {p.cycleDate} cycle has not been approved or rejected yet.{' '}
+          <button type="button" class="btn btn--ghost" onClick={() => selectProposal(p.id)}>
+            Open the {p.cycleDate} cycle
+          </button>
+        </p>
+      ))}
+    </ReflectionSection>
+  );
+}
+
+/** Every other proposal: date and status, with a button that opens it in full
+ *  above. `title` on the badge carries the error text for a failed cycle, the
+ *  same "don't hide it, don't spell it out in another column either" trade-off
+ *  the PR review list makes for its own truncated error line. */
 function ReflectionHistory({ proposals }: { proposals: ReflectionProposal[] }) {
   return (
-    <ReflectionSection title="Earlier cycles">
+    <ReflectionSection title="Other cycles">
       <table class="config-table reflection-table">
-        <thead><tr><th>Cycle</th><th>Status</th></tr></thead>
+        <thead><tr><th>Cycle</th><th>Status</th><th></th></tr></thead>
         <tbody>
           {proposals.map((p) => (
             <tr key={p.id}>
@@ -621,6 +669,11 @@ function ReflectionHistory({ proposals }: { proposals: ReflectionProposal[] }) {
                 <span class={`badge ${badgeClassForProposal(p)}`} title={p.error ?? undefined}>
                   {describeProposalStatus(p)}
                 </span>
+              </td>
+              <td>
+                <button type="button" class="btn btn--ghost" onClick={() => selectProposal(p.id)}>
+                  Open
+                </button>
               </td>
             </tr>
           ))}
@@ -648,12 +701,17 @@ export function ReflectionCard() {
         <p class="stats-slot__status-text stats-slot__status-text--error">Failed to load: {state.message}</p>
       )}
       {state.status === 'empty' && <p class="stats-slot__status-text">No reflection cycles have run yet.</p>}
-      {state.status === 'ready' && (
-        <div class="reflection-card__body">
-          <ReflectionProposalDetail proposal={state.proposals[0]!} />
-          {state.proposals.length > 1 && <ReflectionHistory proposals={state.proposals.slice(1)} />}
-        </div>
-      )}
+      {state.status === 'ready' && (() => {
+        const shown = chooseShownProposal(state.proposals, selectedProposalId.value);
+        const others = state.proposals.filter((p) => p.id !== shown.id);
+        return (
+          <div class="reflection-card__body">
+            <AwaitingDecisionNotice proposals={awaitingDecisionElsewhere(state.proposals, shown.id)} />
+            <ReflectionProposalDetail proposal={shown} />
+            {others.length > 0 && <ReflectionHistory proposals={others} />}
+          </div>
+        );
+      })()}
     </section>
   );
 }
