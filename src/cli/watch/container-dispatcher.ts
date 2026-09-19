@@ -111,6 +111,11 @@ export function getContainerEnv(): Record<string, string> {
     // container. This list is an allowlist: a variable the config layer reads but
     // that is not forwarded here silently falls back to its default, with no error
     // and nothing in the logs. Add new config env vars here when you add them.
+    // Turns on the port classifier that re-checks "not a cherry-pick" routing
+    // (src/sdk/port-classifier.ts). Absent here, the key exists on the host, the
+    // spawned review never sees it, and every port the regex misses keeps taking
+    // the full path — with nothing in the logs to say why.
+    TYPESAFE_API_KEY: process.env['TYPESAFE_API_KEY'] ?? '',
     DEFAULT_MODEL: process.env['DEFAULT_MODEL'] ?? '',
     DEFAULT_EFFORT: process.env['DEFAULT_EFFORT'] ?? '',
     REVISION_MAX_ATTEMPTS: process.env['REVISION_MAX_ATTEMPTS'] ?? '',

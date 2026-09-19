@@ -25,11 +25,13 @@ import {
   isApprovedRecommendation,
   findBotSummaryThread,
   fetchPRMetadata,
+  fetchRecentPullRequests,
   fetchPRDiff,
   type ReviewThread,
   type PRMetadata,
 } from '../sdk/ado/pull-requests.ts';
 import { chooseReviewPath, compareDiffs, renderDiffComparison, type FileDiff } from '../sdk/ado/backport.ts';
+import { typeSafePortClassifier, acceptedSourcePr } from '../sdk/port-classifier.ts';
 import { checkoutBranch, resolveRef } from '../sdk/git-checkout.ts';
 import { checkoutReviewTree } from '../sdk/ado/review-tree.ts';
 import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
@@ -1209,7 +1211,43 @@ export async function reviewPR(args: string[]): Promise<void> {
 
   // Route before spending. `full` is the default for every uncertainty: an
   // unidentifiable backport then costs exactly what it costs today.
-  const cherryPick = detectCherryPick({ title: resolvedTitle, description: resolvedDescription });
+  let cherryPick = detectCherryPick({ title: resolvedTitle, description: resolvedDescription });
+
+  // The regex reads words, and the porting tool does not always write one — a
+  // port raised against a second branch carries its original's title verbatim.
+  // Only consulted when the regex already said no, and only accepted with a
+  // named source PR above the confidence floor; everything after this still has
+  // to agree (the PR must exist, its diff must be fetchable, and it must share
+  // files), so a wrong match costs a full review, which is what a missed port
+  // costs today.
+  let classifiedPort: { sourcePrId: number; confidence: number } | null = null;
+  if (!cherryPick.isCherryPick) {
+    const classify = typeSafePortClassifier();
+    if (classify) {
+      try {
+        const candidates = (await fetchRecentPullRequests(config)).filter((c) => c.id !== prId);
+        const verdict = await classify({
+          title: resolvedTitle,
+          description: resolvedDescription,
+          sourceBranch: shortBranch,
+          targetBranch: shortTarget,
+          candidates: candidates.map((c) => ({ id: c.id, title: c.title })),
+        });
+        const sourcePrId = acceptedSourcePr(verdict, prId);
+        if (sourcePrId !== null) {
+          classifiedPort = { sourcePrId, confidence: verdict!.confidence };
+          cherryPick = { isCherryPick: true, originalPrId: sourcePrId };
+          console.log(`[backport] classifier says this ports !${sourcePrId} (confidence ${verdict!.confidence.toFixed(2)})`);
+        } else if (verdict) {
+          console.log(`[backport] classifier: ${verdict.isPort ? 'port' : 'original'} at ${verdict.confidence.toFixed(2)} — below the bar, taking the regex's answer`);
+        }
+      } catch (err) {
+        // Never a reason to fail a review: the regex's answer stands.
+        console.log(`[backport] port classifier unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
   let sourceDiff: FileDiff[] = [];
   let sourcePrExists = false;
   let sourceDiffError = '';
@@ -1256,7 +1294,12 @@ export async function reviewPR(args: string[]): Promise<void> {
   // together) so a run that errors before `save()` still persists which path it
   // took — a cheap review and a failed detection must stay distinguishable in the
   // data even when the run itself blows up.
-  let reviewPath = route.path === 'sanity' ? `sanity:${route.sourcePrId}` : `full:${route.reason}`;
+  // A classified route says so, so the next cost read can separate the ports the
+  // regex found from the ones the classifier did — the whole change is
+  // unmeasurable otherwise.
+  let reviewPath = route.path === 'sanity'
+    ? `sanity:${route.sourcePrId}${classifiedPort ? ` (classified ${classifiedPort.confidence.toFixed(2)})` : ''}`
+    : `full:${route.reason}`;
 
   // Read the PR's existing marker threads BEFORE the agent runs, so the prompt can
   // hand it the exact file+title pairs already under discussion. Without this the

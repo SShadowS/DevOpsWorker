@@ -752,3 +752,36 @@ export async function fetchPRDiff(
   }
   return { ok: true, files: diff.files };
 }
+
+/** A pull request as the port classifier sees it: enough to recognise a twin. */
+export interface RecentPullRequest {
+  id: number;
+  title: string;
+  targetBranch: string;
+}
+
+/**
+ * Recent pull requests in this repository, newest first.
+ *
+ * The candidate list a port is chosen from. `status=all` on purpose: a port is
+ * usually raised right after its original was completed, so an active-only list
+ * would miss exactly the pull request being copied.
+ */
+export async function fetchRecentPullRequests(
+  config: PipelineConfig,
+  top = 50,
+): Promise<RecentPullRequest[]> {
+  const res = await adoFetch<{ value?: { pullRequestId?: number; title?: string; targetRefName?: string }[] }>(
+    config.azureDevOps,
+    `git/repositories/${config.azureDevOps.repositoryId}/pullrequests` +
+      `?searchCriteria.status=all&$top=${top}&api-version=7.0`,
+  );
+  return (res.value ?? [])
+    .filter((pr): pr is { pullRequestId: number; title: string; targetRefName?: string } =>
+      typeof pr.pullRequestId === 'number' && typeof pr.title === 'string')
+    .map((pr) => ({
+      id: pr.pullRequestId,
+      title: pr.title,
+      targetBranch: (pr.targetRefName ?? '').replace('refs/heads/', ''),
+    }));
+}

@@ -25,6 +25,7 @@
     "@anthropic-ai/sdk": "^0.115.0",
     "@preact/signals": "^2.9.3",
     "@sshadows/tree-sitter-al": "^3.0.1",
+    "@typesafe-ai/sdk": "^0.6.0",
     "postgres": "^3.4.9",
     "preact": "^10.29.7",
     "web-tree-sitter": "^0.26.11",
