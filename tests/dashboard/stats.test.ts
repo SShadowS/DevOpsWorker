@@ -129,7 +129,7 @@ describe('isTestFlag', () => {
 // ---------------------------------------------------------------------------
 
 function finding(severity: PRFinding['severity']): PRFinding {
-  return { severity, title: 't', body: 'b' };
+  return { severity, title: 't', body: 'b', foundBy: [] };
 }
 
 describe('readBandCount', () => {

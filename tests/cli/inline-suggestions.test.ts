@@ -37,6 +37,7 @@ const finding: PRFinding = {
   line: 2,
   replacesText: '    if A < B then',
   suggestedFix: '    if A <= B then',
+  foundBy: ['code-review-validator'],
 };
 
 describe('resolveSuggestion', () => {

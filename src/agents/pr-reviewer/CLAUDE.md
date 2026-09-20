@@ -304,7 +304,10 @@ unreleased — this PR releases it"). Absent one of those, Minor.
 1. Keep the entry with the most detail and context
 2. Use the highest severity across duplicates
 3. Merge suggestions from all sources. This applies to prose only: if two agents propose **different replacement code** for the same lines, keep neither `suggestedFix` nor `replacesText`. Two rewrites of one line cannot be merged, and choosing between them arbitrarily puts a fix you did not adjudicate behind a one-click Apply button. Describe both options in the finding body instead.
-4. Note which analysis domains flagged it
+4. Note which analysis domains flagged it, and **union their agent names into `foundBy`**
+   on the kept entry — every agent that raised it, not just the one whose wording you
+   kept. A merged finding with one name reads as a finding only that agent could have
+   caught, which is the opposite of what a merge means.
 5. Carry `file`, `line` and `location` through the merge. If the kept entry lacks one of
    them and a merged duplicate has it, take the duplicate's — agreement across domains is a
    reason to anchor a finding, not to lose its anchor.
@@ -456,13 +459,19 @@ Return the PRReviewResult with:
 - **findingsCount**: total number of deduplicated findings
 - **recommendation**: the overall recommendation string (`"approve"`, `"request changes"`, or `"needs discussion"`)
 - **findings**: object with counts by severity: `{ critical: N, major: N, minor: N, nitpick: N }`. Count each deduplicated finding based on its final severity after merging.
-- **findingsList**: every finding as a structured record — `{severity, title, file, line, location, replacesText, suggestedFix, body}`.
+- **findingsList**: every finding as a structured record — `{severity, title, file, line, location, replacesText, suggestedFix, body, foundBy}`.
   - `severity` is the same label you printed in the heading: `critical` / `major` / `minor` / `nitpick`.
   - `title` must match the finding's heading text. `file` and `title` together are what link a finding to the thread already discussing it, so keeping both stable across reviews of this PR is what makes a re-review update that thread rather than open a second one beside it.
   - `file` is the **repo-relative** path of a changed file (`App/Cloud/Al/Codeunits/X.Codeunit.al`), not an AL object name. Spell the same path the same way every review — a path written differently between runs identifies a different finding, exactly as a reworded title does.
   - `line` is a line number on the **RIGHT (source-branch) side** of the diff — a line that exists in the changed file.
   - `location` is the name of the enclosing AL procedure, trigger, or method — for example `OnAfterValidateEvent`, `PostDocument`. Just the identifier: when an agent reported it inside a longer reference (`Codeunit 50100 SalesPost, procedure PostDocument, line 88`), take the procedure name out of it. Omit it when the finding is not inside one.
   - When a finding has no single location — a missing test, a pattern spanning several call sites — **omit `file` and `line`**. A guessed line is worse than none: it anchors a comment to unrelated code. Omitting them costs nothing; the finding still appears in the summary.
+  - `foundBy` names the sub-agents this finding came from, spelled exactly as the agent
+    is named (`al-performance-analyzer`, `code-review-validator`, …). One name for a
+    finding a single agent raised; **every** contributing agent for one you merged under
+    the deduplication rules. You are the only place this can be recorded — the agents
+    finish before the merge happens — and it is what makes it possible to ask later
+    whether skipping an agent would have lost a finding.
   - The severity counts in `findings` must agree with the entries here.
   - If a finding matches one listed under "Findings already tracked on this PR", reuse that row's `file` and `title` verbatim here.
   - `replacesText` and `suggestedFix` are optional and go together — supply both or neither. They turn the finding's inline thread into a one-click "Apply change" suggestion.

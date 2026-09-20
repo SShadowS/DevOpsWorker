@@ -18,7 +18,7 @@ describe('rowToPRReview', () => {
 
   test('maps findings_list to findingsList', () => {
     const findingsList: PRFinding[] = [
-      { severity: 'critical', title: 'Missing guard', file: 'App/Foo.Codeunit.al', line: 42, location: 'PostDocument', body: 'Explanation.' },
+      { severity: 'critical', title: 'Missing guard', file: 'App/Foo.Codeunit.al', line: 42, location: 'PostDocument', body: 'Explanation.', foundBy: ['code-review-validator'] },
     ];
     const row = rowToPRReview({
       id: 1, pr_id: 42, repo_key: 'k', source_branch: 's', target_branch: 't',

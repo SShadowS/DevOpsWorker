@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadConfig, readAllSettingsSafely } from './config.ts';
 import type { ISettingsStore } from '../config/settings-store.interface.ts';
 import { runPRReview, detectCherryPick } from '../agents/pr-reviewer/config.ts';
-import type { PRFinding, PRReviewResult } from '../agents/pr-reviewer/schema.ts';
+import type { PRFinding, PRReviewResult, PrSubAgent } from '../agents/pr-reviewer/schema.ts';
 import { runBackportReview } from '../agents/cherry-pick-reviewer/config.ts';
 import type { BackportReview } from '../agents/cherry-pick-reviewer/schema.ts';
 import { findRepoByRepositoryId } from '../config/repos.ts';
@@ -285,7 +285,7 @@ export const ROUTING_MARKER = '## Sub-agent routing (applies during Phase 4)';
  * every change, so it has no trigger. The rest are AL constructs that either
  * appear in a diff or do not.
  */
-export const AGENT_TRIGGERS: Record<string, string[]> = {
+export const AGENT_TRIGGERS: Record<PrSubAgent, string[]> = {
   'code-review-validator': [],
   'code-quality-assessor': [],
   'al-performance-analyzer': ['repeat', 'FindSet', 'FindFirst', 'SetLoadFields', 'CalcFields', 'Commit', 'LockTable', 'SetRange', 'SetFilter'],
@@ -1568,6 +1568,22 @@ export async function reviewPR(args: string[]): Promise<void> {
     // read instead of a database query.
     if ((result.output?.findingsCount ?? 0) > 0 && !result.output?.findingsList?.length) {
       console.warn(`[inline] findingsCount=${result.output?.findingsCount} but findingsList has 0 entries — inline posting will not run`);
+    }
+
+    // Attribution compliance, per review, in the log.
+    //
+    // `foundBy` cannot fail a review by design (schema.ts says why), so an
+    // orchestrator that ignores it leaves empty arrays and nothing else. The
+    // comparable optional field, `observedCherryPick`, was simply omitted on 31
+    // of the last 100 reviews and nobody could see it happening. This is the
+    // counter that would have shown it.
+    const findings = result.output?.findingsList ?? [];
+    if (findings.length > 0) {
+      const unattributed = findings.filter((f) => !f.foundBy?.length).length;
+      console.log(
+        `[attribution] ${findings.length - unattributed}/${findings.length} findings name the agents that found them` +
+        (unattributed > 0 ? ` — ${unattributed} unattributed` : ''),
+      );
     }
 
     // `noPost` is read above and already suppresses the agent's own summary
