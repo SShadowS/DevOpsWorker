@@ -110,14 +110,53 @@ export function typeSafePortClassifier(): PortClassifier | null {
       },
     });
 
-    const source = answers.ported_from.choice;
-    const sourcePrId = source.startsWith('pr_') ? Number(source.slice(3)) : undefined;
-    return {
-      isPort: answers.is_port.choice === 'port',
-      // The pair has to agree: the routing decision needs a named source, so the
-      // confidence that matters is the weaker of "is it a port" and "which one".
-      confidence: Math.min(answers.is_port.confidence, answers.ported_from.confidence),
-      ...(sourcePrId !== undefined && Number.isFinite(sourcePrId) ? { sourcePrId } : {}),
-    };
+    return readVerdict(
+      answers.is_port.probabilities.port,
+      answers.ported_from.probabilities as Record<string, number>,
+      q.candidates,
+    );
+  };
+}
+
+/**
+ * Turn the classifier's two probability distributions into one routing verdict.
+ *
+ * A fix is often ported to several branches in the same minute, and every copy
+ * carries the same title. For the second port, the candidate list then holds
+ * the original AND its sibling port, and "which one is this a copy of?" splits
+ * between them — PR 56336 read 0.59 / 0.39 across two copies of one change,
+ * with only 0.02 on "none", while "is it a port?" was 1.00. Taking the single
+ * top option's confidence threw that answer away.
+ *
+ * So the probability of candidates that are the SAME change (same title) is
+ * pooled, the pool must clear the bar, and the route compares against the
+ * OLDEST PR in it — the original, not a sibling port. A split between two
+ * DIFFERENT changes stays split and fails the bar, which is the case the bar is
+ * there for.
+ */
+export function readVerdict(
+  pPort: number,
+  sourceProbabilities: Record<string, number>,
+  candidates: PortCandidate[],
+): PortVerdict {
+  // Copies of one change are NOT identical strings: the porting tool appends the
+  // branch or version — `… Tell Me`, `… Tell Me [29.1]`, `… Tell Me [29.0.1]`
+  // on !56232/!56335/!56336. Bracketed segments are dropped before comparing.
+  const sameTitle = (t: string) => t.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  const groups = new Map<string, { mass: number; oldestId: number }>();
+  for (const c of candidates) {
+    const p = sourceProbabilities[`pr_${c.id}`] ?? 0;
+    const g = groups.get(sameTitle(c.title)) ?? { mass: 0, oldestId: Number.POSITIVE_INFINITY };
+    g.mass += p;
+    g.oldestId = Math.min(g.oldestId, c.id);
+    groups.set(sameTitle(c.title), g);
+  }
+  const best = [...groups.values()].sort((a, b) => b.mass - a.mass)[0];
+
+  return {
+    isPort: pPort >= 0.5,
+    // Both halves must hold: it is a port, and it is a port of THIS change.
+    confidence: Math.min(pPort, best?.mass ?? 0),
+    ...(best && best.mass > 0 ? { sourcePrId: best.oldestId } : {}),
   };
 }
