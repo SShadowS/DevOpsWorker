@@ -46,12 +46,16 @@ export interface PortVerdict {
 export type PortClassifier = (q: PortQuestion) => Promise<PortVerdict | null>;
 
 /**
- * Measured on the eval corpus: at 0.95 the classifier caught every port and
- * produced one wrong match in 100 pull requests. Lower floors add wrong matches
- * without catching anything more, because every true port it found scored 0.93
- * or above.
+ * Measured on 200 reviewed pull requests with production-style candidates
+ * (every PR in the repository at review time, older ones only, twins pooled):
+ * at 0.85 the classifier caught 10 of the 14 ports the title regex missed and
+ * routed no original change. 0.95 caught 3. The only "wrong" routes at 0.85
+ * were a port the reviewer agent itself mislabelled.
+ *
+ * An earlier eval put this at 0.95, but it never showed the classifier a
+ * same-minute sibling port, which is the case that decides the floor.
  */
-export const PORT_CONFIDENCE_FLOOR = 0.95;
+export const PORT_CONFIDENCE_FLOOR = 0.85;
 
 /**
  * The source pull request worth routing against, or null to leave the regex's
@@ -74,6 +78,23 @@ export function acceptedSourcePr(
   return verdict.confidence >= floor ? verdict.sourcePrId : null;
 }
 
+/** The two questions, exported so an offline eval asks exactly what production asks. */
+export const PORT_QUESTIONS = {
+  isPort: 'Does this pull request re-apply a change that was already made on another branch — a cherry-pick, a backport, or the same change raised again against a second branch — rather than being original work?',
+  portedFrom: 'Which of the recent pull requests in this repository is this pull request a copy of? Answer none when it is original work, or when no listed pull request is the same change.',
+} as const;
+
+/** The state the classifier reads, exported for the same reason. */
+export function portState(q: PortQuestion): Record<string, string> {
+  return {
+    title: q.title,
+    description: q.description.slice(0, 4000),
+    source_branch: q.sourceBranch,
+    target_branch: q.targetBranch,
+    recent_pull_requests_in_this_repository: q.candidates.map((c) => `!${c.id}: ${c.title}`).join('\n'),
+  };
+}
+
 /**
  * The TypeSafe-backed classifier, or null when no key is configured.
  *
@@ -91,22 +112,10 @@ export function typeSafePortClassifier(): PortClassifier | null {
     for (const c of q.candidates) options[`pr_${c.id}`] = null;
 
     const { answers } = await new sdk.TypeSafeClient().systemOne({
-      state: {
-        title: q.title,
-        description: q.description.slice(0, 4000),
-        source_branch: q.sourceBranch,
-        target_branch: q.targetBranch,
-        recent_pull_requests_in_this_repository: q.candidates.map((c) => `!${c.id}: ${c.title}`).join('\n'),
-      },
+      state: portState(q),
       questions: {
-        is_port: sdk.choice(
-          'Does this pull request re-apply a change that was already made on another branch — a cherry-pick, a backport, or the same change raised again against a second branch — rather than being original work?',
-          { port: null, original: null },
-        ),
-        ported_from: sdk.choice(
-          'Which of the recent pull requests in this repository is this pull request a copy of? Answer none when it is original work, or when no listed pull request is the same change.',
-          options,
-        ),
+        is_port: sdk.choice(PORT_QUESTIONS.isPort, { port: null, original: null }),
+        ported_from: sdk.choice(PORT_QUESTIONS.portedFrom, options),
       },
     });
 

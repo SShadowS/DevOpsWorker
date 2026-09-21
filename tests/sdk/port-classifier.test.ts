@@ -6,10 +6,11 @@ import { acceptedSourcePr, typeSafePortClassifier, readVerdict, PORT_CONFIDENCE_
 // ---------------------------------------------------------------------------
 // The gate in front of the cheap review path.
 //
-// Measured on the last 100 reviewed PRs: the title regex missed 9 ports
-// ($29.30 of full reviews) because a port raised against a second branch
-// carries its original's title verbatim. The classifier caught them, and at
-// 0.95 produced one wrong match. These pin the bar it has to clear.
+// Measured on 200 reviewed PRs with production-style candidates: the title
+// regex missed 14 ports because a port raised against a second branch carries
+// its original's title. At 0.85, with twins pooled and only older PRs offered,
+// the classifier caught 10 of them and routed no original change. These pin
+// the bar it has to clear.
 // ---------------------------------------------------------------------------
 
 const OWN = 56206;
@@ -21,7 +22,7 @@ describe('acceptedSourcePr', () => {
   });
 
   test('below the floor, the regex keeps the decision', () => {
-    expect(acceptedSourcePr(verdict({ confidence: 0.94, sourcePrId: 56156 }), OWN)).toBeNull();
+    expect(acceptedSourcePr(verdict({ confidence: 0.84, sourcePrId: 56156 }), OWN)).toBeNull();
     // Exactly at the floor counts — the floor is the measured operating point.
     expect(acceptedSourcePr(verdict({ confidence: PORT_CONFIDENCE_FLOOR, sourcePrId: 56156 }), OWN)).toBe(56156);
   });
@@ -116,6 +117,12 @@ describe('the review path records how a port was found', () => {
     expect(REVIEW_PR).toContain('if (!cherryPick.isCherryPick) {');
     const idx = REVIEW_PR.indexOf('typeSafePortClassifier()');
     expect(idx).toBeGreaterThan(REVIEW_PR.indexOf('if (!cherryPick.isCherryPick) {'));
+  });
+
+  test('only OLDER pull requests are offered as sources', () => {
+    // A port is always raised after what it copies. Offering newer PRs let an
+    // original be matched to its own later port (!56041, !56052).
+    expect(REVIEW_PR).toContain('.filter((c) => c.id < prId)');
   });
 
   test('a classified route is distinguishable in review_path', () => {

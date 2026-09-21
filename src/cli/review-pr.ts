@@ -1225,7 +1225,11 @@ export async function reviewPR(args: string[]): Promise<void> {
     const classify = typeSafePortClassifier();
     if (classify) {
       try {
-        const candidates = (await fetchRecentPullRequests(config)).filter((c) => c.id !== prId);
+        // Only OLDER pull requests can be a source: a port is always raised after
+        // what it copies, and ADO ids only go up. Without this, re-reviewing an
+        // original after its port was opened put the port in the list, and the
+        // classifier matched the original to its own copy (!56041, !56052).
+        const candidates = (await fetchRecentPullRequests(config)).filter((c) => c.id < prId);
         const verdict = await classify({
           title: resolvedTitle,
           description: resolvedDescription,
