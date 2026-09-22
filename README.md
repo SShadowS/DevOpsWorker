@@ -99,8 +99,8 @@ bun run pipeline -- webhook-server [--port <n>]
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | No | HMAC secret for webhook signature validation |
 | `WEBHOOK_PORT` | No | Webhook server port (default: `3002`) |
 | `BUILD_SHA` | No | Baked into images as a build arg and recorded per review; drives the dashboard's deployment-drift panel. Export it before `docker compose build`, or the image bakes the literal `unknown` |
-| `DEFAULT_MODEL` | No | Orchestrator model (default: `claude-opus-5`). An empty string falls through to the default too — resolution uses `\|\|`, not `??` |
-| `DEFAULT_EFFORT` | No | Reasoning effort; unset means the SDK default |
+| `DEFAULT_MODEL` | No | Orchestrator model (default: `claude-opus-5-5`). An empty string falls through to the default too — resolution uses `\|\|`, not `??` |
+| `DEFAULT_EFFORT` | No | Reasoning effort; unset means the model's default — `medium` on Opus 5.5, `high` on most earlier models. Set it explicitly |
 
 \* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.
 
@@ -211,7 +211,7 @@ To iterate on agent behavior: **edit the agent's `CLAUDE.md`** — no TypeScript
 | **cherry-pick-reviewer** | Focused single-agent review of backport/cherry-pick PRs |
 
 Models resolve per agent at the `runAgent` chokepoint, precedence high to low:
-overlay `models` knobs → per-agent core defaults → `DEFAULT_MODEL` → `claude-opus-5`.
+overlay `models` knobs → per-agent core defaults → `DEFAULT_MODEL` → `claude-opus-5-5`.
 The shipped per-agent defaults (`src/cli/config.ts`) put **coder, draft-pr, test-cases
 and documenter on `claude-sonnet-5`** — strong (Opus) planning and review, cheap (Sonnet)
 execution — while analyzer, planner and the reviewers inherit the Opus default. Review

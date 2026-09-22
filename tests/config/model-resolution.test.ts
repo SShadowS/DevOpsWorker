@@ -40,15 +40,15 @@ describe('DEFAULT_MODEL reaches models.default', () => {
     expect(loadConfig('.').models.default).toBe('claude-opus-4-8');
   });
 
-  test('loadConfig falls back to claude-opus-5 when unset', () => {
-    expect(loadConfig('.').models.default).toBe('claude-opus-5');
+  test('loadConfig falls back to claude-opus-5-5 when unset', () => {
+    expect(loadConfig('.').models.default).toBe('claude-opus-5-5');
   });
 
   test('an EMPTY value falls back rather than being passed through', () => {
     // The container env forwards unset vars as '', and '' is not nullish — `??` here
     // would hand an empty model id to the SDK. This pins `||`.
     process.env['DEFAULT_MODEL'] = '';
-    expect(loadConfig('.').models.default).toBe('claude-opus-5');
+    expect(loadConfig('.').models.default).toBe('claude-opus-5-5');
   });
 
   test('the two config builders agree — this is the divergence that caused the bug', () => {

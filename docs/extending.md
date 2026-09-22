@@ -86,7 +86,7 @@ Set the model via `manifest.agents[name].model`:
 const manifest: OverlayManifest = {
   agents: {
     coder: { model: 'claude-sonnet-5' },
-    planner: { model: 'claude-opus-5' },
+    planner: { model: 'claude-opus-5-5' },
   },
 };
 ```

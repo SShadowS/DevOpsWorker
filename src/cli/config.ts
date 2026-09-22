@@ -102,10 +102,10 @@ export function buildModelsAndCosts(
       // variable IS in the container env allowlist and DOES arrive correctly.
       // Measured on a spawned container: process.env.DEFAULT_MODEL was
       // "claude-opus-4-8" while models.default resolved to "claude-opus-5".
-      default: readSetting<string>(settings, 'models.default') ?? (env['DEFAULT_MODEL'] || 'claude-opus-5'),
+      default: readSetting<string>(settings, 'models.default') ?? (env['DEFAULT_MODEL'] || 'claude-opus-5-5'),
       effort: readSetting<PipelineConfig['models']['effort']>(settings, 'models.effort') ?? parseEffort(env['DEFAULT_EFFORT']),
       perAgent: readSetting<Record<string, string>>(settings, 'models.perAgent') ?? {
-        // planner inherits the Opus 5 default — strong planning, cheap (Sonnet) coding.
+        // planner inherits the Opus 5.5 default — strong planning, cheap (Sonnet) coding.
         'coder': 'claude-sonnet-5',
         'draft-pr': 'claude-sonnet-5',
         'test-cases': 'claude-sonnet-5',

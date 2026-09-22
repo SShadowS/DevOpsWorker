@@ -259,7 +259,7 @@ export async function runAgent<T extends z.ZodType>(
     // Logged so a run's effort is recoverable from its transcript. The SDK silently
     // downgrades an unsupported level, so this records what was REQUESTED — the
     // applied level has to be read back from the run itself.
-    effort: context.config.models.effort ?? '(sdk default: high)',
+    effort: context.config.models.effort ?? '(model default: medium on Opus 5.5, high on most others)',
     maxTurns: knobs.maxTurns,
     allowedTools: effectiveTools,
     mcpServers: Object.keys(resolvedMcpServers),

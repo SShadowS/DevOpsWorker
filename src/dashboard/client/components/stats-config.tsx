@@ -55,7 +55,7 @@ export type ConfigSectionStatus = 'ok' | 'attention' | 'neutral';
 
 export type ModelConfigState = 'unset' | 'empty' | 'configured';
 
-/** `DEFAULT_MODEL || 'claude-opus-5'` has THREE distinct input states, not
+/** `DEFAULT_MODEL || 'claude-opus-5-5'` has THREE distinct input states, not
  *  two: fully unset, explicitly set to an empty string (both fall through to
  *  the hardcoded literal, but are different facts about the deployment), and
  *  a real configured value. Collapsing unset/empty into one "not configured"

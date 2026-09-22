@@ -248,7 +248,7 @@ const SDK_INTERNAL_MODEL = 'claude-haiku-4-5-20251001';
  * default, not be treated as a model id).
  */
 export function allowedModelsFor(arm: Arm): string[] {
-  return [expectedModelFor(arm), process.env['DEFAULT_MODEL'] || 'claude-opus-5', SDK_INTERNAL_MODEL];
+  return [expectedModelFor(arm), process.env['DEFAULT_MODEL'] || 'claude-opus-5-5', SDK_INTERNAL_MODEL];
 }
 
 export function buildComplianceVerdict(

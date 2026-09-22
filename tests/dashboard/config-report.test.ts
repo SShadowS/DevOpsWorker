@@ -356,8 +356,8 @@ describe('buildConfigReport', () => {
   test('DEFAULT_MODEL unset: both builders fall through the || to the same hardcoded literal, and raw says so', async () => {
     clearEnv();
     const report = await buildConfigReport({ manifest: {} });
-    expect(report.orchestratorModel.loadConfig.model).toBe('claude-opus-5');
-    expect(report.orchestratorModel.buildConfigFromRepo.model).toBe('claude-opus-5');
+    expect(report.orchestratorModel.loadConfig.model).toBe('claude-opus-5-5');
+    expect(report.orchestratorModel.buildConfigFromRepo.model).toBe('claude-opus-5-5');
     expect(report.orchestratorModel.agree).toBe(true);
     // The whole point of `raw`: "claude-opus-5" alone cannot tell a consumer
     // whether an operator configured it or nobody configured anything.
@@ -386,8 +386,8 @@ describe('buildConfigReport', () => {
     const report = await buildConfigReport({ manifest: {} });
     expect(report.orchestratorModel.loadConfig.raw).toBe('');
     expect(report.orchestratorModel.buildConfigFromRepo.raw).toBe('');
-    expect(report.orchestratorModel.loadConfig.model).toBe('claude-opus-5');
-    expect(report.orchestratorModel.buildConfigFromRepo.model).toBe('claude-opus-5');
+    expect(report.orchestratorModel.loadConfig.model).toBe('claude-opus-5-5');
+    expect(report.orchestratorModel.buildConfigFromRepo.model).toBe('claude-opus-5-5');
     expect(report.orchestratorModel.agree).toBe(true);
   });
 

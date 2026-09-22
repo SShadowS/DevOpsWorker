@@ -31,7 +31,7 @@ describe('buildModelsAndCosts — precedence', () => {
 
   test('an absent setting changes nothing — falls back to the code default', () => {
     const { models } = buildModelsAndCosts({}, {});
-    expect(models.default).toBe('claude-opus-5');
+    expect(models.default).toBe('claude-opus-5-5');
     expect(models.perAgent?.['coder']).toBe('claude-sonnet-5');
   });
 
@@ -39,7 +39,7 @@ describe('buildModelsAndCosts — precedence', () => {
     // The container env forwards unset vars as '', and '' is not nullish — `??`
     // would hand an empty model id to the SDK. Pins the operator preserved.
     const { models } = buildModelsAndCosts({ DEFAULT_MODEL: '' }, {});
-    expect(models.default).toBe('claude-opus-5');
+    expect(models.default).toBe('claude-opus-5-5');
   });
 
   test('costs values arrive from the database, where today they are always undefined', () => {
@@ -79,7 +79,7 @@ describe('buildModelsAndCosts — precedence', () => {
           'costs.maxBudgetPerAgentUsd': -5, // violates positive()
         },
       );
-      expect(models.default).toBe('claude-opus-5'); // fell back, did not throw or brick assembly
+      expect(models.default).toBe('claude-opus-5-5'); // fell back, did not throw or brick assembly
       expect(models.effort).toBeUndefined();
       expect(costs.maxBudgetPerAgentUsd).toBeUndefined();
       expect(calls.some(c => c.includes('models.default'))).toBe(true);
