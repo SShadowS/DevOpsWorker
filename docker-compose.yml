@@ -212,6 +212,24 @@ services:
     networks:
       - pipeline-net
 
+  # Local git mirrors of the registered repositories, served read-only over
+  # git:// on pipeline-net (no host port). Spawned containers clone from here
+  # and top up from Azure DevOps, instead of each paying for a full clone —
+  # see docker/repo-cache/Dockerfile for why that matters. The mirror list is
+  # deployment-specific: `mirrors.json` in the overlay's deploy/repo-cache/.
+  # Without it the service mirrors nothing and containers clone as before.
+  repo-cache:
+    build: ./docker/repo-cache
+    restart: unless-stopped
+    # Only the PAT, not the whole .env: this service needs nothing else.
+    environment:
+      AZURE_DEVOPS_PAT: ${AZURE_DEVOPS_PAT:-}
+    volumes:
+      - repo-mirrors:/mirrors
+      - ./private/deploy/repo-cache:/config:ro
+    networks:
+      - pipeline-net
+
 networks:
   pipeline-net:
     name: pipeline-net
@@ -219,5 +237,6 @@ networks:
 volumes:
   pgdata:
   do-pipeline-state:
+  repo-mirrors:
   caddy_data:
   caddy_config:

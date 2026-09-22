@@ -111,12 +111,27 @@ APP_ROOT=$(echo "${INITIAL_INFO}" | jq -r '.appRoot')
 MAIN_REPO_DIR="${SESSION_ROOT}/${REPO_KEY}"
 
 # --- Phase 2: clone or refresh main repo ---
-if [ ! -d "${MAIN_REPO_DIR}/.git" ]; then
-  echo "Cloning main repo (${REPO_KEY})..."
-  retry_git git clone --branch "${REPO_BRANCH:-master}" "${REPO_URL}" "${MAIN_REPO_DIR}"
-else
+#
+# A fresh clone comes from the local mirror when one is served (the repo-cache
+# compose service), then is topped up from Azure DevOps. A full-history clone
+# from Azure DevOps costs 280-550 of the identity's 200-unit 5-minute budget for
+# the larger repos, so two containers starting together throttled everyone on
+# that identity. The mirror is at most one sync interval behind; the top-up
+# fetch brings only what changed since, and `origin` is pointed back at Azure
+# DevOps so pushes go where they always did. No mirror — no cache service, or a
+# repo it does not list — falls through to the full clone, as before.
+REPO_CACHE_URL="git://${REPO_CACHE_HOST:-repo-cache}/${REPO_KEY}.git"
+if [ -d "${MAIN_REPO_DIR}/.git" ]; then
   echo "Refreshing main repo (${REPO_KEY})..."
   cd "${MAIN_REPO_DIR}" && retry_git git fetch origin && cd /app
+elif timeout 15 git ls-remote "${REPO_CACHE_URL}" HEAD >/dev/null 2>&1   && git clone --quiet --branch "${REPO_BRANCH:-master}" "${REPO_CACHE_URL}" "${MAIN_REPO_DIR}"; then
+  echo "Cloned main repo (${REPO_KEY}) from the local mirror; topping up from Azure DevOps..."
+  git -C "${MAIN_REPO_DIR}" remote set-url origin "${REPO_URL}"
+  retry_git git -C "${MAIN_REPO_DIR}" fetch --quiet origin
+else
+  rm -rf "${MAIN_REPO_DIR}"   # a half-finished clone from the mirror, if any
+  echo "Cloning main repo (${REPO_KEY}) from Azure DevOps..."
+  retry_git git clone --branch "${REPO_BRANCH:-master}" "${REPO_URL}" "${MAIN_REPO_DIR}"
 fi
 
 # NOTE: app.json Windows backslash path normalization (the "Specified part does not exist in
