@@ -202,6 +202,26 @@ prompt told you is available (AL LSP `goToDefinition`/`outgoingCalls`, or the
 callee's behavior. A real example this prevents: flagging a missing `Commit()` when
 the called insert procedure already commits five calls deep.
 
+### With the AL LSP
+
+When your tool list includes `LSP` (the orchestrator's prompt then has a section headed
+"Resolving Called Procedures (AL LSP)"), `LSP` is how you resolve a callee. It runs the AL
+language server over this workspace, so it answers from the compiler's view of the branch.
+Load it once at the start with `ToolSearch` and the query `select:LSP`.
+
+| I need to... | Use |
+|---|---|
+| Read the body of a called procedure | `LSP goToDefinition` on the call, then `Read` the file it names |
+| See what a procedure calls | `LSP outgoingCalls` |
+| Find every caller of a procedure | `LSP incomingCalls` or `LSP findReferences` |
+| Check a signature, type or field list | `LSP hover` |
+| See a file's structure and object IDs | `LSP documentSymbol` |
+
+Give `LSP` an absolute `filePath` (`/workspace/session/<Repo>/...`) and the 1-based line and
+character of the symbol. With `LSP` available, a callee answer that came from text matching
+is a guess, and a finding that rests on it is reported as unverified. Grep and Read stay the
+right tools for comments, config values and finding files.
+
 ## Reporting a location
 
 Give the orchestrator three machine-usable fields for every finding, so it can anchor a

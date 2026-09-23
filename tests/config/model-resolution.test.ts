@@ -154,6 +154,23 @@ describe('DEFAULT_EFFORT reaches models.effort', () => {
     expect(cfg.effort).toBe('medium');
   });
 
+  test('PR_REVIEW_EFFORT overrides the pr-reviewer pin; a typo leaves the pin', () => {
+    const saved = process.env['PR_REVIEW_EFFORT'];
+    const params = {
+      prId: 1, repoKey: 'r', repoUrl: 'u', repositoryId: 'g', project: 'p',
+      sourceBranch: 's', targetBranch: 't', treeSource: 'merge-preview' as const,
+    };
+    try {
+      process.env['PR_REVIEW_EFFORT'] = 'low';
+      expect(createPRReviewConfig(loadConfig('.'), params).effort).toBe('low');
+      process.env['PR_REVIEW_EFFORT'] = 'lowest';
+      expect(createPRReviewConfig(loadConfig('.'), params).effort).toBe('medium');
+    } finally {
+      if (saved === undefined) delete process.env['PR_REVIEW_EFFORT'];
+      else process.env['PR_REVIEW_EFFORT'] = saved;
+    }
+  });
+
   test('DEFAULT_EFFORT is forwarded to spawned containers', () => {
     // A var read inside the container but absent from the allowlist does nothing,
     // silently — the failure mode this project keeps hitting.

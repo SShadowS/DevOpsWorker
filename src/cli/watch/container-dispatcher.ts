@@ -96,6 +96,9 @@ export function getContainerEnv(): Record<string, string> {
     // which is exactly the failure the comment above warns about: an arm could be
     // set on the host, forwarded nowhere, and silently measured as the baseline.
     CALLEE_MECHANISM: process.env['CALLEE_MECHANISM'] ?? '',
+    // Reasoning effort for the PR reviewer alone, overriding its 'medium' pin
+    // (see createPRReviewConfig). Blank or unrecognised keeps the pin.
+    PR_REVIEW_EFFORT: process.env['PR_REVIEW_EFFORT'] ?? '',
     // Git identity inside pipeline containers. Email must be authorized in the
     // AL Object ID Ninja backend app pool; name marks commits as AI-made.
     GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',

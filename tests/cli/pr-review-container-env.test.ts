@@ -50,3 +50,17 @@ describe('getPrReviewContainerEnv CALLEE_MECHANISM forwarding', () => {
     expect(env['CALLEE_MECHANISM']).toBe('');
   });
 });
+
+describe('getPrReviewContainerEnv PR_REVIEW_EFFORT forwarding', () => {
+  const saved = process.env['PR_REVIEW_EFFORT'];
+  afterEach(() => {
+    if (saved === undefined) delete process.env['PR_REVIEW_EFFORT'];
+    else process.env['PR_REVIEW_EFFORT'] = saved;
+  });
+
+  test('a host PR_REVIEW_EFFORT reaches the container', () => {
+    process.env['PR_REVIEW_EFFORT'] = 'low';
+    expect(getPrReviewContainerEnv()['PR_REVIEW_EFFORT']).toBe('low');
+  });
+});
+
