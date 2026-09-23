@@ -104,7 +104,8 @@ COPY docker/claude-settings.json /root/.claude/settings.json
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/fetch-al-extension.sh /fetch-al-extension.sh
 COPY docker/fetch-al-lsp-plugin.sh /fetch-al-lsp-plugin.sh
-RUN sed -i 's/\r$//' /entrypoint.sh /fetch-al-extension.sh /fetch-al-lsp-plugin.sh \
-    && chmod +x /entrypoint.sh /fetch-al-extension.sh /fetch-al-lsp-plugin.sh
+COPY docker/fetch-al-symbols.sh /fetch-al-symbols.sh
+RUN sed -i 's/\r$//' /entrypoint.sh /fetch-al-extension.sh /fetch-al-lsp-plugin.sh /fetch-al-symbols.sh \
+    && chmod +x /entrypoint.sh /fetch-al-extension.sh /fetch-al-lsp-plugin.sh /fetch-al-symbols.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

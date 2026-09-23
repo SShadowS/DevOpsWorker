@@ -302,6 +302,18 @@ if [ -d "${AL_LSP_PLUGIN_DIR}" ]; then
   chmod +x "${AL_LSP_PLUGIN_DIR}/bin/al-language-server" 2>/dev/null || true
 fi
 
+# --- Cache the Microsoft BC symbol packages for the repo's BC major (state volume) ---
+# Review containers have no .alpackages, so without these the language server reports
+# base-app objects (Vendor, Purchase Header, ...) as missing. The major comes from the
+# same APP_JSON the BC companion branch is derived from above. Non-fatal: with no set
+# (the feed lacks the major, or no network and no earlier cache) nothing is exported.
+AL_SYMBOLS_DIR=$(/fetch-al-symbols.sh "${AL_TOOLS_DIR}" "${APP_JSON}") || AL_SYMBOLS_DIR=""
+if [ -n "${AL_SYMBOLS_DIR}" ]; then
+  # Read by the AL LSP wrapper (a ':'-separated list of package cache folders).
+  export AL_LSP_PACKAGE_CACHE="${AL_SYMBOLS_DIR}"
+  echo "AL symbol packages available at ${AL_LSP_PACKAGE_CACHE}"
+fi
+
 # NOTE: production no longer applies Claude Code binary patches. The A/B framework
 # (run-inner.ts → applyPatchPreset) can still patch the SDK binary via tweakcc for
 # experiments, but in-binary tool-description steering was measured to REDUCE LSP
