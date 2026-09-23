@@ -273,7 +273,9 @@ function calleeGuide(mechanism: string): string {
 }
 
 export function createPRReviewConfig(config: PipelineConfig, params: PRReviewParams): AgentConfig<typeof PRReviewSchema> {
-  const mechanism = (process.env['CALLEE_MECHANISM'] ?? 'none').toLowerCase();
+  // Defaults to the AL LSP. The watcher forwards an unset variable as '', so blank
+  // counts as unset; 'none' and 'treesitter' stay available for A/B arms.
+  const mechanism = (process.env['CALLEE_MECHANISM']?.trim() || 'lsp').toLowerCase();
   const lspTools = mechanism === 'lsp' ? [TOOLS.LSP] : [];
   const lspPlugins = mechanism === 'lsp'
     ? ([resolveAlLspPlugin()].filter(Boolean) as SdkPluginConfig[])

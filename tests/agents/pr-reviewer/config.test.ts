@@ -241,10 +241,15 @@ describe('createPRReviewConfig — config shape', () => {
     expect(config.plugins ?? []).toHaveLength(0);
   });
 
-  test('unset mechanism defaults to "none" (no LSP tool)', () => {
-    delete process.env['CALLEE_MECHANISM'];
-    const config = createPRReviewConfig(mockConfig(), mockParams());
-    expect(config.allowedTools).not.toContain('LSP');
+  test('unset or empty mechanism defaults to "lsp"', () => {
+    // The watcher forwards an unset CALLEE_MECHANISM as '' (container-dispatcher),
+    // so the empty string must default exactly like an absent variable.
+    for (const value of [undefined, '', '  ']) {
+      if (value === undefined) delete process.env['CALLEE_MECHANISM'];
+      else process.env['CALLEE_MECHANISM'] = value;
+      const config = createPRReviewConfig(mockConfig(), mockParams());
+      expect(config.allowedTools).toContain('LSP');
+    }
   });
 
   test('mechanism "treesitter" adds no LSP tool (uses Bash helper instead)', () => {
