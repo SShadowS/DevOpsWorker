@@ -100,7 +100,10 @@ bun run pipeline -- webhook-server [--port <n>]
 | `WEBHOOK_PORT` | No | Webhook server port (default: `3002`) |
 | `BUILD_SHA` | No | Baked into images as a build arg and recorded per review; drives the dashboard's deployment-drift panel. Export it before `docker compose build`, or the image bakes the literal `unknown` |
 | `DEFAULT_MODEL` | No | Orchestrator model (default: `claude-opus-5-5`). An empty string falls through to the default too — resolution uses `\|\|`, not `??` |
-| `DEFAULT_EFFORT` | No | Reasoning effort; unset means the model's default — `medium` on Opus 5.5, `high` on most earlier models. Set it explicitly |
+| `DEFAULT_EFFORT` | No | Reasoning effort for every agent that does not set its own; unset means the model's default — `medium` on Opus 5.5, `high` on most earlier models. Set it explicitly. The pr-reviewer sets its own (see `PR_REVIEW_EFFORT`) |
+| `PR_REVIEW_EFFORT` | No | Reasoning effort for the pr-reviewer alone, overriding its built-in `low`. At `low` on Opus 5.5 the reviewer often skips its 7 sub-agents on smaller PRs and reviews alone; `medium` dispatches them reliably at about twice the cost. A blank or unknown value keeps `low` |
+| `PR_REVIEW_ANTHROPIC_API_KEY` | No | API key for PR reviews only. When set, the watcher gives PR-review containers this key and no subscription token, so PR reviews bill pay-per-token and the subscription is kept for the pipeline |
+| `CALLEE_MECHANISM` | No | How full PR reviews look up the procedures that changed code calls: `lsp` (default — loads the AL language server), `treesitter` (a Bash helper), or `none` (Grep and Read). A blank value counts as unset |
 
 \* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.
 
@@ -217,6 +220,9 @@ and documenter on `claude-sonnet-5`** — strong (Opus) planning and review, che
 execution — while analyzer, planner and the reviewers inherit the Opus default. Review
 **sub-agents** additionally pin `claude-sonnet-5` in their own frontmatter. The
 dashboard's Stats & Config tab shows the resolution actually in effect per agent.
+
+Reasoning effort works the same way: an agent's own `effort` setting wins over
+`DEFAULT_EFFORT`. Only the pr-reviewer sets one — `low`, or `PR_REVIEW_EFFORT` when set.
 
 ### Standalone Paths
 
