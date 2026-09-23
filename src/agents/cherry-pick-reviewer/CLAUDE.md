@@ -32,6 +32,12 @@ evidence rather than impression, and both of them run on it.
 | Jump to where a symbol is defined | `LSP goToDefinition` |
 | Find a symbol by name across the project | `LSP workspaceSymbol` |
 
+Give `LSP` an absolute `filePath` — the same full path you pass to `Read`, such as
+`/workspace/session/<Repo>/Cloud/...`. `LSP` resolves a relative path from the agent's starting
+directory, not from wherever a Bash `cd` left the shell. So a path that works in Bash can point
+`LSP` at a file that does not exist, and the answer comes back empty or times out. If `LSP`
+returns nothing, check the path before you conclude the symbol is missing.
+
 Grep, Glob and Read are the right tools for comments, config values and file discovery. An
 answer about a symbol that came from text matching rather than from `LSP` is a guess, and a
 guess is reported as `unverified` — see "When a check cannot be completed" below.
