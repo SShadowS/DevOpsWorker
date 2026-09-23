@@ -314,6 +314,13 @@ if [ -n "${AL_SYMBOLS_DIR}" ]; then
   echo "AL symbol packages available at ${AL_LSP_PACKAGE_CACHE}"
 fi
 
+# Let the AL LSP wrapper resolve the companion apps from source: at start-up it
+# indexes every app.json under these roots (a ':'-separated list) and loads a
+# dependency from the matching project instead of a symbol package. The session
+# root holds the repo and the companions cloned above; the BC companion is a
+# symlink, which the wrapper skips — its objects come from the symbol cache.
+export AL_LSP_SOURCE_ROOTS="${SESSION_ROOT}"
+
 # NOTE: production no longer applies Claude Code binary patches. The A/B framework
 # (run-inner.ts → applyPatchPreset) can still patch the SDK binary via tweakcc for
 # experiments, but in-binary tool-description steering was measured to REDUCE LSP
