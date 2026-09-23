@@ -134,8 +134,12 @@ Never rely on Grep/Glob for AL code navigation when LSP is available. Text searc
 1. Verify the file is a `.al` file in a valid AL project
 2. Check that the position is on a valid symbol (not whitespace or comments)
 3. The symbol might be from an external dependency (`.dal` virtual file)
-4. At this pipeline phase no symbol packages (`.alpackages`) are present — platform
-   (Base/System Application) and compiled-dependency symbols never resolve. An empty
-   result for one of them is expected and is NOT evidence the object is missing.
+4. The symbol may belong to an app the language server cannot see here: an app present
+   only as a compiled dependency, or Microsoft's platform and base apps when their symbol
+   cache is not loaded (check once by hovering a `Record Customer` variable — no answer
+   means not loaded). An empty result for one of those is expected and is NOT evidence
+   the object is missing. The target repo, its companion apps (loaded from their source)
+   and, with the cache loaded, Microsoft's platform and base apps all resolve, so an
+   empty result for them is real.
 5. **Try Serena** — it may work when LSP fails due to missing dependencies
 6. Fall back to Grep/Glob for text-based search as a last resort

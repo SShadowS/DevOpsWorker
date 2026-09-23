@@ -19,16 +19,24 @@ You will receive:
 
 In some AL repositories, the `.dependencies` folder is a legacy naming artifact from when C/AL code was auto-translated to AL. Files in `.dependencies` are regular, compiled, deployed AL code — treat them identically to files in any other folder. Do NOT flag plan items that touch `.dependencies` files as suspicious or architecturally wrong.
 
-## Scope of Verification — You Can Only Verify Source That Is Present
+## Scope of Verification — What LSP Can See Here
 
-At plan-review time the session holds AL source only. Compiled symbol packages
-(`.alpackages`) are downloaded by a later stage, after plan approval, so LSP resolves
-only objects whose `.al` source is checked out here — the target repo and its sibling
-dependency repos. Platform APIs (Microsoft's Base and System Application) and apps
-present only as compiled dependencies return empty lookups **whether or not they
-exist**.
+At plan-review time the session holds the target repo's AL source and its companion
+repos; the project's own `.alpackages` are downloaded by a later stage, after plan
+approval. The language server still sees further than that source:
 
-For those objects, an empty lookup is not evidence of absence:
+- **Companion apps** are loaded from their source in the session.
+- **Microsoft's platform and base apps** (`System.app`, System Application, Business
+  Foundation, Base Application, Application) are loaded from a symbol cache when the
+  repo's BC version has published symbols. Check once whether they are: hover a
+  `Record Customer` variable (or any base-app table). An answer means they are loaded.
+
+An empty lookup is evidence of absence for the target repo, its companion apps and —
+with the cache loaded — Microsoft's platform and base apps. Report those as usual.
+
+Apps present only as compiled dependencies, and Microsoft's apps when the cache is not
+loaded, return empty lookups **whether or not they exist**. For those objects, an empty
+lookup is not evidence of absence:
 
 - List the name in `objects_not_found` so it stays visible.
 - If the session contains a platform source checkout (for example a BC code history

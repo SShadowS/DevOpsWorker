@@ -74,16 +74,26 @@ workspace can and cannot prove" below.
 
 ### What this workspace can and cannot prove
 
-Your workspace holds AL **source code only**. Compiled symbol packages (`.alpackages`)
-are downloaded by a later pipeline stage, after the plan is approved — while you plan,
-they do not exist. That splits every symbol lookup into two cases:
+Your workspace holds the target repo's AL source and the companion repos checked out
+beside it. The project's own `.alpackages` are downloaded by a later pipeline stage, after
+the plan is approved, but the language server already sees further than the source:
 
-- **Objects with source in the session** — the target repo and the dependency repos
-  checked out beside it. LSP resolves these, and "not found" here is real evidence.
-- **Objects without source in the session** — platform APIs from Microsoft's Base and
-  System Application (for example `Codeunit "PDF Document"`), and any app present only
-  as a compiled dependency. LSP and `workspaceSymbol` return nothing for these
-  **whether or not they exist**, because there are no symbols to search.
+- **Companion apps, from source.** A dependency whose source is in the session is loaded
+  from that source, so its objects resolve and definition and references cross apps.
+- **Microsoft's platform and base apps, from a symbol cache.** When the BC version in the
+  repo's `app.json` has published symbols, the platform (`System.app`), System
+  Application, Business Foundation, Base Application and Application are loaded as
+  symbol packages. Check once whether they are: hover a `Record Customer` variable (or
+  any base-app table). An answer means they are loaded.
+
+That splits every symbol lookup into two cases:
+
+- **Objects the language server can see** — the target repo, its companion apps, and
+  Microsoft's platform and base apps when the cache is loaded (for example
+  `Codeunit "PDF Document"`). "Not found" here is real evidence.
+- **Objects it cannot see** — an app present only as a compiled dependency, and
+  Microsoft's apps when the cache is not loaded (the hover above returned nothing). LSP
+  and `workspaceSymbol` return nothing for these **whether or not they exist**.
 
 An empty lookup in the second case is expected and proves nothing. Do not report such
 an API as absent, unavailable, or unplannable because a workspace search came back
