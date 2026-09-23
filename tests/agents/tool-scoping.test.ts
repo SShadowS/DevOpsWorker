@@ -332,7 +332,6 @@ const REQUIRED_SUB_AGENT_TOOLS: string[] = [
   'Read',              // 760-1,237
   'Grep',              // 403-682
   'Glob',              // 17-42
-  'ReportFindings',    // 46-138 — how a sub-agent returns its findings
   'ToolSearch',        // 23-39 — MCP tools are deferred; without this none load
   'mcp__azureDevOps__get_file_content', // 58-101, all seven
 ];
@@ -390,6 +389,20 @@ describe('pr-reviewer sub-agents are scoped by an allowlist', () => {
       const tools = declaredTools(frontmatter);
       expect({ file, tools }).not.toMatchObject({
         tools: expect.arrayContaining(['NotebookEdit']),
+      });
+    }
+  });
+
+  test('no sub-agent grants ReportFindings, which the orchestrator never sees', () => {
+    // The sub-agents called it 315 times in 100 reviews, as if it were how they
+    // hand findings back. It is not: a probe (2026-09-23) showed the parent's
+    // Agent result carries only the sub-agent's closing text, never the
+    // ReportFindings payload. 130 of those calls also failed its schema
+    // (short_summary over 60 characters, required fields missing). The prompts
+    // ask for a JSON reply, and that reply is what the orchestrator parses.
+    for (const { file, frontmatter } of prReviewerSubAgents()) {
+      expect({ file, tools: declaredTools(frontmatter) }).not.toMatchObject({
+        tools: expect.arrayContaining(['ReportFindings']),
       });
     }
   });
