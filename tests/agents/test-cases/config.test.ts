@@ -66,6 +66,11 @@ function minimalContext(): PipelineContext {
   };
 }
 
+// Omitting `manual` makes a plan from before scenarios were marked.
+function scenario(name: string, manual?: 'none' | 'walkthrough' | 'required', manualReason?: string) {
+  return { name, description: 'does it', expectedOutcome: 'it is done', derivedFrom: 'AC1', manual, manualReason };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -82,7 +87,7 @@ describe('test-cases buildPrompt', () => {
         objects: [
           { action: 'modify', objectType: 'codeunit', objectName: 'PostingMgmt', description: 'Fix VAT calc' },
         ],
-        testScenarios: ['Verify VAT is zero for reverse charge'],
+        testScenarios: [scenario('Verify VAT is zero for reverse charge')],
         risks: [],
       } as any,
       changeset: {
@@ -96,8 +101,41 @@ describe('test-cases buildPrompt', () => {
 
     expect(prompt).toContain('Create manual Test Case work items');
     expect(prompt).toContain('#12345');
-    expect(prompt).toContain('Verify VAT is zero for reverse charge');
+    expect(prompt).toContain('**Verify VAT is zero for reverse charge** — does it');
+    expect(prompt).not.toContain('[object Object]');
     expect(prompt).not.toContain('/fix request');
+  });
+
+  test('create-mode prompt lists only marked scenarios for manual cases', () => {
+    const state = freshState({
+      devPlan: {
+        summary: 'Fix', objects: [], risks: [],
+        testScenarios: [
+          scenario('Shows the new field', 'walkthrough'),
+          scenario('Printed layout', 'required', 'Report layout is visual'),
+          scenario('Rounding edge case', 'none'),
+        ],
+      } as any,
+      changeset: { branchName: 'b', filesCreated: [], filesModified: [] } as any,
+    });
+
+    const prompt = agentConfig.buildPrompt(state, ctx);
+    const [manual, automated] = prompt.split('## Covered by automated tests');
+
+    expect(manual).toContain('**Shows the new field** [manual: walkthrough]');
+    expect(manual).toContain('[manual only: Report layout is visual]');
+    expect(manual).not.toContain('Rounding edge case');
+    expect(automated).toContain('- Rounding edge case');
+    expect(prompt).not.toContain('For each test scenario, create');
+  });
+
+  test('create-mode prompt with no marked scenario allows at most one walkthrough', () => {
+    const state = freshState({
+      devPlan: { summary: 'Fix', objects: [], risks: [], testScenarios: [scenario('Internal logic', 'none')] } as any,
+      changeset: { branchName: 'b', filesCreated: [], filesModified: [] } as any,
+    });
+
+    expect(agentConfig.buildPrompt(state, ctx)).toContain('The plan marks none. Write at most one walkthrough case');
   });
 
   test('returns revise-mode prompt when testCases already exist', () => {

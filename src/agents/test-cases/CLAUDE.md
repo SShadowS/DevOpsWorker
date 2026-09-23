@@ -25,7 +25,7 @@ Your cwd is the **session root**. The main codebase is in the target extension r
 
 1. Review the development plan test scenarios and acceptance criteria
 2. Read the actual code in the target extension repo to understand implementation details, UI flows, and data structures
-3. For each test scenario, create a Test Case work item using the Azure DevOps MCP `create_work_item` tool
+3. For each scenario the plan marks for a manual test case (`walkthrough` or `required`), create a Test Case work item using the Azure DevOps MCP `create_work_item` tool. Walkthrough cases show a solution specialist what the feature does; required cases check what automation cannot reach. The unmarked scenarios are automated tests — list them under `leftToAutomatedTests`. A plan made before scenarios were marked lists every scenario unmarked; select from those as "What to write a test case for" describes
 4. Link each test case to the parent work item using `manage_work_item_link`
 5. Report created test case IDs and titles
 

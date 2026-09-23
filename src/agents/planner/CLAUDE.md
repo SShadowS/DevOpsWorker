@@ -168,7 +168,17 @@ Bash is disabled for this agent, so the tools above are the way to do every one 
 
 - Every acceptance criterion must map to at least one test scenario. No exceptions.
 - Test scenarios must include both positive (happy path) and negative (error/edge) cases.
-- If an acceptance criterion cannot be tested automatically, document why and propose a manual test procedure.
+- Test scenarios are automated tests first. The coder writes each one as an AL test, and CI
+  runs them on every push. That is where the testing weight belongs.
+- Set `manual` on every scenario to say whether a person also runs it as a manual Test Case:
+  - `none` — the automated test is enough. This is the normal choice.
+  - `walkthrough` — also shown to a solution specialist so they learn what the feature does.
+    Pick the one or two scenarios that best show the new behaviour in the client, and no
+    more. A change with no behaviour a user sees in the client needs none.
+  - `required` — automation cannot reach it (a printed document's layout, an external
+    service, a UI-only effect). Give `manualReason` saying why. Try to automate first; use
+    this only when you cannot.
+- A plan where most scenarios are manual has the balance wrong.
 
 ### Naming Conventions
 

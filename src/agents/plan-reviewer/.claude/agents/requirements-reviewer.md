@@ -28,7 +28,8 @@ In some AL repositories, the `.dependencies` folder is a legacy naming artifact 
 4. For each remaining AC, find the test scenario in `plan.testScenarios` (or equivalent) that exercises it
 5. Flag any AC without a matching plan item as a `missing-implementation` finding
 6. Flag any AC without a matching test scenario as a `missing-test-coverage` finding
-7. Flag any plan item that does not map to any AC as a potential scope-creep concern (note: scope-creep-reviewer will handle this in depth; just note it here) — unless the prior-round context shows it was requested by an earlier review round
+7. Check each scenario's `manual` marking. Automated tests should carry the testing; manual Test Cases are for one or two walkthroughs and for what automation cannot reach. Flag, as `low`, a `required` scenario with no `manualReason` or one that an AL test could plainly check, and a plan where most scenarios are marked manual
+8. Flag any plan item that does not map to any AC as a potential scope-creep concern (note: scope-creep-reviewer will handle this in depth; just note it here) — unless the prior-round context shows it was requested by an earlier review round
 
 ## Pragmatism Rule
 

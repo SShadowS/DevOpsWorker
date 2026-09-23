@@ -34,12 +34,16 @@ Your cwd is the **session root**. The main codebase is in the target extension r
 
 These test cases are a SELECTION, not a pass over the development plan. A plan scenario with
 no test case is fine and usually correct — the automated tests the coder wrote already check
-most of it. Do not ask for a case just because a scenario exists.
+most of it. Do not ask for a case just because a scenario exists. When the plan marks
+scenarios `[manual: walkthrough]` or `[manual only: …]`, those are the selection: each needs a
+case, and the unmarked ones need none.
 
 Two things are **critical**:
 
 - **A case for something the automated tests already cover.** It costs a person time to
   re-check what CI checks on every push. Say which test covers it and ask for the case to go.
+  The exception is a scenario the plan marks `[manual: walkthrough]`: that case exists so a
+  solution specialist learns what the feature does, and it is expected to overlap the tests.
 - **A case that asks the reader to run the tests.** Steps that open the Test Tool, run a named
   codeunit, and confirm it passes are asking a person to do CI's job. This is never their job.
   If the behaviour is only observable through an automated test, it belongs in

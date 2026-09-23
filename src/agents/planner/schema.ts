@@ -23,6 +23,12 @@ export const TestScenarioSchema = z.object({
   description: z.string(),
   expectedOutcome: z.string(),
   derivedFrom: z.string().describe('Which acceptance criterion this tests'),
+  manual: z.enum(['none', 'walkthrough', 'required']).describe(
+    'Whether a person also runs this as a manual Test Case. none: automated test only (the default choice). ' +
+    'walkthrough: automated, and also shown to a solution specialist so they learn what the feature does. ' +
+    'required: automation cannot reach it, so only a person can check it; give manualReason.',
+  ),
+  manualReason: z.string().optional().describe('Why an automated test cannot check this. Required when manual is "required".'),
 });
 
 export const RiskAssessmentSchema = z.object({
@@ -53,6 +59,25 @@ export const DevPlanSchema = z.object({
 });
 
 export type DevPlan = z.infer<typeof DevPlanSchema>;
+export type TestScenario = z.infer<typeof TestScenarioSchema>;
+
+/** One scenario as a single prompt line. */
+export function formatScenario(s: TestScenario, i: number): string {
+  const manual = s.manual === 'walkthrough' ? ' [manual: walkthrough]'
+    : s.manual === 'required' ? ` [manual only: ${s.manualReason ?? 'no reason given'}]`
+    : '';
+  return `${i + 1}. **${s.name}**${manual} — ${s.description} Expected: ${s.expectedOutcome} (from ${s.derivedFrom})`;
+}
+
+/**
+ * The scenarios the plan marks for a manual Test Case. `null` for a plan made before
+ * scenarios carried `manual`: it marks nothing, so every scenario is a candidate and
+ * the test-cases agent selects on its own.
+ */
+export function manualScenarios(plan: DevPlan): TestScenario[] | null {
+  if (plan.testScenarios.every((s) => s.manual === undefined)) return null;
+  return plan.testScenarios.filter((s) => s.manual === 'walkthrough' || s.manual === 'required');
+}
 
 // ---------------------------------------------------------------------------
 // PipelineState slice — the Planner OWNS `state.devPlan`.

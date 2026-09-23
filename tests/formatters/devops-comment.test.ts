@@ -62,6 +62,14 @@ function makeDevPlan(overrides?: Partial<DevPlan>): DevPlan {
         description: 'Second call returns cached value.',
         expectedOutcome: 'Cached value matches first call.',
         derivedFrom: 'AC-1',
+        manual: 'none',
+      },
+      {
+        name: 'Merge field shows cached value on the template card',
+        description: 'Open a template and preview it.',
+        expectedOutcome: 'Preview shows the merge field value.',
+        derivedFrom: 'AC-2',
+        manual: 'walkthrough',
       },
     ],
     riskAssessment: { level: 'medium', factors: ['Shared table change'], mitigations: ['Add tests'] },
@@ -263,8 +271,18 @@ describe('formatPlanComment', () => {
 
   test('includes test scenarios as a numbered list', () => {
     const md = formatPlanComment(1, makeDevPlan());
-    expect(md).toContain('Test Scenarios');
-    expect(md).toContain('1. **Cache hit returns same value**');
+    expect(md).toContain('Test Scenarios (2 · 1 also as manual test case)');
+    expect(md).toContain('1. **Cache hit returns same value** — Second call');
+    expect(md).toContain('2. **Merge field shows cached value on the template card** — *manual walkthrough* —');
+  });
+
+  test('a plan without manual markings shows no manual count', () => {
+    const plan = makeDevPlan();
+    const md = formatPlanComment(1, {
+      ...plan,
+      testScenarios: plan.testScenarios.map(({ manual: _, ...s }) => s) as DevPlan['testScenarios'],
+    });
+    expect(md).toContain('<b>Test Scenarios (2)</b>');
   });
 
   test('includes complexity', () => {

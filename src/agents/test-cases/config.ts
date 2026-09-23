@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import type { PipelineConfig, PipelineState, PipelineContext, Stage } from '../../types/pipeline.types.ts';
 import type { AgentConfig, McpServerConfig } from '../../types/agent.types.ts';
 import { TestCasesOutputSchema, type TestCasesOutput } from './schema.ts';
+import { formatScenario, manualScenarios, type DevPlan } from '../planner/schema.ts';
 import { agentStage } from '../../pipeline/stage.ts';
 import { buildHumanFeedbackSection } from '../../pipeline/human-feedback.ts';
 import { azureDevOpsMcp, TOOL_SETS, MCP_TOOLS, resolveAlLspPlugin, bcMcp, BC_MCP_TOOLS } from '../../sdk/mcp-configs.ts';
@@ -13,6 +14,33 @@ import type { SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 // ---------------------------------------------------------------------------
 
 const AGENT_DIR = dirname(fileURLToPath(import.meta.url));
+
+// The planner marks which scenarios a person should also run. The rest are automated
+// tests the coder wrote, and CI runs them on every push; a manual case for each one is
+// the flood of test cases this avoids.
+function scenarioSection(plan: DevPlan): string[] {
+  const marked = manualScenarios(plan);
+  if (marked === null) {
+    return [
+      `## Test Scenarios from Dev Plan`,
+      `These are the automated test scenarios. Most are already covered by the coder's tests;`,
+      `select only the behaviour a person has to see, as your instructions describe.`,
+      ...plan.testScenarios.map(formatScenario),
+    ];
+  }
+  const automated = plan.testScenarios.filter((s) => !marked.includes(s));
+  return [
+    `## Scenarios the plan marks for a manual test case`,
+    marked.length > 0
+      ? `Write a test case for each one below. You may merge walkthrough scenarios into one case when they tell one story.`
+      : `The plan marks none. Write at most one walkthrough case, and only if the change has behaviour a user sees in the client.`,
+    ...marked.map(formatScenario),
+    ``,
+    `## Covered by automated tests — no test case`,
+    `List these under leftToAutomatedTests.`,
+    ...(automated.length > 0 ? automated.map((s) => `- ${s.name}`) : [`(none)`]),
+  ];
+}
 
 export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeof TestCasesOutputSchema> {
   return {
@@ -123,8 +151,7 @@ export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeo
         `- **Area Path:** ${config.azureDevOps.areaPath}`,
         `- **Iteration Path:** ${config.azureDevOps.iterationPath}`,
         ``,
-        `## Test Scenarios from Dev Plan`,
-        ...devPlan.testScenarios.map((s, i) => `${i + 1}. ${s}`),
+        ...scenarioSection(devPlan),
         ``,
         `## Objects Implemented`,
         ...devPlan.objects.map(o => `- ${o.action} ${o.objectType} "${o.objectName}": ${o.description}`),
@@ -135,7 +162,7 @@ export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeo
         ``,
         `## Instructions`,
         `1. Read the code in the target extension repo to understand the implementation details`,
-        `2. For each test scenario, create a Test Case work item using MCP \`create_work_item\`:`,
+        `2. For each test case you write (see the scenario section above), create a Test Case work item using MCP \`create_work_item\`:`,
         `   - \`workItemType\`: "Test Case"`,
         `   - \`title\`: Descriptive name — "Verify [action] results in [outcome]"`,
         `   - Set \`areaPath\`: ${config.azureDevOps.areaPath}`,
@@ -144,7 +171,7 @@ export function createTestCasesConfig(config: PipelineConfig): AgentConfig<typeo
         `3. Link each test case to parent work item #${ctx.workItemId} using \`manage_work_item_link\`:`,
         `   - Relation type: \`Microsoft.VSTS.Common.TestedBy-Forward\``,
         `   - This creates a "Tested By" link from the parent to the test case`,
-        `4. Include both positive (happy path) and negative (error/edge) test cases`,
+        `4. Where a scenario covers an error a person can reach in the client, include it as a negative step`,
         `5. Report the created test case IDs, titles, step counts, and which scenario each derives from`,
       ].join('\n');
     },

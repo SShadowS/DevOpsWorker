@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import type { PipelineConfig, PipelineState, PipelineContext, Stage } from '../../types/pipeline.types.ts';
 import type { AgentConfig } from '../../types/agent.types.ts';
 import { TestCaseReviewSchema, type TestCaseReview } from './schema.ts';
+import { formatScenario, manualScenarios } from '../planner/schema.ts';
 import { agentStage } from '../../pipeline/stage.ts';
 import { azureDevOpsMcp, TOOL_SETS, MCP_TOOLS, resolveAlLspPlugin } from '../../sdk/mcp-configs.ts';
 import type { SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
@@ -39,6 +40,7 @@ export function createTestCaseReviewerConfig(config: PipelineConfig): AgentConfi
       const testCases = state.testCases!;
       const repoKey = ctx.config.repoKey;
       const layout = ctx.config.layout;
+      const marked = manualScenarios(devPlan);
 
       const testCaseList = testCases.testCases
         .map((tc) => `- #${tc.id} — "${tc.title}" (${tc.stepCount} steps, from: ${tc.derivedFrom})`)
@@ -66,7 +68,10 @@ export function createTestCaseReviewerConfig(config: PipelineConfig): AgentConfi
         `- **Type:** ${ctx.workItemType}`,
         ``,
         `## Test Scenarios from Dev Plan`,
-        ...devPlan.testScenarios.map((s, i) => `${i + 1}. ${s}`),
+        marked === null
+          ? `The plan does not mark which scenarios need a manual test case; the author selected.`
+          : `Scenarios marked [manual: …] need a test case. The others are automated tests and need none.`,
+        ...devPlan.testScenarios.map(formatScenario),
         ``,
         `## Objects Implemented`,
         ...devPlan.objects.map(o => `- ${o.action} ${o.objectType} "${o.objectName}": ${o.description}`),
@@ -79,11 +84,13 @@ export function createTestCaseReviewerConfig(config: PipelineConfig): AgentConfi
         `**Modified:** ${changeset.filesModified.join(', ') || '(none)'}`,
         ``,
         `## Review Criteria`,
-        `1. **Coverage**: Every test scenario from the dev plan must have at least one test case. Flag missing coverage as critical.`,
+        marked === null
+          ? `1. **Coverage**: Test cases cover the behaviour a person has to see. Do not ask for a case per scenario — the automated tests cover the rest.`
+          : `1. **Coverage**: Every scenario marked for a manual test case must have one; flag a missing one as critical. Do not ask for cases for unmarked scenarios — the automated tests cover them.`,
         `2. **Step Quality**: Actions must be concrete and specific ("Open page X, set field Y to Z"), not vague ("Set up the document").`,
         `3. **Step Accuracy**: Steps must match the actual implementation. Read the code in the target extension repo to verify.`,
         `4. **Expected Results**: Must be observable and verifiable ("Field X displays 25.00"), not vague ("VAT is correct").`,
-        `5. **Negative Cases**: Must include error/edge case test cases, not just happy paths.`,
+        `5. **Negative Cases**: Include an error a person can reach in the client when a covered scenario has one.`,
         `6. **Titles**: Must follow "Verify [action] results in [outcome]" pattern.`,
         `7. **Duplicates**: Flag test cases that substantially overlap.`,
         ``,

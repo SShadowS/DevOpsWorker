@@ -1,5 +1,5 @@
 import type { ReadinessReport } from '../agents/analyzer/schema.ts';
-import type { DevPlan } from '../agents/planner/schema.ts';
+import { manualScenarios, type DevPlan } from '../agents/planner/schema.ts';
 import type { Changeset } from '../agents/coder/schema.ts';
 import type { PipelineState, TelemetryData } from '../types/pipeline.types.ts';
 import { TransientAgentError } from '../sdk/errors.ts';
@@ -123,8 +123,17 @@ export function formatPlanComment(
   L.push('');
 
   // Test scenarios — collapsed
-  L.push(`<details><summary><b>Test Scenarios (${plan.testScenarios.length})</b></summary>`, '');
-  plan.testScenarios.forEach((t, i) => L.push(`${i + 1}. **${t.name}** — ${t.description}`));
+  // Scenarios are automated tests; the marked ones also become manual Test Cases. Show
+  // that count in the summary so the approver sees the manual workload before approving.
+  const manual = manualScenarios(plan);
+  const manualNote = manual === null ? '' : ` · ${manual.length} also as manual test case${manual.length === 1 ? '' : 's'}`;
+  L.push(`<details><summary><b>Test Scenarios (${plan.testScenarios.length}${manualNote})</b></summary>`, '');
+  plan.testScenarios.forEach((t, i) => {
+    const tag = t.manual === 'walkthrough' ? ' — *manual walkthrough*'
+      : t.manual === 'required' ? ` — *manual only: ${t.manualReason ?? 'no reason given'}*`
+      : '';
+    L.push(`${i + 1}. **${t.name}**${tag} — ${t.description}`);
+  });
   L.push('', `</details>`, '');
 
   L.push(`**Complexity:** ${esc(plan.estimatedComplexity)}`, '');

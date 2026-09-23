@@ -67,7 +67,7 @@ describe('test-case-reviewer buildPrompt', () => {
       devPlan: {
         summary: 'Fix posting logic',
         objects: [{ action: 'modify', objectType: 'codeunit', objectName: 'PostingMgmt', description: 'Fix VAT' }],
-        testScenarios: ['Verify VAT is zero for reverse charge', 'Verify error on invalid customer'],
+        testScenarios: [],
         risks: [],
       } as any,
       changeset: {
@@ -99,7 +99,10 @@ describe('test-case-reviewer buildPrompt', () => {
       devPlan: {
         summary: 'Fix posting logic',
         objects: [],
-        testScenarios: ['Scenario A', 'Scenario B'],
+        testScenarios: [
+          { name: 'Scenario A', description: 'd', expectedOutcome: 'e', derivedFrom: 'AC1', manual: 'walkthrough' },
+          { name: 'Scenario B', description: 'd', expectedOutcome: 'e', derivedFrom: 'AC2', manual: 'none' },
+        ],
         risks: [],
       } as any,
       changeset: { branchName: 'b', filesCreated: [], filesModified: [] } as any,
@@ -112,8 +115,26 @@ describe('test-case-reviewer buildPrompt', () => {
 
     const prompt = agentConfig.buildPrompt(state, ctx);
 
-    expect(prompt).toContain('Scenario A');
-    expect(prompt).toContain('Scenario B');
+    expect(prompt).toContain('**Scenario A** [manual: walkthrough]');
+    expect(prompt).toContain('**Scenario B** — d');
+    expect(prompt).not.toContain('[object Object]');
+    expect(prompt).toContain('Do not ask for cases for unmarked scenarios');
+  });
+
+  test('a plan without markings leaves the selection to the author', () => {
+    const state = freshState({
+      devPlan: {
+        summary: 'Fix', objects: [], risks: [],
+        testScenarios: [{ name: 'Old scenario', description: 'd', expectedOutcome: 'e', derivedFrom: 'AC1' }],
+      } as any,
+      changeset: { branchName: 'b', filesCreated: [], filesModified: [] } as any,
+      testCases: { testCases: [], summary: 's', leftToAutomatedTests: [] },
+    });
+
+    const prompt = agentConfig.buildPrompt(state, ctx);
+
+    expect(prompt).toContain('**Old scenario** — d');
+    expect(prompt).toContain('Do not ask for a case per scenario');
   });
 
   test('includes file changes for context', () => {
