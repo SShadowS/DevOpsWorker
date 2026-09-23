@@ -452,7 +452,7 @@ describe('createPRReviewConfig — buildPrompt', () => {
 // outcome; naming that fallback makes it the instructed one rather than a
 // lucky guess.
 //
-// The repository is cloned at the agent's cwd on every review, so reading the
+// The repository is cloned under the agent's cwd on every review, so reading the
 // callee's source is always possible — this is not aspirational advice.
 // ---------------------------------------------------------------------------
 describe('createPRReviewConfig — the baseline arm names its fallback', () => {
@@ -502,5 +502,42 @@ describe('createPRReviewConfig — the baseline arm names its fallback', () => {
     for (const arm of [undefined, 'none', 'treesitter', 'lsp']) {
       expect(promptFor(arm)).toContain('every analysis sub-agent');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The prompt names where the clone really is.
+//
+// The container clones the repo one level below the session root, beside the
+// companion repos. The prompt used to say the clone was "at the current working
+// directory", and the reviewer believed it: across 100 reviews it ran `git log`
+// in the session root (not a git repo) on 26, and read repo files without the
+// repo folder in the path on 22.
+// ---------------------------------------------------------------------------
+describe('createPRReviewConfig — names the clone directory', () => {
+  const treeSources: PRReviewParams['treeSource'][] = ['merge-preview', 'source-head', 'target-tip', 'default-branch'];
+
+  function promptFor(treeSource: PRReviewParams['treeSource']): string {
+    const config = createPRReviewConfig(mockConfig(), mockParams({ treeSource, treeDetail: 'abc123' }));
+    return config.buildPrompt!(createInitialState('pr-reviewer'), {} as never);
+  }
+
+  test('every tree source names the clone by its absolute path', () => {
+    for (const source of treeSources) {
+      const prompt = promptFor(source);
+      expect(prompt).toContain('`/session/DocumentOutput`');
+      expect(prompt).not.toMatch(/cloned at the current working directory|clone at the current working directory/i);
+    }
+  });
+
+  test('it says the session root also holds the companion repos', () => {
+    expect(promptFor('merge-preview')).toMatch(/`\/session`.*companion repos/);
+  });
+
+  test('it tells the reviewer to run git in the clone and pass absolute paths on', () => {
+    const prompt = promptFor('merge-preview');
+    expect(prompt).toContain('git -C /session/DocumentOutput');
+    expect(prompt).toMatch(/absolute paths/);
+    expect(prompt).toMatch(/every analysis sub-agent/);
   });
 });

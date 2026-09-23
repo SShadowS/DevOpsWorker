@@ -194,28 +194,28 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
  * path's own fix puts it, that "would answer from a different release line and
  * look verified".
  */
-function workingTreeLines(params: PRReviewParams): string[] {
+function workingTreeLines(params: PRReviewParams, repoDir: string): string[] {
   const at = params.treeDetail ? ` (${params.treeDetail})` : '';
   switch (params.treeSource) {
     case 'merge-preview':
       return [
-        `The repository is cloned at the current working directory, checked out to this PR merged into its target branch${at}.`,
+        `The repository is cloned at \`${repoDir}\`, checked out to this PR merged into its target branch${at}.`,
         `Files the PR does not touch match the target branch; files it touches already include the PR's changes.`,
       ];
     case 'source-head':
       return [
-        `The repository is cloned at the current working directory, checked out to this PR's own head commit${at}.`,
+        `The repository is cloned at \`${repoDir}\`, checked out to this PR's own head commit${at}.`,
         `It contains the PR's changes, but not target-branch work that landed after the PR branched.`,
       ];
     case 'target-tip':
       return [
-        `The repository is cloned at the current working directory, checked out to the tip of the target branch${at}.`,
+        `The repository is cloned at \`${repoDir}\`, checked out to the tip of the target branch${at}.`,
         `It does NOT contain this PR's changes — read those from the diff and the MCP file tools.`,
         `It IS the right place to read the current behaviour of code the PR calls but does not change.`,
       ];
     case 'default-branch':
       return [
-        `WARNING: the PR's code could not be checked out. The clone at the current working directory sits on the repository's default branch, which may be a different release line than this PR's target (${params.targetBranch}).`,
+        `WARNING: the PR's code could not be checked out. The clone at \`${repoDir}\` sits on the repository's default branch, which may be a different release line than this PR's target (${params.targetBranch}).`,
         `Do not trust the clone for the behaviour of code this PR touches or calls — verify against the target branch with mcp__azureDevOps__get_file_content when a finding depends on it.`,
         `Pass this warning to every analysis sub-agent.`,
       ];
@@ -331,6 +331,9 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
     maxRetries: 1, // No retries — agent posts PR comments as side effects that aren't idempotent
 
     buildPrompt(_state: PipelineState, _ctx: PipelineContext): string {
+      // The container clones the repo one level below the session root, beside the
+      // companions (`docker/entrypoint.sh`: `MAIN_REPO_DIR="${SESSION_ROOT}/${REPO_KEY}"`).
+      const repoDir = `${config.paths.sessionRoot}/${config.repoKey}`;
       const cherryPick = params.prTitle
         ? detectCherryPick({ title: params.prTitle, description: params.prDescription })
         : { isCherryPick: false } as CherryPickInfo;
@@ -348,7 +351,10 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
         params.prUrl ? `- **URL:** ${params.prUrl}` : '',
         ``,
         `## Working Tree`,
-        ...workingTreeLines(params),
+        ...workingTreeLines(params, repoDir),
+        `Your working directory, \`${config.paths.sessionRoot}\`, is not a git repository: it holds that clone beside the companion repos, which are read-only references.`,
+        `Run git as \`git -C ${repoDir} ...\`, and give Read, Grep, Glob and LSP absolute paths. A Bash \`cd\` does not move the other tools.`,
+        `Pass this layout on to every analysis sub-agent.`,
         `Use local file tools (Read, Grep, Glob, Bash) for code analysis alongside the MCP tools for PR metadata.`,
         ``,
         `Follow the instructions in your CLAUDE.md to:`,
