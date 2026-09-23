@@ -1,28 +1,53 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# fetch-al-lsp-plugin.sh — Fetch the AL LSP wrapper plugin at a PINNED ref.
+# fetch-al-lsp-plugin.sh — Fetch the AL LSP wrapper plugin at its NEWEST release.
 #
 # Usage: ./fetch-al-lsp-plugin.sh <cache-dir>
 #
-# The entrypoint previously cloned this repo's default branch and ran
-# `git pull --ff-only 2>/dev/null || true` at every container start. That made
-# plugin changes reach production the moment they merged — no image rebuild, no
-# gate, no rollback — and made the clone a mutable directory that concurrent
-# containers read while another was pulling into it.
+# Tracks the newest release on purpose: every container start resolves the highest
+# v* tag and moves the cache to it, so a new plugin release reaches production
+# without an image rebuild. Releases, not the default branch, because a release is
+# what carries the signed wrapper. AL_LSP_PLUGIN_REF pins a specific commit instead
+# (for tests, or to hold back a bad release).
 #
-# The default below is the SHA production was already running when it was
-# pinned, so pinning changed no behaviour; it only stopped the drift. Bump it
-# deliberately, as a reviewed change.
+# The price, known and accepted: a broken release reaches every container on its
+# next start. The move itself is still safe — the new clone is staged, verified
+# against the resolved commit and swapped in under a lock, so a failed fetch leaves
+# the working copy in place rather than a half-updated one.
 
 CACHE_DIR="${1:?Usage: fetch-al-lsp-plugin.sh <cache-dir>}"
 REPO_URL="https://github.com/SShadowS/claude-code-lsps.git"
-PLUGIN_REF="${AL_LSP_PLUGIN_REF:-5e1c8ec78c76fce5dc5d29a625f08ce69ef82ae2}"
 PLUGIN_DIR="${CACHE_DIR}/al-lsp-plugin"
 LOCK_FILE="${CACHE_DIR}/.al-lsp-plugin.lock"
 LOCK_DIR="${LOCK_FILE}.d"
 
 mkdir -p "${CACHE_DIR}"
+
+# The commit behind the highest v* tag. An annotated tag lists twice in ls-remote —
+# its own object, and `^{}` for the commit it points to — and only the commit can
+# match HEAD after checkout, so take the peeled sha whenever there is one.
+newest_release() {
+  git ls-remote --tags "${REPO_URL}" 'v*' 2>/dev/null | awk '
+    { name = $2; sub(/^refs\/tags\//, "", name)
+      if (name ~ /\^\{\}$/) { sub(/\^\{\}$/, "", name); peeled[name] = $1 } else { plain[name] = $1 } }
+    END { for (n in plain) print n, (n in peeled ? peeled[n] : plain[n]) }'     | sort -V | tail -n 1 | awk '{ print $2 }'
+}
+
+if [ -n "${AL_LSP_PLUGIN_REF:-}" ]; then
+  PLUGIN_REF="${AL_LSP_PLUGIN_REF}"
+else
+  PLUGIN_REF="$(newest_release || true)"
+  if [ -z "${PLUGIN_REF}" ]; then
+    # GitHub unreachable: a working plugin already in the cache is better than none.
+    if [ -d "${PLUGIN_DIR}/.git" ]; then
+      echo "WARNING: cannot list AL LSP plugin releases; keeping the cached plugin at $(git -C "${PLUGIN_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+      exit 0
+    fi
+    echo "ERROR: cannot list AL LSP plugin releases and no plugin is cached"
+    exit 1
+  fi
+fi
 
 at_pin() {
   [ -d "${PLUGIN_DIR}/.git" ] || return 1
@@ -44,9 +69,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --- Fast path (unlocked): the existing clone is already at the pin. No
-# clone, no network, no lock. This must stay the common case: every
-# container start after the first hits this and returns immediately. ---
+# --- Fast path (unlocked): the existing clone is already at the resolved ref.
+# No clone and no lock — only the one `ls-remote` above. This must stay the
+# common case: every start between releases hits it and returns at once. ---
 if at_pin; then
   echo "AL LSP plugin already at ${PLUGIN_REF}"
   exit 0
