@@ -328,6 +328,11 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
     // Inside the container, the session root has the cloned repo + companions
     cwd: config.paths.sessionRoot,
     maxTurns: 100,
+    // Pinned above the global DEFAULT_EFFORT. On Opus 5.5 at 'low' this reviewer
+    // read the diff, wrote the review itself and dispatched none of its seven
+    // sub-agents (0 of 3 no-post runs on 2026-09-23); PR 56441 fell from 9
+    // findings to 1. At 'medium' the same PR dispatched all seven and found 9.
+    effort: 'medium',
     maxRetries: 1, // No retries — agent posts PR comments as side effects that aren't idempotent
 
     buildPrompt(_state: PipelineState, _ctx: PipelineContext): string {

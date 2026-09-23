@@ -2,6 +2,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { loadConfig, buildConfigFromRepo, parseEffort } from '../../src/cli/config.ts';
 import type { RepoConfig } from '../../src/config/repo-config.ts';
+import { resolveEffort } from '../../src/sdk/run-agent.ts';
+import { createPRReviewConfig } from '../../src/agents/pr-reviewer/config.ts';
 
 /**
  * DEFAULT_MODEL must reach `models.default` on EVERY config path.
@@ -133,7 +135,23 @@ describe('DEFAULT_EFFORT reaches models.effort', () => {
     // Source-pinned: the option must be conditionally spread, so an unset effort
     // leaves the SDK default rather than passing an explicit undefined.
     const src = readFileSync(new URL('../../src/sdk/run-agent.ts', import.meta.url), 'utf8');
-    expect(src).toMatch(/\.\.\.\(context\.config\.models\.effort \? \{ effort: context\.config\.models\.effort \} : \{\}\)/);
+    expect(src).toMatch(/\.\.\.\(resolveEffort\(config, context\.config\) \? \{ effort: resolveEffort\(config, context\.config\) \} : \{\}\)/);
+  });
+
+  test("an agent's own effort overrides the global one; unset falls back to it", () => {
+    expect(resolveEffort({ effort: 'medium' }, { models: { effort: 'low' } })).toBe('medium');
+    expect(resolveEffort({}, { models: { effort: 'low' } })).toBe('low');
+    expect(resolveEffort({}, { models: {} })).toBeUndefined();
+  });
+
+  test('the pr-reviewer runs at medium whatever DEFAULT_EFFORT says', () => {
+    // On Opus 5.5 at 'low' it reviewed alone and skipped all seven sub-agents
+    // (0 of 3 no-post runs, 2026-09-23); 'medium' dispatched all seven.
+    const cfg = createPRReviewConfig(loadConfig('.'), {
+      prId: 1, repoKey: 'r', repoUrl: 'u', repositoryId: 'g', project: 'p',
+      sourceBranch: 's', targetBranch: 't', treeSource: 'merge-preview',
+    });
+    expect(cfg.effort).toBe('medium');
   });
 
   test('DEFAULT_EFFORT is forwarded to spawned containers', () => {

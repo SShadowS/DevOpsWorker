@@ -44,6 +44,13 @@ export interface AgentConfig<TOutput extends z.ZodType> {
   /** Max agentic turns before stopping (default: 50) */
   maxTurns?: number;
 
+  /**
+   * Reasoning effort for THIS agent, overriding the global `models.effort`
+   * (DEFAULT_EFFORT). Set it where an agent's behaviour depends on effort: the
+   * pr-reviewer on Opus 5.5 at 'low' reviews alone and skips its sub-agents.
+   */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
   /** Cost ceiling per agent run */
   maxBudgetUsd?: number;
 

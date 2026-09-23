@@ -53,6 +53,14 @@ const NON_RETRYABLE_SUBTYPES = new Set([
 ]);
 
 /** Determine if an error is transient and worth retrying. */
+/** The effort an agent runs at: its own setting if it has one, else the global one. */
+export function resolveEffort(
+  agent: Pick<AgentConfig<z.ZodTypeAny>, 'effort'>,
+  pipeline: { models: { effort?: AgentConfig<z.ZodTypeAny>['effort'] } },
+): AgentConfig<z.ZodTypeAny>['effort'] {
+  return agent.effort ?? pipeline.models.effort;
+}
+
 export function isRetryableError(err: unknown): boolean {
   if (err instanceof AgentValidationError) return false;
   if (err instanceof BudgetExceededError) return false;
@@ -259,7 +267,7 @@ export async function runAgent<T extends z.ZodType>(
     // Logged so a run's effort is recoverable from its transcript. The SDK silently
     // downgrades an unsupported level, so this records what was REQUESTED — the
     // applied level has to be read back from the run itself.
-    effort: context.config.models.effort ?? '(model default: medium on Opus 5.5, high on most others)',
+    effort: resolveEffort(config, context.config) ?? '(model default: medium on Opus 5.5, high on most others)',
     maxTurns: knobs.maxTurns,
     allowedTools: effectiveTools,
     mcpServers: Object.keys(resolvedMcpServers),
@@ -291,10 +299,11 @@ export async function runAgent<T extends z.ZodType>(
             disallowedTools: config.disallowedTools,
             mcpServers: resolvedMcpServers,
             model,
-            // Omitted entirely when unset, so the SDK default ('high') applies —
+            // The agent's own effort wins over the global one. Omitted entirely when
+            // neither is set, so the SDK default ('high') applies —
             // passing `undefined` explicitly would be equivalent, but spreading keeps
             // the option absent from the object a reader inspects.
-            ...(context.config.models.effort ? { effort: context.config.models.effort } : {}),
+            ...(resolveEffort(config, context.config) ? { effort: resolveEffort(config, context.config) } : {}),
             cwd,
             maxTurns: knobs.maxTurns,
             maxBudgetUsd: config.maxBudgetUsd,
