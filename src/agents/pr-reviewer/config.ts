@@ -224,15 +224,35 @@ function workingTreeLines(params: PRReviewParams, repoDir: string): string[] {
 
 function calleeGuide(mechanism: string): string {
   if (mechanism === 'lsp') {
+    // Modelled on the cherry-pick reviewer's prompt, which gets real LSP use. The
+    // earlier three-line version loaded the tool and got zero calls from the
+    // orchestrator and all seven sub-agents (2026-09-23, PR 56548): LSP is a
+    // deferred tool, nobody loaded it, and the orchestrator paraphrased the
+    // guide into its own context file instead of passing it on.
     return [
       `## Resolving Called Procedures (AL LSP)`,
+      `The \`LSP\` tool runs the AL language server over this workspace, so it answers`,
+      `from the compiler's view of the checked-out branch. Load it once at the start`,
+      `with \`ToolSearch\` and the query \`select:LSP\`.`,
+      ``,
       `Before flagging anything that depends on what a CALLED procedure does — a`,
       `transaction/commit boundary, whether an error is swallowed, an IsHandled`,
-      `bail-out — resolve the callee first:`,
-      `- Jump to a called proc's definition → \`LSP goToDefinition\``,
-      `- What a proc calls → \`LSP outgoingCalls\`  |  who calls it → \`LSP incomingCalls\``,
-      `- A symbol's type/signature → \`LSP hover\``,
-      `Pass this instruction to every analysis sub-agent.`,
+      `bail-out, a validation — resolve the callee with \`LSP\`:`,
+      ``,
+      `| I need to... | Use |`,
+      `|---|---|`,
+      `| Read the body of a called procedure | \`LSP goToDefinition\` on the call, then \`Read\` the file it names |`,
+      `| See what a procedure calls | \`LSP outgoingCalls\` |`,
+      `| Find every caller of a procedure | \`LSP incomingCalls\` or \`LSP findReferences\` |`,
+      `| Check a signature, type or field list | \`LSP hover\` |`,
+      `| See a file's structure and object IDs | \`LSP documentSymbol\` |`,
+      ``,
+      `Give \`LSP\` an absolute \`filePath\` (\`/workspace/session/<Repo>/...\`), with the`,
+      `1-based line and character of the symbol. A callee answer that came from text`,
+      `matching rather than from \`LSP\` is a guess: report that finding as unverified.`,
+      `Grep and Read remain the right tools for comments, config values and finding files.`,
+      ``,
+      `Copy this whole section, unchanged, into the prompt of every analysis sub-agent.`,
     ].join('\n');
   }
   if (mechanism === 'treesitter') {

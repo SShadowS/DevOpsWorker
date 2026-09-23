@@ -420,7 +420,10 @@ describe('createPRReviewConfig — buildPrompt', () => {
     expect(prompt).toContain('LSP goToDefinition');
     expect(prompt).toContain('LSP outgoingCalls');
     expect(prompt).toContain('LSP incomingCalls');
-    expect(prompt).toContain('Pass this instruction to every analysis sub-agent.');
+    // LSP is a deferred tool: without an explicit load step nobody called it.
+    expect(prompt).toContain('`select:LSP`');
+    expect(prompt).toMatch(/absolute `filePath`/);
+    expect(prompt).toContain('Copy this whole section, unchanged, into the prompt of every analysis sub-agent.');
   });
 
   test('mechanism "treesitter" injects the al-symbol callee guide', () => {
