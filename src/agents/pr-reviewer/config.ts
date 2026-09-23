@@ -351,12 +351,14 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
     // Inside the container, the session root has the cloned repo + companions
     cwd: config.paths.sessionRoot,
     maxTurns: 100,
-    // Pinned above the global DEFAULT_EFFORT. On Opus 5.5 at 'low' this reviewer
-    // read the diff, wrote the review itself and dispatched none of its seven
-    // sub-agents (0 of 3 no-post runs on 2026-09-23); PR 56441 fell from 9
-    // findings to 1. At 'medium' the same PR dispatched all seven and found 9.
-    // PR_REVIEW_EFFORT overrides the pin without a rebuild; a typo keeps it.
-    effort: parseEffort(process.env['PR_REVIEW_EFFORT']) ?? 'medium',
+    // Pinned so the reviewer's effort is its own, not whatever DEFAULT_EFFORT
+    // says for the pipeline. 'low' is the cost choice: on draft PR 56548 two low
+    // runs dispatched all seven sub-agents for $2.41 and $3.45 against $5.71-7.57
+    // at 'medium'. The price: on smaller PRs low often skips the sub-agents and
+    // reviews alone (0 of 3 no-post runs on 2026-09-23; PR 56441 found 1 finding
+    // where medium found 9). Set PR_REVIEW_EFFORT=medium to trade cost for
+    // reliable dispatch without a rebuild; a typo keeps the pin.
+    effort: parseEffort(process.env['PR_REVIEW_EFFORT']) ?? 'low',
     maxRetries: 1, // No retries — agent posts PR comments as side effects that aren't idempotent
 
     buildPrompt(_state: PipelineState, _ctx: PipelineContext): string {

@@ -144,14 +144,14 @@ describe('DEFAULT_EFFORT reaches models.effort', () => {
     expect(resolveEffort({}, { models: {} })).toBeUndefined();
   });
 
-  test('the pr-reviewer runs at medium whatever DEFAULT_EFFORT says', () => {
-    // On Opus 5.5 at 'low' it reviewed alone and skipped all seven sub-agents
-    // (0 of 3 no-post runs, 2026-09-23); 'medium' dispatched all seven.
+  test('the pr-reviewer runs at its own pin (low) whatever DEFAULT_EFFORT says', () => {
+    // Low is the chosen cost trade-off; PR_REVIEW_EFFORT=medium buys reliable
+    // sub-agent dispatch (see the comment on the pin in pr-reviewer/config.ts).
     const cfg = createPRReviewConfig(loadConfig('.'), {
       prId: 1, repoKey: 'r', repoUrl: 'u', repositoryId: 'g', project: 'p',
       sourceBranch: 's', targetBranch: 't', treeSource: 'merge-preview',
     });
-    expect(cfg.effort).toBe('medium');
+    expect(cfg.effort).toBe('low');
   });
 
   test('PR_REVIEW_EFFORT overrides the pr-reviewer pin; a typo leaves the pin', () => {
@@ -161,10 +161,10 @@ describe('DEFAULT_EFFORT reaches models.effort', () => {
       sourceBranch: 's', targetBranch: 't', treeSource: 'merge-preview' as const,
     };
     try {
-      process.env['PR_REVIEW_EFFORT'] = 'low';
-      expect(createPRReviewConfig(loadConfig('.'), params).effort).toBe('low');
-      process.env['PR_REVIEW_EFFORT'] = 'lowest';
+      process.env['PR_REVIEW_EFFORT'] = 'medium';
       expect(createPRReviewConfig(loadConfig('.'), params).effort).toBe('medium');
+      process.env['PR_REVIEW_EFFORT'] = 'lowest';
+      expect(createPRReviewConfig(loadConfig('.'), params).effort).toBe('low');
     } finally {
       if (saved === undefined) delete process.env['PR_REVIEW_EFFORT'];
       else process.env['PR_REVIEW_EFFORT'] = saved;
