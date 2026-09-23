@@ -30,7 +30,7 @@ evidence rather than impression, and both of them run on it.
 | See a file's structure and object IDs | `LSP documentSymbol` |
 | Find every call site of a symbol | `LSP findReferences` |
 | Jump to where a symbol is defined | `LSP goToDefinition` |
-| Find a symbol by name across the project | `LSP workspaceSymbol` |
+| Find a symbol by name across the project | `LSP workspaceSymbol`, with any `.al` file as `filePath` (a folder is rejected). The first search of a session can take up to two minutes while the index builds |
 
 Give `LSP` an absolute `filePath` — the same full path you pass to `Read`, such as
 `/workspace/session/<Repo>/Cloud/...`. `LSP` resolves a relative path from the agent's starting
@@ -38,9 +38,14 @@ directory, not from wherever a Bash `cd` left the shell. So a path that works in
 `LSP` at a file that does not exist, and the answer comes back empty or times out. If `LSP`
 returns nothing, check the path before you conclude the symbol is missing.
 
-Grep, Glob and Read are the right tools for comments, config values and file discovery. An
-answer about a symbol that came from text matching rather than from `LSP` is a guess, and a
-guess is reported as `unverified` — see "When a check cannot be completed" below.
+Grep, Glob and Read are the right tools for comments, config values and file discovery.
+
+A symbol from another app — a permission set, table or codeunit the change references but
+this repo does not declare — is verified once you have read its declaration. `LSP
+goToDefinition` takes you there when the language server can see that app; otherwise find it
+in the app's own source in the companion repos your prompt lists, with Grep and Read. Name
+the file you found it in. A symbol whose declaration you did not find is `unverified` — see
+"When a check cannot be completed" below.
 
 ## 1. Is the port faithful to its source?
 

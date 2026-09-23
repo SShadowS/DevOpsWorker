@@ -1503,6 +1503,9 @@ export async function reviewPR(args: string[]): Promise<void> {
           // the wrong string here would tell the agent to look in a directory
           // that does not exist.
           repoKey: config.repoKey,
+          // BC is left out: it is a symlink to the Microsoft code-history mirror,
+          // which Grep and Glob skip, and its objects come from the symbol cache.
+          companions: Object.keys(repo.config.companions ?? {}).filter((c) => c !== 'BC'),
           sourceBranch: effectiveSourceBranch,
           targetBranch: effectiveTargetBranch,
           diffComparison,

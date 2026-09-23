@@ -326,3 +326,35 @@ describe('cherry-pick-reviewer prompt — line endings', () => {
     expect(crlf === 0 || crlf === lf).toBe(true);
   });
 });
+
+// PR 56648: the reviewer could not verify a permission set declared in another app.
+// The language server could not see other apps, the prompt told it an answer from
+// reading source was a guess, it never looked in the companion repo that declares
+// the set, and three workspaceSymbol calls failed with "Path is not a file".
+describe('cherry-pick-reviewer — cross-app symbols', () => {
+  const intel = section(/^AL code intelligence/);
+
+  test('a declaration read in companion source counts as verified', () => {
+    expect(intel).not.toMatch(/text matching rather than from `LSP` is a guess/);
+    expect(intel).toMatch(/declaration/);
+    expect(intel).toMatch(/companion/);
+  });
+
+  test('workspaceSymbol is told to take an .al file as filePath', () => {
+    const row = intel.split('\n').find((l) => l.includes('workspaceSymbol')) ?? '';
+    expect(row).toMatch(/`\.al` file/);
+  });
+
+  test('the prompt names each companion repo by its path', () => {
+    const rendered = createBackportReviewConfig(config, { ...params, companions: ['Core', 'PartnerApps'] })
+      .buildPrompt(NO_STATE, NO_CTX);
+    expect(rendered).toContain('`/workspace/Core`');
+    expect(rendered).toContain('`/workspace/PartnerApps`');
+  });
+
+  test('with no companions the prompt claims none', () => {
+    const rendered = createBackportReviewConfig(config, { ...params, companions: [] })
+      .buildPrompt(NO_STATE, NO_CTX);
+    expect(rendered).not.toMatch(/companion repos?:/i);
+  });
+});

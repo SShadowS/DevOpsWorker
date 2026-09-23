@@ -43,6 +43,13 @@ export interface BackportReviewParams {
    * every thread into a duplicate rather than updating it.
    */
   priorFindingsBlock?: string;
+  /**
+   * Directory names of the companion repos cloned beside the repo under the
+   * session root (from the repo's registry entry). Named in the prompt so the
+   * reviewer knows where another app's declarations live: on PR 56648 it could not
+   * verify a permission set declared in a companion it never looked in.
+   */
+  companions?: string[];
 }
 
 export function createBackportReviewConfig(
@@ -176,6 +183,9 @@ export function createBackportReviewConfig(
         `Your working directory holds the cloned repository in the \`${params.repoKey}\` subdirectory, alongside any companion repos${params.checkoutOk
           ? `; that subdirectory is checked out to ${params.sourceBranch}, so it represents this port merged into ${params.targetBranch}`
           : `, but the checkout to this PR's branch did NOT succeed — report the symbol and coverage checks as unverified`}.`,
+        params.companions?.length
+          ? `Beside it, read-only source of the apps this repo builds on sits in these companion repos: ${params.companions.map((c) => `\`${config.paths.sessionRoot}/${c}\``).join(', ')}.`
+          : null,
         params.noPost ? `` : null,
         params.noPost
           ? `## REPLAY MODE\nThis is a measurement replay. Do ALL analysis but post no PR comment. Return the structured result with commentId set to 0.`
