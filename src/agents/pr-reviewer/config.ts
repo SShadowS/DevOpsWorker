@@ -50,6 +50,8 @@ export interface PRReviewParams {
    * its findings — and a finding's identity is its file plus its title.
    */
   priorFindingsBlock?: string;
+  /** LethAL test-gap leads (`renderTestGapBlock`), or '' when there are none. Appended. */
+  testGapBlock?: string;
 }
 
 export interface CherryPickInfo {
@@ -424,7 +426,7 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
         );
       }
 
-      const body = lines.filter(Boolean).join('\n');
+      const body = [lines.filter(Boolean).join('\n'), params.testGapBlock].filter(Boolean).join('\n\n');
       // Prepended, not appended: the model needs the titles it must reuse before
       // it starts naming findings. Omitted entirely when empty — an unconditional
       // heading over an empty table would assert prior findings that don't exist.

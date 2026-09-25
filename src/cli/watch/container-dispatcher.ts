@@ -91,14 +91,17 @@ export function getContainerEnv(): Record<string, string> {
     PR_REVIEW_SECURITY_BC_ONLY: process.env['PR_REVIEW_SECURITY_BC_ONLY'] ?? '',
     // Which callee-resolution mechanism the reviewer is told it has: 'lsp',
     // 'treesitter' (the al-symbol Bash helper, which ships in every image), or
-    // 'none'. Unset resolves to 'none', so listing it changes nothing on its own —
+    // 'none'. Unset resolves to 'lsp', so listing it changes nothing on its own —
     // it makes the arm reachable at all. Until now it was missing from this list,
     // which is exactly the failure the comment above warns about: an arm could be
     // set on the host, forwarded nowhere, and silently measured as the baseline.
     CALLEE_MECHANISM: process.env['CALLEE_MECHANISM'] ?? '',
-    // Reasoning effort for the PR reviewer alone, overriding its 'medium' pin
+    // Reasoning effort for the PR reviewer alone, overriding its 'low' pin
     // (see createPRReviewConfig). Blank or unrecognised keeps the pin.
     PR_REVIEW_EFFORT: process.env['PR_REVIEW_EFFORT'] ?? '',
+    // '1' turns on LethAL mutation-testing leads (maybeBuildTestGapBlock in
+    // review-pr.ts). Off until the CI step publishing `lethal-report` exists.
+    PR_REVIEW_LETHAL: process.env['PR_REVIEW_LETHAL'] ?? '',
     // Git identity inside pipeline containers. Email must be authorized in the
     // AL Object ID Ninja backend app pool; name marks commits as AI-made.
     GIT_USER_NAME: process.env['GIT_USER_NAME'] ?? '',

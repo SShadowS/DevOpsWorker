@@ -76,7 +76,7 @@ describe('sub-agent frontmatter', () => {
     // Flipping these back to opus costs ~45% more per review for no measured
     // gain. If you do it, bring evidence.
     const scoped = files.filter((f) => f.includes('pr-reviewer'));
-    expect(scoped.length).toBe(7);
+    expect(scoped.length).toBe(8);
     for (const f of scoped) {
       expect(readFileSync(f, 'utf-8')).toMatch(/^model:\s*claude-sonnet-5\s*$/m);
     }

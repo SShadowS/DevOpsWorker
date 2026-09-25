@@ -31,6 +31,9 @@ import {
   type PRMetadata,
 } from '../sdk/ado/pull-requests.ts';
 import { chooseReviewPath, compareDiffs, renderDiffComparison, type FileDiff } from '../sdk/ado/backport.ts';
+import { fetchLethalArtifact } from '../sdk/ado/builds.ts';
+import { buildTestGapLeads, changedLines, renderTestGapBlock } from '../sdk/lethal.ts';
+import { tmpdir } from 'node:os';
 import { typeSafePortClassifier, acceptedSourcePr } from '../sdk/port-classifier.ts';
 import { checkoutBranch, resolveRef } from '../sdk/git-checkout.ts';
 import { checkoutReviewTree } from '../sdk/ado/review-tree.ts';
@@ -1074,6 +1077,43 @@ export async function buildReviewBaseConfig(
   return loadConfig(sessionRoot, settings);
 }
 
+/**
+ * LethAL mutation-testing leads for the full review, behind `PR_REVIEW_LETHAL=1`
+ * until the CI step that publishes the `lethal-report` artifact exists (issue #28).
+ * Returns '' — a normal review — whenever anything is missing or unusable, and says
+ * why in the log.
+ */
+export async function maybeBuildTestGapBlock(
+  prId: number,
+  prMetadata: PRMetadata | undefined,
+  repoDir: string,
+  config: PipelineConfig,
+): Promise<string> {
+  if (process.env['PR_REVIEW_LETHAL'] !== '1') return '';
+  if (!prMetadata?.sourceBranch) {
+    console.log('[lethal] no PR metadata, so no source branch to look up builds for');
+    return '';
+  }
+  const artifact = await fetchLethalArtifact(prMetadata.sourceBranch, prMetadata.lastMergeSourceCommit, config, tmpdir());
+  if (!artifact.ok) {
+    console.log(`[lethal] no mutation results: ${artifact.reason}`);
+    return '';
+  }
+  const diff = await fetchPRDiff(prId, repoDir, config);
+  if (!diff.ok) {
+    console.log(`[lethal] mutation results found, but the PR diff is unavailable: ${diff.error}`);
+    return '';
+  }
+  const leads = buildTestGapLeads(artifact.files, changedLines(diff.files));
+  if (!leads.usable) {
+    console.log(`[lethal] build ${artifact.buildId} results not usable: ${leads.reason}`);
+    return '';
+  }
+  const survivors = leads.procedures.reduce((n, p) => n + p.survivors.length, 0);
+  console.log(`[lethal] build ${artifact.buildId}: ${survivors} survivor(s) in ${leads.procedures.length} procedure(s), ${leads.noCoverage.length} uncovered procedure(s) on changed lines`);
+  return renderTestGapBlock(leads);
+}
+
 export async function reviewPR(args: string[]): Promise<void> {
   const { prId, repoId, sourceBranch, targetBranch, prUrl, prTitle, prDescription, actionId, forceFull } = parseReviewPrArgs(args);
 
@@ -1372,11 +1412,12 @@ export async function reviewPR(args: string[]): Promise<void> {
       // non-question; no iteration number is needed when the resolved commit
       // itself is recorded.
       reviewedCommitSha = await resolveRef(repoDir, 'HEAD');
+      const testGapBlock = await maybeBuildTestGapBlock(prId, prMetadata, repoDir, config);
       return runPRReview(
         {
           prId, repoKey: repo.key, repoUrl: repo.config.url, repositoryId: repoId,
           project: repo.config.azureDevOps.project, sourceBranch, targetBranch, prUrl,
-          prTitle: resolvedTitle, prDescription: resolvedDescription, noPost, priorFindingsBlock,
+          prTitle: resolvedTitle, prDescription: resolvedDescription, noPost, priorFindingsBlock, testGapBlock,
           treeSource: tree.source,
           ...(tree.detail ? { treeDetail: tree.detail } : {}),
         },

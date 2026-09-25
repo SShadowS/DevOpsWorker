@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { z } from 'zod';
-import { PRFindingSchema, PR_SUB_AGENTS } from '../../../src/agents/pr-reviewer/schema.ts';
+import { PRFindingSchema, PR_SUB_AGENTS, FINDING_SOURCES } from '../../../src/agents/pr-reviewer/schema.ts';
 import { AGENT_TRIGGERS } from '../../../src/cli/review-pr.ts';
 import { findingKey } from '../../../src/sdk/ado/finding-key.ts';
 
@@ -45,7 +45,7 @@ describe('foundBy on a finding', () => {
     // The JSON schema sent to the SDK carries the enum, so the model sees the
     // exact spellings rather than guessing them.
     const json = z.toJSONSchema(PRFindingSchema) as unknown as { properties: { foundBy: { items: { enum: string[] } } } };
-    expect(json.properties.foundBy.items.enum.sort()).toEqual([...PR_SUB_AGENTS].sort());
+    expect(json.properties.foundBy.items.enum.sort()).toEqual([...FINDING_SOURCES].sort());
   });
 
   test('the roster and the routing table cannot drift apart', () => {

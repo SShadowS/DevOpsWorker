@@ -186,6 +186,13 @@ Dispatch the `al-integration-analyzer` agent.
 
 Focus areas: event publisher/subscriber patterns (IsHandled usage, parameter design), API page design (field exposure, OData keys, versioning), HttpClient usage (timeouts, retry logic, error handling), background task patterns (idempotency, concurrency, error recovery).
 
+### Agent 8 (only with mutation-testing leads): Test Gaps
+
+Dispatch the `test-gap-analyzer` agent **only** when your prompt contains a
+`## Mutation-testing leads (LethAL)` section, and pass it that section unchanged
+together with the usual PR context. Its findings are test-gap leads: keep them at
+**Minor**, category Other, and do not let them change the recommendation.
+
 ## Phase 5: Synthesize Results
 
 ### 6. Collect and Parse Agent Results

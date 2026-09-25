@@ -21,6 +21,14 @@ export const PR_SUB_AGENTS = [
 
 export type PrSubAgent = typeof PR_SUB_AGENTS[number];
 
+/**
+ * Every name a finding may be attributed to: the routed roster plus
+ * `test-gap-analyzer`, which is not routed. It runs only when the prompt carries
+ * LethAL mutation-testing leads (`renderTestGapBlock`), so it has no place in
+ * `AGENT_TRIGGERS`.
+ */
+export const FINDING_SOURCES = [...PR_SUB_AGENTS, 'test-gap-analyzer'] as const;
+
 export const PRFindingSchema = z.object({
   severity: z.enum(['critical', 'major', 'minor', 'nitpick']),
   title: z.string().describe('Short finding title — also the basis of its identity across re-reviews, so keep it stable between runs'),
@@ -40,7 +48,7 @@ export const PRFindingSchema = z.object({
   // missing field — countable, and reported per review, which is the point:
   // `observedCherryPick` is optional and the orchestrator simply omitted it on
   // 31 of the last 100 reviews, with nothing to say so.
-  foundBy: z.array(z.enum(PR_SUB_AGENTS)).default([]).catch([]).describe('Which sub-agents found this. One name for a finding from a single agent; EVERY contributing agent when you merged duplicates from several. Use the exact agent names.'),
+  foundBy: z.array(z.enum(FINDING_SOURCES)).default([]).catch([]).describe('Which sub-agents found this. One name for a finding from a single agent; EVERY contributing agent when you merged duplicates from several. Use the exact agent names.'),
 });
 
 export type PRFinding = z.infer<typeof PRFindingSchema>;

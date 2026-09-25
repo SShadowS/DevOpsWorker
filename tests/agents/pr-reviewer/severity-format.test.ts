@@ -189,7 +189,7 @@ describe('pr-reviewer sub-agents report a location', () => {
 
   test('every pr-reviewer sub-agent is asked for a repo-relative path and a diff line', () => {
     const files = subAgentFiles();
-    expect(files).toHaveLength(7);
+    expect(files).toHaveLength(8);
     for (const f of files) {
       const src = readFileSync(f, 'utf-8');
       expect(src).toContain('## Reporting a location');

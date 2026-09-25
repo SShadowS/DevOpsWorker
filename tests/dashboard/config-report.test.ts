@@ -462,11 +462,11 @@ describe('buildConfigReport', () => {
     expect(planner.overlayOverrideModel).toBeNull();
   });
 
-  test('reports the pr-reviewer sub-agent frontmatter group with 7 files, and includes the ci-waiter inline sub-agent separately', async () => {
+  test('reports the pr-reviewer sub-agent frontmatter group with 8 files, and includes the ci-waiter inline sub-agent separately', async () => {
     clearEnv();
     const report = await buildConfigReport({ manifest: {} });
     const prReviewerGroup = report.subAgents.groups.find((g) => g.parentAgent === 'pr-reviewer')!;
-    expect(prReviewerGroup.count).toBe(7);
+    expect(prReviewerGroup.count).toBe(8);
     const ciWaiter = report.subAgents.inline.find((s) => s.subagentType === 'ci-waiter')!;
     expect(ciWaiter.parentAgent).toBe('coder');
     expect(ciWaiter.declaredModel).toBe('claude-haiku-4-5');
