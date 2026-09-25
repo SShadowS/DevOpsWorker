@@ -11,6 +11,7 @@ import type { McpServerConfig } from '../../types/agent.types.ts';
 import type { SdkPluginConfig, AgentDefinition as SdkAgentDefinition, HookCallbackMatcher } from '@anthropic-ai/claude-agent-sdk';
 import type { CodeReview } from '../code-reviewer/schema.ts';
 import { ciWaiterGuard, fileOpGuard } from './bash-guard.ts';
+import { branchFiles } from '../../sdk/git-diff.ts';
 
 // ---------------------------------------------------------------------------
 // Coding Agent — writes AL code according to the approved dev plan
@@ -519,9 +520,25 @@ export function applyCoderOutput(state: PipelineState, output: Changeset): Pipel
 }
 
 export function coderStage(config: PipelineConfig): Stage {
-  return agentStage({
+  const inner = agentStage({
     agent: createCoderConfig(config),
     canRun: (state) => state.devPlan != null,
     applyOutput: applyCoderOutput,
   });
+  return {
+    ...inner,
+    async execute(state, context) {
+      const result = await inner.execute(state, context);
+      const changeset = result.state.changeset;
+      if (!changeset) return result;
+      // The agent's own file list comes from memory of the plan and misses files;
+      // git knows. REPO_BRANCH is the default branch the container cloned.
+      const files = await branchFiles(config.paths.targetRepo, process.env['REPO_BRANCH'] || 'master');
+      if (!files) {
+        context.logger?.log('[coder] could not read the changed files from git; keeping the agent\'s list');
+        return result;
+      }
+      return { ...result, state: { ...result.state, changeset: { ...changeset, ...files } } };
+    },
+  };
 }

@@ -54,7 +54,7 @@ The PR description must include the following sections:
 
 - **Summary**: Brief description of what the PR does and why, referencing the work item.
 - **Development Plan**: Condensed summary of the key implementation decisions.
-- **Files Changed**: List of created or modified files grouped by purpose (production code, tests, configuration).
+- **Files Changed**: Every file in the task prompt's Files Changed list, grouped by purpose (production code, tests, configuration). That list is read from git, so it matches the PR diff: include each file exactly once, and add none from the plan.
 - **CI Status**: Current pipeline status (passed/failed) with link if available.
 - **Test Coverage**: Summary of test scenarios included.
 

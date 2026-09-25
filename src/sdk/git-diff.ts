@@ -181,3 +181,33 @@ export async function diffCommits(
 
   return { ok: true, files };
 }
+
+/**
+ * The files a feature branch changed since it left `baseBranch`, read from git.
+ *
+ * The coder used to report this list itself, and it reported from memory of the
+ * plan: PR 56719 listed 4 files where the diff had 10. Every later stage (draft PR,
+ * code review, test cases, docs) repeats this list, so it is taken from git here.
+ * A deleted file counts as modified — the PR diff shows it too.
+ *
+ * `null` when git cannot answer (no `origin/<baseBranch>`, not a repository); the
+ * caller then keeps the agent's own list rather than an empty one.
+ */
+export async function branchFiles(
+  cwd: string,
+  baseBranch: string,
+): Promise<{ filesCreated: string[]; filesModified: string[] } | null> {
+  const mb = await runGit(cwd, ['merge-base', 'HEAD', `origin/${baseBranch}`]);
+  const base = mb.out.trim();
+  if (mb.code !== 0 || !SHA.test(base)) return null;
+  const d = await runGit(cwd, ['diff', '--no-color', '--no-renames', '--name-status', '-z', base, 'HEAD']);
+  if (d.code !== 0) return null;
+  // `-z --name-status` is `<status>\0<path>\0` repeated.
+  const parts = d.out.split('\0').filter(Boolean);
+  const filesCreated: string[] = [];
+  const filesModified: string[] = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    (parts[i] === 'A' ? filesCreated : filesModified).push(parts[i + 1]!);
+  }
+  return { filesCreated, filesModified };
+}
