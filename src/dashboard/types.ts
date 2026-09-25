@@ -149,6 +149,8 @@ export interface DashboardPRReview {
 export interface DashboardPRReviewDetail extends DashboardPRReview {
   /** Full review body markdown — only returned by GET /api/pr-reviews/:id (kept out of the list DTO to avoid bulk overfetch). */
   reviewBody: string | null;
+  /** Each finding with the sub-agents that raised it; null when the review recorded no list. */
+  findingsList: Array<{ severity: string; title: string; file?: string; line?: number; foundBy: string[] }> | null;
 }
 
 export interface StageProgress {

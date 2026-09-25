@@ -12,15 +12,19 @@ export function sortToolCalls(tc: Record<string, number> | null): [string, numbe
 
 export function PRReviewDetail({ review }: { review: DashboardPRReview }) {
   const [body, setBody] = useState<string | null>(null);
+  const [findings, setFindings] = useState<DashboardPRReviewDetail['findingsList']>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setBody(null);
+    setFindings(null);
     fetch(`/api/pr-reviews/${review.id}`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((d: DashboardPRReviewDetail | null) => { if (alive) { setBody(d?.reviewBody ?? null); setLoading(false); } })
+      .then((d: DashboardPRReviewDetail | null) => {
+        if (alive) { setBody(d?.reviewBody ?? null); setFindings(d?.findingsList ?? null); setLoading(false); }
+      })
       .catch(() => { if (alive) { setBody(null); setLoading(false); } });
     return () => { alive = false; };
   }, [review.id]);
@@ -58,6 +62,25 @@ export function PRReviewDetail({ review }: { review: DashboardPRReview }) {
           View logs
         </button>
       </div>
+
+      {findings && findings.length > 0 && (
+        <div class="pr-review-detail__findings">
+          <h4>Findings</h4>
+          <table>
+            <thead><tr><th>Severity</th><th>Finding</th><th>Where</th><th>Raised by</th></tr></thead>
+            <tbody>
+              {findings.map((f, i) => (
+                <tr key={i}>
+                  <td>{f.severity}</td>
+                  <td>{f.title}</td>
+                  <td>{f.file ? `${f.file.split('/').pop()}${f.line ? `:${f.line}` : ''}` : '—'}</td>
+                  <td>{f.foundBy.length > 0 ? f.foundBy.join(', ') : 'the reviewer itself'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div class="pr-review-detail__body">
         <h4>Review</h4>

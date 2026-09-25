@@ -439,5 +439,10 @@ export async function readPRReviewDetail(store: IPRReviewStore, id: number): Pro
     createdAt: r.createdAt, webUrl: buildPrWebUrl(r.repoKey, r.prId),
     pendingStatus: undefined, reviewBody: r.reviewBody, isTest: r.isTest,
     reviewPath: r.reviewPath, observedCherryPick: r.observedCherryPick,
+    findingsList: r.findingsList?.map((f) => ({
+      severity: f.severity, title: f.title,
+      ...(f.file ? { file: f.file } : {}), ...(f.line ? { line: f.line } : {}),
+      foundBy: f.foundBy ?? [],
+    })) ?? null,
   };
 }

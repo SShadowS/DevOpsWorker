@@ -1001,6 +1001,10 @@ a.session-card__wi-id:hover { color: var(--color-accent); text-decoration: under
 .pr-review-detail__meta { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; font-size: 0.85rem; }
 .pr-review-detail__tools { display: flex; flex-direction: column; gap: 0.25rem; }
 .pr-review-detail__tools h4,
+.pr-review-detail__findings h4 { margin: 0 0 0.25rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+.pr-review-detail__findings { overflow-x: auto; margin-bottom: 0.75rem; }
+.pr-review-detail__findings table { border-collapse: collapse; font-size: 0.85rem; width: 100%; }
+.pr-review-detail__findings th, .pr-review-detail__findings td { text-align: left; padding: 0.2rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
 .pr-review-detail__body h4 { margin: 0 0 0.25rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
 .pr-review-detail__tool-row { display: grid; grid-template-columns: 12rem 1fr 3rem; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
 .pr-review-detail__tool-name { font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
