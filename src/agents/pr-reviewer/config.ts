@@ -345,7 +345,12 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
     // the right fix is a path-scoped PreToolUse hook, not a tool denial. That
     // hook must cover Bash as well: this agent keeps `Bash`, and `sed -i`, `>`
     // and `git checkout` write to the tree without going near Write or Edit.
-    disallowedTools: ['NotebookEdit'],
+    //
+    // `Workflow` and `ScheduleWakeup` run work in the background and return at
+    // once. The orchestrator never waited: all 9 reviews that started their
+    // sub-agents through `Workflow` (2026-09-23..29) posted a partial review
+    // with no sub-agent findings. `Agent` waits for its results.
+    disallowedTools: ['NotebookEdit', 'Workflow', 'ScheduleWakeup'],
     plugins: lspPlugins,
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),

@@ -245,6 +245,16 @@ describe('tool scoping — deliberate exceptions', () => {
     expect(pr.disallowedTools).not.toContain('Task');
   });
 
+  test('pr-reviewer denies the background tools that post a review before its sub-agents finish', () => {
+    // `Workflow` returns a task id at once and the orchestrator never waited for
+    // it: all 9 reviews that called it (2026-09-23..29) posted a partial review
+    // with no sub-agent findings. One also called `ScheduleWakeup`. Denying both
+    // leaves `Agent`, which waits for its results.
+    const pr = agentSurfaces().find(a => a.name === 'pr-reviewer')!;
+    expect(pr.disallowedTools).toContain('Workflow');
+    expect(pr.disallowedTools).toContain('ScheduleWakeup');
+  });
+
   test('coder keeps every tool it needs to change the repo', () => {
     // Denying any of these would break the one agent whose job is to write code.
     const coder = agentSurfaces().find(a => a.name === 'coder')!;
