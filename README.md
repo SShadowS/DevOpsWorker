@@ -219,7 +219,9 @@ overlay `models` knobs → per-agent core defaults → `DEFAULT_MODEL` → `clau
 The shipped per-agent defaults (`src/cli/config.ts`) put **coder, draft-pr, test-cases
 and documenter on `claude-sonnet-5-5`** — strong (Opus) planning and review, cheap (Sonnet)
 execution — while analyzer, planner and the reviewers inherit the Opus default. Review
-**sub-agents** additionally pin `claude-sonnet-5-5` in their own frontmatter. The
+**sub-agents** additionally pin `claude-sonnet-5-5` in their own frontmatter, except the PR
+reviewer's `code-review-validator`, which pins `claude-opus-5-5` (it found real Criticals the
+Sonnet validator missed). The
 dashboard's Stats & Config tab shows the resolution actually in effect per agent.
 
 Reasoning effort works the same way: an agent's own `effort` setting wins over

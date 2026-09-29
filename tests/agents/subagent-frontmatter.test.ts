@@ -75,11 +75,20 @@ describe('sub-agent frontmatter', () => {
     //
     // Flipping these back to opus costs ~45% more per review for no measured
     // gain. If you do it, bring evidence.
-    const scoped = files.filter((f) => f.includes('pr-reviewer'));
-    expect(scoped.length).toBe(8);
+    //
+    // The one exception is code-review-validator, which got that evidence
+    // (2026-09-29, 20-run A/B): on Opus 5.5 it raised two real Criticals, each in
+    // 2/2 runs, that the Sonnet validator raised in 0/2, both checked in the code.
+    const scoped = files.filter((f) => f.includes('pr-reviewer') && !f.includes('code-review-validator'));
+    expect(scoped.length).toBe(7);
     for (const f of scoped) {
       expect(readFileSync(f, 'utf-8')).toMatch(/^model:\s*claude-sonnet-5-5\s*$/m);
     }
+  });
+
+  test('pr-reviewer code-review-validator pins claude-opus-5-5', () => {
+    const f = files.find((p) => p.includes('pr-reviewer') && p.includes('code-review-validator'))!;
+    expect(readFileSync(f, 'utf-8')).toMatch(/^model:\s*claude-opus-5-5\s*$/m);
   });
 
   test('the image normalises agent prompt line endings', () => {
