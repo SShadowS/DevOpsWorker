@@ -5,7 +5,7 @@ import type { PipelineConfig, PipelineState, PipelineContext } from '../../types
 import { PRReviewSchema } from './schema.ts';
 import type { PRReviewResult } from './schema.ts';
 import { azureDevOpsMcp, resolveAlLspPlugin, TOOLS } from '../../sdk/mcp-configs.ts';
-import type { SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
+import type { SdkPluginConfig, HookCallbackMatcher } from '@anthropic-ai/claude-agent-sdk';
 import { runAgent } from '../../sdk/run-agent.ts';
 import { parseEffort } from '../../cli/config.ts';
 import { createInitialState } from '../../pipeline/initial-state.ts';
@@ -311,6 +311,34 @@ function calleeGuide(mechanism: string): string {
   ].join('\n');
 }
 
+/**
+ * `PR_REVIEW_BLIND_HISTORY=1`: the review sees none of the PR's earlier review
+ * findings. For A/B replays of already-reviewed PRs, where both arms would
+ * otherwise be handed the defects the experiment is trying to see them find.
+ * Removes both channels: the "Findings already tracked" table (review-pr.ts) and
+ * the PR's comment threads, read through the comments tool.
+ */
+export function isHistoryBlind(): boolean {
+  return process.env['PR_REVIEW_BLIND_HISTORY'] === '1';
+}
+
+const PR_COMMENTS_TOOL = 'mcp__azureDevOps__get_pull_request_comments';
+
+/** Denies the comments tool from a hook too: `disallowedTools` is not known to
+ *  reach sub-agents, whose own tool lists name this tool. */
+const denyPrCommentsHook: HookCallbackMatcher = {
+  matcher: PR_COMMENTS_TOOL,
+  hooks: [
+    async () => ({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'PR_REVIEW_BLIND_HISTORY is set: earlier review comments are hidden for this run.',
+      },
+    }),
+  ],
+};
+
 export function createPRReviewConfig(config: PipelineConfig, params: PRReviewParams): AgentConfig<typeof PRReviewSchema> {
   // Defaults to the AL LSP. The watcher forwards an unset variable as '', so blank
   // counts as unset; 'none' and 'treesitter' stay available for A/B arms.
@@ -366,7 +394,8 @@ export function createPRReviewConfig(config: PipelineConfig, params: PRReviewPar
     // once. The orchestrator never waited: all 9 reviews that started their
     // sub-agents through `Workflow` (2026-09-23..29) posted a partial review
     // with no sub-agent findings. `Agent` waits for its results.
-    disallowedTools: ['NotebookEdit', 'Workflow', 'ScheduleWakeup'],
+    disallowedTools: ['NotebookEdit', 'Workflow', 'ScheduleWakeup', ...(isHistoryBlind() ? [PR_COMMENTS_TOOL] : [])],
+    ...(isHistoryBlind() ? { hooks: { PreToolUse: [denyPrCommentsHook] } } : {}),
     plugins: lspPlugins,
     mcpServers: {
       azureDevOps: azureDevOpsMcp(config),

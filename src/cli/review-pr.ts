@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadConfig, readAllSettingsSafely } from './config.ts';
 import type { ISettingsStore } from '../config/settings-store.interface.ts';
-import { runPRReview, detectCherryPick } from '../agents/pr-reviewer/config.ts';
+import { runPRReview, detectCherryPick, isHistoryBlind } from '../agents/pr-reviewer/config.ts';
 import type { PRFinding, PRReviewResult, PrSubAgent } from '../agents/pr-reviewer/schema.ts';
 import { runBackportReview } from '../agents/cherry-pick-reviewer/config.ts';
 import type { BackportReview } from '../agents/cherry-pick-reviewer/schema.ts';
@@ -1363,12 +1363,16 @@ export async function reviewPR(args: string[]): Promise<void> {
   // Guarded like every other ADO read here: a failed read costs the model its
   // lookup table, never the review.
   let priorFindingsBlock = '';
-  try {
-    priorFindingsBlock = buildPriorFindingsBlock(await fetchReviewThreadsRaw(prId, config));
-    const rows = priorFindingsBlock ? priorFindingsBlock.split('\n').filter((l) => l.startsWith('| ')).length - 1 : 0;
-    console.log(`[inline] prompting with ${rows} prior finding(s) already threaded on this PR`);
-  } catch (err) {
-    console.log(`[inline] could not read prior PR threads, prompting without them: ${err}`);
+  if (!isHistoryBlind()) {
+    try {
+      priorFindingsBlock = buildPriorFindingsBlock(await fetchReviewThreadsRaw(prId, config));
+      const rows = priorFindingsBlock ? priorFindingsBlock.split('\n').filter((l) => l.startsWith('| ')).length - 1 : 0;
+      console.log(`[inline] prompting with ${rows} prior finding(s) already threaded on this PR`);
+    } catch (err) {
+      console.log(`[inline] could not read prior PR threads, prompting without them: ${err}`);
+    }
+  } else {
+    console.log('[inline] PR_REVIEW_BLIND_HISTORY=1: prompting without prior findings');
   }
 
   // Set when the checkout landed on the PR's merge commit instead of its (deleted)

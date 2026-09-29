@@ -1,4 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   detectCherryPick,
   createPRReviewConfig,
@@ -547,5 +549,36 @@ describe('createPRReviewConfig — names the clone directory', () => {
     expect(prompt).toContain('git -C /session/DocumentOutput');
     expect(prompt).toMatch(/absolute paths/);
     expect(prompt).toMatch(/every analysis sub-agent/);
+  });
+});
+
+// A/B replays of a PR that was reviewed before hand every arm the earlier
+// findings twice: as the "Findings already tracked" table, and as the PR's
+// comment threads read through get_pull_request_comments. That makes "arm B
+// finds what arm A misses" nearly impossible to observe. The switch removes both.
+describe('PR_REVIEW_BLIND_HISTORY', () => {
+  const COMMENTS = 'mcp__azureDevOps__get_pull_request_comments';
+  afterEach(() => { delete process.env['PR_REVIEW_BLIND_HISTORY']; });
+
+  test('off by default: the comments tool stays available', () => {
+    const c = createPRReviewConfig(mockConfig(), mockParams());
+    expect(c.disallowedTools).not.toContain(COMMENTS);
+    expect(c.hooks).toBeUndefined();
+  });
+
+  test('on: the comments tool is denied, and a hook also denies it to sub-agents', async () => {
+    process.env['PR_REVIEW_BLIND_HISTORY'] = '1';
+    const c = createPRReviewConfig(mockConfig(), mockParams());
+    expect(c.disallowedTools).toContain(COMMENTS);
+    const hook = c.hooks!.PreToolUse![0]!;
+    expect(hook.matcher).toBe(COMMENTS);
+    const out = await hook.hooks[0]!({ tool_name: COMMENTS } as never, 't', { signal: new AbortController().signal });
+    expect((out as { hookSpecificOutput: { permissionDecision: string } }).hookSpecificOutput.permissionDecision).toBe('deny');
+  });
+
+  test('on: review-pr skips the tracked-findings table', () => {
+    const src = readFileSync(join(import.meta.dir, '../../../src/cli/review-pr.ts'), 'utf-8');
+    expect(src).toContain("if (!isHistoryBlind()) {");
+    expect(src.indexOf('buildPriorFindingsBlock(await')).toBeGreaterThan(src.indexOf("if (!isHistoryBlind()) {"));
   });
 });
