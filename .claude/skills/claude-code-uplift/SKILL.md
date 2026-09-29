@@ -15,12 +15,14 @@ description: >-
 
 ## Why this exists
 
-Two Claude versions run in this project and they drift independently:
+One Claude version runs in this project: **`@anthropic-ai/claude-agent-sdk`**, pinned in
+`package.json` / `bun.lock`. It bundles its own Claude Code binary
+(`claude-agent-sdk-<platform>/claude`), which every agent runs, locally and in spawned
+containers. The SDK version decides the CLI version: SDK 0.3.N ships Claude Code 2.1.N.
 
-1. **`@anthropic-ai/claude-agent-sdk`** — pinned in `package.json` / `bun.lock`. This is
-   what the pipeline imports and runs locally and in spawned containers.
-2. **`@anthropic-ai/claude-code`** (the CLI) — installed **unpinned** in `Dockerfile:32`
-   (`npm install -g @anthropic-ai/claude-code`). It floats to latest on every image build.
+The container used to also install `@anthropic-ai/claude-code` globally. Nothing called it,
+and its version said nothing about what agents ran, so it was removed on 2026-09-29.
+Do not add it back.
 
 Around these we carry a stack of AL-LSP hacks (binary patches, plugin resolution, container
 symlinks, prompt steering). Upstream fixes land often and silently make some hacks redundant
@@ -37,7 +39,7 @@ hack and note it — don't leave dead workarounds.
 | # | Thing | Location | On uplift |
 |---|-------|----------|-----------|
 | 1 | SDK version pin | `package.json` + `bun.lock` `@anthropic-ai/claude-agent-sdk` | bump |
-| 2 | Claude Code CLI (container) | `Dockerfile:32` `npm i -g @anthropic-ai/claude-code` (unpinned) | verify floats clean; pin if it breaks |
+| 2 | Claude Code CLI | bundled in the SDK (`claude-agent-sdk-<platform>/claude`), no separate install | moves with row 1; check the model ids you need are in it: `grep -a -c '<model-id>' <binary>` |
 | 3 | Global MCP servers | `Dockerfile` `npm i -g @sshadows/mcp-server-azure-devops business-central-mcp @vjeko.com/al-object-id-ninja-mcp` | verify still resolve |
 | 4 | `cli.js` race binary-patch | `scripts/patch-lsp.cjs` (regex on minified `isEnabled()`) | regex dead (no `cli.js`). Keep transform as reference; re-host on tweakcc only if the race recurs. |
 | 4a | Production cli.js patcher | `scripts/apply-production-patches.ts` + `docker/entrypoint.sh` hook (~L251) | `findCliJs()` is dead. **Port to tweakcc** (see "Binary patching" below). Also retarget: patch the SDK binary, not the standalone CLI. |
@@ -68,7 +70,6 @@ in the same change — that's how the runbook stays complete across future uplif
 grep '"@anthropic-ai/claude-agent-sdk"' package.json
 # latest published
 npm view @anthropic-ai/claude-agent-sdk version dist-tags --json
-npm view @anthropic-ai/claude-code version
 ```
 
 Then read what actually changed. Don't bump blind — a multi-minor jump can move minified
@@ -82,8 +83,8 @@ loading changes, permission/tool-name changes. Note anything touching a row in t
 bun add @anthropic-ai/claude-agent-sdk@<target>   # updates package.json + bun.lock together
 ```
 
-`Dockerfile:32` CLI is unpinned — it picks up latest on next `docker build`. If a CLI release
-is bad, pin it: `npm install -g @anthropic-ai/claude-code@<good-version>`.
+The CLI comes with the SDK, so there is no second version to bump. If a CLI release is bad,
+pin the SDK version that shipped a good one.
 
 ### B — Reconcile the patches
 

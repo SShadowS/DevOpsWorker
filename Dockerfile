@@ -28,9 +28,11 @@ ENV PATH="/root/.bun/bin:$PATH"
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude CLI + tweakcc (binary patcher for A/B tool-description experiments;
-# unpacks/repacks the SDK-bundled native binary — see scripts/ab-test-lsp/patches.ts)
-RUN npm install -g @anthropic-ai/claude-code tweakcc
+# tweakcc: binary patcher for A/B tool-description experiments; unpacks/repacks the
+# SDK-bundled native binary (see the internal repo's scripts/ab-test-lsp/patches.ts).
+# No global @anthropic-ai/claude-code: agents run the binary bundled with the SDK, and
+# nothing here calls a global `claude`. A second copy only showed a misleading version.
+RUN npm install -g tweakcc
 
 # Pre-install MCP servers so `npx -y` resolves them instantly from the global
 # install instead of cold-downloading from npm at agent startup. A cold download
