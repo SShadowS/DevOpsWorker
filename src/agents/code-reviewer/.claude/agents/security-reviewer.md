@@ -1,7 +1,7 @@
 ---
 name: security-reviewer
 description: Application security analyst for AL code. Identifies security vulnerabilities including input validation gaps, authorization issues, data protection concerns, information disclosure risks, and business logic security edge cases.
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 tools: Read, Glob, Grep, LSP, Bash
 ---
 

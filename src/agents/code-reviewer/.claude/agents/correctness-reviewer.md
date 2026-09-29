@@ -1,7 +1,7 @@
 ---
 name: correctness-reviewer
 description: Deep code analysis specialist. Traces control flow, identifies logic errors, edge cases, subtle bugs, and verifies whether the implementation matches the intended plan. Use for rigorous correctness validation of AL code changes.
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 tools: Read, Glob, Grep, LSP, Bash
 ---
 

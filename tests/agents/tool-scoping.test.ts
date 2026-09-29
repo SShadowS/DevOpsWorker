@@ -82,7 +82,7 @@ function mockPipelineConfig(): PipelineConfig {
       pollIntervalMinutes: 1,
     },
     revisionLoops: { maxAttempts: 5 },
-    models: { default: 'claude-sonnet-5' },
+    models: { default: 'claude-sonnet-5-5' },
     costs: {},
     repoKey: 'Repo',
     layout: { appRoot: 'Cloud', source: 'Cloud/Al', testAppRoot: 'Test', test: 'Test/Src' },

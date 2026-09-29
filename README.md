@@ -217,9 +217,9 @@ To iterate on agent behavior: **edit the agent's `CLAUDE.md`** — no TypeScript
 Models resolve per agent at the `runAgent` chokepoint, precedence high to low:
 overlay `models` knobs → per-agent core defaults → `DEFAULT_MODEL` → `claude-opus-5-5`.
 The shipped per-agent defaults (`src/cli/config.ts`) put **coder, draft-pr, test-cases
-and documenter on `claude-sonnet-5`** — strong (Opus) planning and review, cheap (Sonnet)
+and documenter on `claude-sonnet-5-5`** — strong (Opus) planning and review, cheap (Sonnet)
 execution — while analyzer, planner and the reviewers inherit the Opus default. Review
-**sub-agents** additionally pin `claude-sonnet-5` in their own frontmatter. The
+**sub-agents** additionally pin `claude-sonnet-5-5` in their own frontmatter. The
 dashboard's Stats & Config tab shows the resolution actually in effect per agent.
 
 Reasoning effort works the same way: an agent's own `effort` setting wins over

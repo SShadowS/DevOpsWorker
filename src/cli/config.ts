@@ -106,10 +106,10 @@ export function buildModelsAndCosts(
       effort: readSetting<PipelineConfig['models']['effort']>(settings, 'models.effort') ?? parseEffort(env['DEFAULT_EFFORT']),
       perAgent: readSetting<Record<string, string>>(settings, 'models.perAgent') ?? {
         // planner inherits the Opus 5.5 default — strong planning, cheap (Sonnet) coding.
-        'coder': 'claude-sonnet-5',
-        'draft-pr': 'claude-sonnet-5',
-        'test-cases': 'claude-sonnet-5',
-        'documenter': 'claude-sonnet-5',
+        'coder': 'claude-sonnet-5-5',
+        'draft-pr': 'claude-sonnet-5-5',
+        'test-cases': 'claude-sonnet-5-5',
+        'documenter': 'claude-sonnet-5-5',
       },
     },
 

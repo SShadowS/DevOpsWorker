@@ -423,7 +423,7 @@ describe('buildConfigReport', () => {
       ].sort(),
     );
     expect(report.ruleLearnerAgent.name).toBe('rule-learner');
-    expect(report.ruleLearnerAgent.model).toBe('claude-sonnet-5');
+    expect(report.ruleLearnerAgent.model).toBe('claude-sonnet-5-5');
   });
 
   test('pr-reviewer and cherry-pick-reviewer are resolved via the loadConfig builder; the rest via buildConfigFromRepo', async () => {
@@ -435,11 +435,11 @@ describe('buildConfigReport', () => {
     expect(byName.get('coder')!.configBuilder).toBe('buildConfigFromRepo');
   });
 
-  test('coder resolves to its perAgent pin (claude-sonnet-5) with maxTurns 200', async () => {
+  test('coder resolves to its perAgent pin (claude-sonnet-5-5) with maxTurns 200', async () => {
     clearEnv();
     const report = await buildConfigReport({ manifest: {} });
     const coder = report.perAgent.find((a) => a.name === 'coder')!;
-    expect(coder.effectiveModel).toBe('claude-sonnet-5');
+    expect(coder.effectiveModel).toBe('claude-sonnet-5-5');
     expect(coder.effectiveMaxTurns).toBe(200);
   });
 
@@ -447,8 +447,8 @@ describe('buildConfigReport', () => {
     clearEnv();
     const report = await buildConfigReport({ manifest: {} });
     const cpr = report.perAgent.find((a) => a.name === 'cherry-pick-reviewer')!;
-    expect(cpr.effectiveModel).toBe('claude-sonnet-5');
-    expect(cpr.declaredModel).toBe('claude-sonnet-5');
+    expect(cpr.effectiveModel).toBe('claude-sonnet-5-5');
+    expect(cpr.declaredModel).toBe('claude-sonnet-5-5');
     expect(cpr.effectiveMaxTurns).toBe(60);
   });
 

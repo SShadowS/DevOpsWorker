@@ -1,7 +1,7 @@
 ---
 name: architecture-reviewer
 description: Software architecture analyst for AL code. Detects SRP violations, coupling issues, extension point design problems, and structural concerns affecting long-term maintainability and testability.
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 tools: Read, Glob, Grep, LSP, Bash
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: test-gap-analyzer
 description: Turns LethAL mutation-testing results into test-gap findings. Dispatch it only when the review prompt contains a "Mutation-testing leads (LethAL)" section, and pass it that section unchanged. It reads each listed procedure and its covering tests, drops mutants that change nothing, and reports what the tests execute but do not check.
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 tools: [Bash, Read, Grep, Glob, ToolSearch, LSP, mcp__azureDevOps__get_file_content]
 color: yellow
 ---

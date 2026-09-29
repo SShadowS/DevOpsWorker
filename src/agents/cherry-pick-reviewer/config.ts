@@ -137,7 +137,7 @@ export function createBackportReviewConfig(
     // Pinned, not inherited. The model is the measured cost lever: seven
     // sub-agents silently running opus rather than sonnet nearly doubled one
     // review's cost on an identical image.
-    model: 'claude-sonnet-5',
+    model: 'claude-sonnet-5-5',
 
     // 30 was too tight and was measured failing. Two acceptance runs on the same PR
     // took 25 and 31 turns; the 31-turn run hit the cap, returned

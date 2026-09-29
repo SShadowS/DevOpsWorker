@@ -34,5 +34,5 @@ export const SHARED_PROMPT_FRAGMENTS = ['al-review-patterns.md'];
  * Exported so the dashboard's config-report can report the real value that runs
  * instead of a second hardcoded copy of it.
  */
-export const MODEL = 'claude-sonnet-5';
+export const MODEL = 'claude-sonnet-5-5';
 export const MAX_TURNS = 20;

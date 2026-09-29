@@ -96,7 +96,7 @@ describe('cherry-pick-reviewer config', () => {
   test('pins the model explicitly rather than inheriting', () => {
     // The model is the measured cost lever here: seven sub-agents silently running
     // opus instead of sonnet nearly doubled one review's cost on the same image.
-    expect(createBackportReviewConfig(config, params).model).toBe('claude-sonnet-5');
+    expect(createBackportReviewConfig(config, params).model).toBe('claude-sonnet-5-5');
   });
 
   test('does not retry — the review posts comments', () => {

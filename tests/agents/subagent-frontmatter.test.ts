@@ -55,18 +55,18 @@ describe('sub-agent frontmatter', () => {
     expect(offenders).toEqual([]);
   });
 
-  test('code-reviewer and plan-reviewer agents pin model: claude-sonnet-5 (Phase 1B activates real values)', () => {
+  test('code-reviewer and plan-reviewer agents pin model: claude-sonnet-5-5 (Phase 1B activates real values)', () => {
     const scoped = files.filter(
       (f) => f.includes('code-reviewer') || f.includes('plan-reviewer'),
     );
     expect(scoped.length).toBe(12);
     for (const f of scoped) {
       const src = readFileSync(f, 'utf-8');
-      expect(src).toMatch(/^model:\s*claude-sonnet-5\s*$/m);
+      expect(src).toMatch(/^model:\s*claude-sonnet-5-5\s*$/m);
     }
   });
 
-  test('pr-reviewer agents pin model: claude-sonnet-5 — measured, not assumed', () => {
+  test('pr-reviewer agents pin model: claude-sonnet-5-5 — measured, not assumed', () => {
     // Was `model: opus` on all 7. A/B on PR 52081 (2026-07-27, n=1 per arm):
     // Sonnet cost meaningfully less than Opus (-45%) and made 31 Bash calls vs 124,
     // while producing the SAME seven core findings plus one the Opus arms
@@ -78,7 +78,7 @@ describe('sub-agent frontmatter', () => {
     const scoped = files.filter((f) => f.includes('pr-reviewer'));
     expect(scoped.length).toBe(8);
     for (const f of scoped) {
-      expect(readFileSync(f, 'utf-8')).toMatch(/^model:\s*claude-sonnet-5\s*$/m);
+      expect(readFileSync(f, 'utf-8')).toMatch(/^model:\s*claude-sonnet-5-5\s*$/m);
     }
   });
 

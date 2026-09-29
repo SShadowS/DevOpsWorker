@@ -1,7 +1,7 @@
 ---
 name: requirements-reviewer
 description: Acceptance-criteria coverage specialist. Verifies every AC in the work item has a matching plan item AND a matching test scenario. Use for gap detection before a plan advances to coding.
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 tools: Read, Glob, Grep, LSP
 ---
 
