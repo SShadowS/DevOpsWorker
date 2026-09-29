@@ -182,6 +182,14 @@ describe('cherry-pick-reviewer config — buildPrompt', () => {
     expect(p).not.toMatch(/cloned at the current working directory/i);
   });
 
+  test('states the repository id to pass to Azure DevOps calls', () => {
+    // Without it the agent passed the repo key (the clone's folder name) as repositoryId.
+    // ADO answered 404, the MCP server reported "No iterations found", and the summary
+    // comment failed to post — five backport reviews, August to September.
+    const p = createBackportReviewConfig(config, params).buildPrompt(NO_STATE, NO_CTX);
+    expect(p).toContain(`(ID: ${config.azureDevOps.repositoryId})`);
+  });
+
   test('the prompt carries the pre-computed diff comparison, not an instruction to derive it', () => {
     const p = createBackportReviewConfig(config, params).buildPrompt(NO_STATE, NO_CTX);
     expect(p).toContain('## Diff comparison against the source PR');

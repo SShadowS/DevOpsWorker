@@ -166,6 +166,7 @@ export function createBackportReviewConfig(
         `only be wrong about the port, described in your CLAUDE.md.`,
         ``,
         `## Port details`,
+        `- **Repository:** ${config.azureDevOps.repositoryName} (ID: ${config.azureDevOps.repositoryId}) — pass this ID as \`repositoryId\` on every Azure DevOps tool call`,
         `- **This PR:** #${params.prId}`,
         `- **Ported from:** !${params.sourcePrId}`,
         `- **Source PR review status:** ${params.sourceReviewStatus}${params.sourceRecommendation ? ` (${params.sourceRecommendation})` : ''}`,
