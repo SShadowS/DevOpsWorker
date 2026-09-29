@@ -69,7 +69,7 @@ describe('DEFAULT_MODEL reaches models.default', () => {
     // A DEFAULT_MODEL change must not disturb agents that are deliberately pinned.
     process.env['DEFAULT_MODEL'] = 'claude-opus-4-8';
     const m = loadConfig('.').models;
-    expect(m.perAgent?.['coder']).toBe('claude-sonnet-5');
+    expect(m.perAgent?.['coder']).toBe('claude-sonnet-5-5');
     expect(m.default).toBe('claude-opus-4-8');
   });
 });

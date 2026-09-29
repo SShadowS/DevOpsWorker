@@ -32,7 +32,7 @@ describe('buildModelsAndCosts — precedence', () => {
   test('an absent setting changes nothing — falls back to the code default', () => {
     const { models } = buildModelsAndCosts({}, {});
     expect(models.default).toBe('claude-opus-5-5');
-    expect(models.perAgent?.['coder']).toBe('claude-sonnet-5');
+    expect(models.perAgent?.['coder']).toBe('claude-sonnet-5-5');
   });
 
   test('an empty DEFAULT_MODEL still falls back to the code default (|| not ??)', () => {
