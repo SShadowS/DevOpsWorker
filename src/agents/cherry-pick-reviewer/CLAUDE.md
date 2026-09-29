@@ -191,7 +191,8 @@ the three checks still decide the recommendation.
 
 ## Posting
 
-Post one summary comment on the PR with `mcp__azureDevOps__add_pull_request_comment`, then
+Post one summary comment on the PR with `mcp__azureDevOps__add_pull_request_comment`, passing
+`status: "active"` alongside the content (the tool requires a status to open a thread), then
 return the structured result.
 
 The MCP comment tools are the only channel that counts as posting: the orchestrator asserts

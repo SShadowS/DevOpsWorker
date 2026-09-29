@@ -281,6 +281,12 @@ describe('cherry-pick-reviewer prompt — structured output', () => {
     expect(PROMPT).toContain('mcp__azureDevOps__add_pull_request_comment');
   });
 
+  test('says to pass a thread status when posting', () => {
+    // The tool rejects a new thread without `status`; every backport review spent a
+    // turn on "Status is required when creating a new thread" before retrying.
+    expect(section(/^Posting/)).toContain('`status: "active"`');
+  });
+
   test('tells the model to reuse a prior finding\'s file and title verbatim, in positive framing', () => {
     // Without this, a re-review of a backport has nothing to be stable against
     // and forks every existing thread into a duplicate instead of updating it.
