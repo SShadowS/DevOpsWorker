@@ -100,13 +100,28 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
   const BRACKETED = /\[(?:cherry[- ]pick|backport)\s*\d*(?:\.x)?\s*\]/i;
   const bracketMatch = BRACKETED.test(pr.title) || BRACKETED.test(pr.description ?? '');
 
+  // Titles that name the source with no marker word. A PR is only titled
+  // `Merged PR 56927: …` or `Merge pull request 56968 from …` when it is raised
+  // from a commit that is already merged, so the id IS the source. Anchored to
+  // the start (after any `[REL 29]`-style tags): mid-title it is prose. Measured
+  // 2026-09-29: of 41 full reviews with the `Merged PR` title, the reviewer called
+  // 28 ports and none original work.
+  const LEAD_TAGS = String.raw`^\s*(?:\[[^\]]*\]\s*)*`;
+  const titleSource = pr.title.match(new RegExp(`${LEAD_TAGS}merged pr (\\d+):`, 'i'))
+    ?? pr.title.match(new RegExp(`${LEAD_TAGS}merge pull request (\\d+) from `, 'i'));
+  const titleSourceId = titleSource ? parseInt(titleSource[1]!, 10) : undefined;
+  // `… (cherry-pick to development/29.x)`, `… (port to release/29.x)`: a port that
+  // says where it goes but not where it came from. The classifier finds the source.
+  const portSuffix = /\((?:cherry[- ]pick(?:ed)?|back ?port(?:ed)?|port(?:ed)?) to [^)]+\)/i.test(pr.title);
+
   // A revert of a port quotes the port's own title, marker and all, so every test above
   // says yes to it. It is the opposite of a port — it takes a change away — and the
   // cheap path would compare it against the very PR it undoes, calling every file
   // "diverged". Reverts are rare and read cheap; send them down the full path.
   const isRevert = /^\s*revert\b/i.test(pr.title);
 
-  const isCherryPick = !isRevert && (titleMatch || descMatch || bracketMatch);
+  const isCherryPick = !isRevert
+    && (titleMatch || descMatch || bracketMatch || titleSourceId !== undefined || portSuffix);
   if (!isCherryPick) return { isCherryPick: false };
 
   // A port can carry more than one source. PR 53271 lists two, one per line:
@@ -177,13 +192,14 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
     //    the newer shape — a cited sibling PR is real, same-repo and fetchable, so
     //    picking it over the true parent is a mistake no later guard can catch. An
     //    explicit trailer still wins over everything: it names the source outright.
+    // A source named in the title is structural in the same way, so it ranks the same.
     const chosen = bracketMatch
       ? (lastTrailer?.[1] ?? parentFromTitle ?? urlMatch?.[1] ?? refMatch?.[1])
-      : (lastTrailer?.[1] ?? urlMatch?.[1] ?? refMatch?.[1]);
+      : (lastTrailer?.[1] ?? titleSourceId ?? urlMatch?.[1] ?? refMatch?.[1]);
     if (chosen) originalPrId = typeof chosen === 'number' ? chosen : parseInt(chosen, 10);
   }
 
-  originalPrId ??= parentFromTitle;
+  originalPrId ??= parentFromTitle ?? titleSourceId;
 
   return { isCherryPick, originalPrId };
 }

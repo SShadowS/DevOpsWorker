@@ -1,7 +1,7 @@
 import { describe, test, expect, afterEach } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { acceptedSourcePr, typeSafePortClassifier, readVerdict, PORT_CONFIDENCE_FLOOR, type PortVerdict } from '../../src/sdk/port-classifier.ts';
+import { acceptedSourcePr, shouldAskClassifier, typeSafePortClassifier, readVerdict, PORT_CONFIDENCE_FLOOR, type PortVerdict } from '../../src/sdk/port-classifier.ts';
 
 // ---------------------------------------------------------------------------
 // The gate in front of the cheap review path.
@@ -113,10 +113,11 @@ describe('typeSafePortClassifier', () => {
 describe('the review path records how a port was found', () => {
   const REVIEW_PR = readFileSync(join(import.meta.dir, '../../src/cli/review-pr.ts'), 'utf-8');
 
-  test('the classifier is consulted only when the regex said no', () => {
-    expect(REVIEW_PR).toContain('if (!cherryPick.isCherryPick) {');
+  test('the classifier is gated by shouldAskClassifier', () => {
+    // The gate's cases are pinned in the `shouldAskClassifier` tests above.
+    expect(REVIEW_PR).toContain('if (shouldAskClassifier(cherryPick)) {');
     const idx = REVIEW_PR.indexOf('typeSafePortClassifier()');
-    expect(idx).toBeGreaterThan(REVIEW_PR.indexOf('if (!cherryPick.isCherryPick) {'));
+    expect(idx).toBeGreaterThan(REVIEW_PR.indexOf('if (shouldAskClassifier(cherryPick)) {'));
   });
 
   test('only OLDER pull requests are offered as sources', () => {
@@ -129,5 +130,25 @@ describe('the review path records how a port was found', () => {
     // Without this the next cost read cannot tell which ports the classifier
     // found, and the change cannot be attributed.
     expect(REVIEW_PR).toContain('(classified ${classifiedPort.confidence.toFixed(2)})');
+  });
+});
+
+describe('shouldAskClassifier', () => {
+  test('asks when the regex found no port', () => {
+    expect(shouldAskClassifier({ isCherryPick: false })).toBe(true);
+  });
+
+  test('asks when the regex found a port but no source id', () => {
+    // `[Cherry-pick 29.x] …` with no trailer: 11 reviews took the full path on
+    // this shape (2026-09-22..29) while the classifier was never consulted.
+    expect(shouldAskClassifier({ isCherryPick: true })).toBe(true);
+  });
+
+  test('does not ask when the regex already named the source', () => {
+    expect(shouldAskClassifier({ isCherryPick: true, originalPrId: 56927 })).toBe(false);
+  });
+
+  test('does not ask for a port of several PRs: one source cannot cover it', () => {
+    expect(shouldAskClassifier({ isCherryPick: true, multiSourcePrIds: [41464, 42379] })).toBe(false);
   });
 });

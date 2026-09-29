@@ -13,8 +13,9 @@
  * What separates them is the candidate list — the other recent pull requests in
  * the repository. A port is the one whose twin already exists.
  *
- * Off unless `TYPESAFE_API_KEY` is set, and consulted ONLY when the regex
- * already said no, so the worst case is exactly today's behaviour. Everything
+ * Off unless `TYPESAFE_API_KEY` is set, and consulted only when the regex
+ * said no or found no source id (`shouldAskClassifier`), so the worst case is
+ * exactly the regex's own answer. Everything
  * downstream still applies: the source PR must exist, its diff must be
  * fetchable, and it must share files with this one, or `chooseReviewPath` sends
  * the review down the full path anyway. A wrong match therefore costs a full
@@ -76,6 +77,24 @@ export function acceptedSourcePr(
   // routing on it would compare the PR against its own diff and call it clean.
   if (verdict.sourcePrId === ownPrId) return null;
   return verdict.confidence >= floor ? verdict.sourcePrId : null;
+}
+
+/**
+ * Whether the classifier has anything to add to the regex's answer.
+ *
+ * It does when the regex said "not a port", and also when the regex said "port"
+ * but found no source id: the cheap path needs one named PR, and a bracketed
+ * marker with no trailer (`[Cherry-pick 29.x] …`) otherwise goes down the full
+ * path with the classifier never asked. A port of several PRs is left alone —
+ * one source could not cover it.
+ */
+export function shouldAskClassifier(regex: {
+  isCherryPick: boolean;
+  originalPrId?: number;
+  multiSourcePrIds?: number[];
+}): boolean {
+  if (!regex.isCherryPick) return true;
+  return regex.originalPrId === undefined && !(regex.multiSourcePrIds && regex.multiSourcePrIds.length > 1);
 }
 
 /** The two questions, exported so an offline eval asks exactly what production asks. */

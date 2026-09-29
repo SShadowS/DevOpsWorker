@@ -34,7 +34,7 @@ import { chooseReviewPath, compareDiffs, renderDiffComparison, type FileDiff } f
 import { fetchLethalArtifact } from '../sdk/ado/builds.ts';
 import { buildTestGapLeads, changedLines, renderTestGapBlock } from '../sdk/lethal.ts';
 import { tmpdir } from 'node:os';
-import { typeSafePortClassifier, acceptedSourcePr } from '../sdk/port-classifier.ts';
+import { typeSafePortClassifier, acceptedSourcePr, shouldAskClassifier } from '../sdk/port-classifier.ts';
 import { checkoutBranch, resolveRef } from '../sdk/git-checkout.ts';
 import { checkoutReviewTree } from '../sdk/ado/review-tree.ts';
 import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
@@ -1255,13 +1255,14 @@ export async function reviewPR(args: string[]): Promise<void> {
 
   // The regex reads words, and the porting tool does not always write one — a
   // port raised against a second branch carries its original's title verbatim.
-  // Only consulted when the regex already said no, and only accepted with a
+  // Consulted when the regex said no, or said yes without a source id (see
+  // `shouldAskClassifier`), and only accepted with a
   // named source PR above the confidence floor; everything after this still has
   // to agree (the PR must exist, its diff must be fetchable, and it must share
   // files), so a wrong match costs a full review, which is what a missed port
   // costs today.
   let classifiedPort: { sourcePrId: number; confidence: number } | null = null;
-  if (!cherryPick.isCherryPick) {
+  if (shouldAskClassifier(cherryPick)) {
     const classify = typeSafePortClassifier();
     if (classify) {
       try {

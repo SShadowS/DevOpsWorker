@@ -109,13 +109,17 @@ describe('detectCherryPick — the bracketed backport titles', () => {
     expect(r.originalPrId).toBe(52658);
   });
 
-  test('a plain merge title is NOT a cherry-pick', () => {
-    // This is the guard that keeps the rule narrow. Every squash-merged PR in this
-    // organisation carries a "Merged PR <id>:" prefix, so the prefix alone must mean
-    // nothing — the cherry-pick marker has to be present too.
+  test('a plain merge title IS a port of the PR it names', () => {
+    // Reversed 2026-09-29. This used to assert "not a cherry-pick" on the grounds
+    // that every squash-merged PR carries a "Merged PR <id>:" prefix. That is true
+    // of the merge COMMIT; a pull request is only TITLED that way when it is raised
+    // from a commit that is already merged. Of 50 reviews with this title, none was
+    // ever judged original work, and 26 without a marker went down the full path.
+    // What keeps the rule narrow now is the anchor (start of title) and the checks
+    // downstream: the named PR must exist and its diff must be computable.
     const r = detectCherryPick({ title: 'Merged PR 52700: Fix posting date on service invoices' });
-    expect(r.isCherryPick).toBe(false);
-    expect(r.originalPrId).toBeUndefined();
+    expect(r.isCherryPick).toBe(true);
+    expect(r.originalPrId).toBe(52700);
   });
 
   test('an explicit trailer still beats the title prefix', () => {
@@ -273,5 +277,56 @@ describe('detectCherryPick — multi-source ports stay on the full path', () => 
     const r = detectCherryPick({ ...MULTI, description: `${MULTI.description}\nCherry picked from !42379` });
     expect(r.originalPrId).toBe(42379);
     expect(r.multiSourcePrIds).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Titles that carry no marker word but still name a port.
+//
+// Measured 2026-09-29: 41 full reviews had a title starting `Merged PR <id>:`.
+// The reviewer itself called 28 of them ports and not one of them original
+// work (the other 13 were never asked). A pull request only gets that title
+// when it is raised from a commit that is ALREADY merged, so the prefix names
+// its source. The other shapes below took the full path in the same window.
+// ---------------------------------------------------------------------------
+describe('detectCherryPick — ports whose title names the source without a marker', () => {
+  test('a title that starts with a squash-merge prefix is a port of that PR (!57034)', () => {
+    const r = detectCherryPick({ title: 'Merged PR 56927: Validate export XML against its schema' });
+    expect(r.isCherryPick).toBe(true);
+    expect(r.originalPrId).toBe(56927);
+  });
+
+  test('the prefix outranks a PR URL typed in the description', () => {
+    const r = detectCherryPick({
+      title: 'Merged PR 55834: #82681 - Keep the record and log the problem',
+      description: 'Same fix as [PR 50231](https://dev.azure.com/o/p/_git/Repo/pullrequest/50231).',
+    });
+    expect(r.originalPrId).toBe(55834);
+  });
+
+  test('a git merge-commit title is a port of the PR it names (!57063)', () => {
+    const r = detectCherryPick({ title: '[REL 29] Merge pull request 56968 from bug/83641 into master' });
+    expect(r.isCherryPick).toBe(true);
+    expect(r.originalPrId).toBe(56968);
+  });
+
+  test('a "(cherry-pick to <branch>)" suffix is a port, source still unknown (!56661)', () => {
+    const r = detectCherryPick({
+      title: '#82960 Validate documents on posting (cherry-pick to development/29.x)',
+    });
+    expect(r.isCherryPick).toBe(true);
+    expect(r.originalPrId).toBeUndefined();
+  });
+
+  test('a "(port to <branch>)" suffix is a port (!56507)', () => {
+    const r = detectCherryPick({
+      title: 'Let the demo app configure its settings (port to development/29.x)',
+    });
+    expect(r.isCherryPick).toBe(true);
+  });
+
+  test('prose that only mentions a merged PR mid-title is still not a port', () => {
+    expect(detectCherryPick({ title: 'Align posting date with Merged PR 51000: follow-up' }).isCherryPick).toBe(false);
+    expect(detectCherryPick({ title: 'Port the report to the new layout' }).isCherryPick).toBe(false);
   });
 });
