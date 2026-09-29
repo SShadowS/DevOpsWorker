@@ -1,5 +1,5 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { SettingSource } from '@anthropic-ai/claude-agent-sdk';
+import type { SettingSource, HookCallbackMatcher } from '@anthropic-ai/claude-agent-sdk';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { z } from 'zod';
@@ -51,6 +51,28 @@ const NON_RETRYABLE_SUBTYPES = new Set([
   'error_max_turns',
   'error_max_budget',
 ]);
+
+/**
+ * Removes `model` from every sub-agent dispatch, so the sub-agent's own `model:`
+ * pin decides. A `model` on the Agent call wins over the pin, and orchestrators
+ * pass one unasked: review 3597 ran 5 of 7 pr-reviewer sub-agents on Haiku and
+ * review 3331 ran all 7 on Opus 5, while every sub-agent file pinned Sonnet. No
+ * agent here chooses a sub-agent's model through the call; `ci-waiter` sets its
+ * model in its definition. `Task` is the dispatch tool's older name.
+ */
+export const subAgentModelPinHook: HookCallbackMatcher = {
+  matcher: 'Agent|Task',
+  hooks: [
+    async (input) => {
+      const toolInput = (input as { tool_input?: unknown }).tool_input;
+      if (!toolInput || typeof toolInput !== 'object' || !('model' in toolInput)) return { continue: true };
+      const { model: _dropped, ...rest } = toolInput as Record<string, unknown>;
+      return {
+        hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: rest },
+      };
+    },
+  ],
+};
 
 /** Determine if an error is transient and worth retrying. */
 /** The effort an agent runs at: its own setting if it has one, else the global one. */
@@ -311,7 +333,10 @@ export async function runAgent<T extends z.ZodType>(
             allowDangerouslySkipPermissions: true,
             plugins: config.plugins,
             agents: config.agents,
-            hooks: config.hooks,
+            hooks: {
+              ...config.hooks,
+              PreToolUse: [subAgentModelPinHook, ...(config.hooks?.PreToolUse ?? [])],
+            },
           },
         });
 

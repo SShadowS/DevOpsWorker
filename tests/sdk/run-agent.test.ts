@@ -19,7 +19,7 @@ mock.module('@anthropic-ai/claude-agent-sdk', () => ({
 }));
 
 // Import AFTER mock is set up
-const { runAgent, isRetryableError, detectApiError, initAgentRuntime } = await import('../../src/sdk/run-agent.ts');
+const { runAgent, isRetryableError, detectApiError, initAgentRuntime, subAgentModelPinHook } = await import('../../src/sdk/run-agent.ts');
 
 // Shared temp agent directory for tests using the preset path
 const testTempDir = mkdtempSync(join(tmpdir(), 'runagent-test-'));
@@ -1143,5 +1143,54 @@ describe('buildSharedFragmentContent integration', () => {
 
   test('throws for non-existent fragment', () => {
     expect(() => buildSharedFragmentContent(['non-existent.md'])).toThrow('Failed to read prompt file');
+  });
+});
+
+// A `model` passed on the Agent call beats the sub-agent's own `model:` pin.
+// Measured: review 3597 ran 5 of 7 pr-reviewer sub-agents on Haiku, 3331 ran all
+// 7 on Opus 5, both while every sub-agent file pinned Sonnet. The hook removes
+// the parameter so the pin is what decides.
+describe('subAgentModelPinHook', () => {
+  const run = (toolInput: Record<string, unknown>) =>
+    subAgentModelPinHook.hooks[0]!(
+      { hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: toolInput } as never,
+      'toolu_1',
+      { signal: new AbortController().signal },
+    );
+
+  test('removes model from an Agent call and keeps everything else', async () => {
+    const out = await run({ subagent_type: 'code-review-validator', prompt: 'p', description: 'd', model: 'haiku' });
+    expect(out).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        updatedInput: { subagent_type: 'code-review-validator', prompt: 'p', description: 'd' },
+      },
+    });
+  });
+
+  test('leaves an Agent call without model alone', async () => {
+    expect(await run({ subagent_type: 'x', prompt: 'p' })).toEqual({ continue: true });
+  });
+
+  test('matches both names the dispatch tool has had', () => {
+    expect(new RegExp(`^(?:${subAgentModelPinHook.matcher})$`).test('Agent')).toBe(true);
+    expect(new RegExp(`^(?:${subAgentModelPinHook.matcher})$`).test('Task')).toBe(true);
+    expect(new RegExp(`^(?:${subAgentModelPinHook.matcher})$`).test('Bash')).toBe(false);
+  });
+
+  test('runAgent installs it for every agent, ahead of the agent\'s own hooks', async () => {
+    const own = { matcher: 'Bash', hooks: [async () => ({ continue: true })] };
+    mockQuery = mock(() => fakeMessages(initMessage(), successMessage({ summary: 'ok', score: 1 })));
+    await runAgent({ ...testAgentConfig(), hooks: { PreToolUse: [own] } }, testState(), testContext());
+    const pre = (getQueryCallArgs().options.hooks as { PreToolUse: unknown[] }).PreToolUse;
+    expect(pre[0]).toBe(subAgentModelPinHook);
+    expect(pre[1]).toBe(own);
+  });
+
+  test('runAgent installs it when the agent has no hooks of its own', async () => {
+    mockQuery = mock(() => fakeMessages(initMessage(), successMessage({ summary: 'ok', score: 1 })));
+    await runAgent(testAgentConfig(), testState(), testContext());
+    expect((getQueryCallArgs().options.hooks as { PreToolUse: unknown[] }).PreToolUse).toEqual([subAgentModelPinHook]);
   });
 });
