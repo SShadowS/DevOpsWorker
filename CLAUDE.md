@@ -232,7 +232,9 @@ docker compose up -d                           # Restart services
 
 Forgetting to rebuild `devopsworker:latest` is a common pitfall — compose services pick up code changes but spawned containers silently run stale code. Symptoms: no errors, but side effects (like DB writes) don't happen.
 
-The entrypoint (`docker/entrypoint.sh`) handles git credentials, repo cloning, AL extension fetching, and AL LSP plugin setup before dropping to the `pipeline` user.
+The entrypoint (`docker/entrypoint.sh`) handles git credentials, repo cloning, AL extension fetching, and AL LSP plugin setup, then runs the pipeline command. There is no `pipeline` user: the
+container runs as root with `IS_SANDBOX=1` (`Dockerfile`), which Claude Code needs to allow
+skipped permission prompts as root. Do not pass `--user` to a manual `docker run`.
 
 ### AL LSP Plugin in Containers
 
