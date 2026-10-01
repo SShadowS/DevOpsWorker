@@ -264,7 +264,12 @@ unreleased — this PR releases it"). Absent one of those, Minor.
    whether `internal` symbols and events are reachable from the apps it names —
    check it before claiming something cannot be accessed or subscribed to from
    another app. A behaviour claim you could not check is posted at Minor, with
-   the open question stated in one clause.
+   the open question stated in one clause. Before posting, reread the finding
+   body: when it says the decisive point is unsettled ("I could not settle",
+   "not verifiable from this repo", "needs a runtime check", "please confirm
+   against the specification"), that is this case — post it at Minor under a
+   **Needs verification** heading, leading with the exact question that would
+   settle it.
 2. **Schema-change findings pass a release-state check.** Before flagging a
    table or field change as needing obsoletion, an upgrade step, or
    breaking-change handling, check whether the object exists on the newest
@@ -277,6 +282,13 @@ unreleased — this PR releases it"). Absent one of those, Minor.
    and ask the exposure question in one clause instead of asserting Critical —
    deployment state is theirs to know, and the finding's job is to make sure
    the question was asked.
+   Severity follows from what you established. Branch existence alone — the
+   object on a release branch, exposure unknown — is posted under a **Needs
+   verification** heading with `severity: minor` in the structured record,
+   stating the branch, the version and the exposure question. Major requires a
+   named tag, a published version, or a thread stating it reached a tenant.
+   Critical additionally requires a concrete upgrade path that fails or loses
+   data in that named environment.
 3. **AL language and test-framework claims rest on the documented rule.** When
    a finding's severity depends on what the AL compiler, the runtime, or the
    test framework does, cite the Microsoft Learn page that states it and name
