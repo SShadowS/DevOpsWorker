@@ -130,6 +130,14 @@ export function readBandCount(findingsList: PRFinding[] | null): number {
   return findingsList.filter((f) => f.severity === 'critical' || f.severity === 'major').length;
 }
 
+/** True for a row the cheap backport (cherry-pick) reviewer produced. That
+ *  path only checks the port matches its source PR, so it almost never raises
+ *  critical or major findings — counting it would drag the quality averages
+ *  down whenever the share of ports rises, with no change in review quality. */
+export function isBackportReview(reviewPath: string | null): boolean {
+  return reviewPath?.startsWith('sanity:') ?? false;
+}
+
 export function severityDistribution(rows: Array<PRFinding[] | null>): Record<string, number> {
   const dist: Record<string, number> = { critical: 0, major: 0, minor: 0, nitpick: 0 };
   for (const findings of rows) {
@@ -882,6 +890,8 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow, popul
 // ---------------------------------------------------------------------------
 
 export interface QualityStats extends WindowMeta, PopulationMeta {
+  /** Backport reviews in the window, left out of every figure below. */
+  backportReviewsExcluded: number;
   readBandSampleSize: number;
   avgReadBandItems: number | null;
   belowBandCount: number;
@@ -896,12 +906,13 @@ export async function getQualityStats(sql: postgres.Sql, window: StatsWindow, po
   const totalN = await countInWindowForPopulation(sql, days, testFlag);
   const otherPopulationCount = await countInWindowForPopulation(sql, days, !testFlag);
 
-  const rows = await sql<Array<{ findings_list: PRFinding[] | null; recommendation: string | null }>>`
-    SELECT findings_list, recommendation
+  const allRows = await sql<Array<{ findings_list: PRFinding[] | null; recommendation: string | null; review_path: string | null }>>`
+    SELECT findings_list, recommendation, review_path
     FROM pr_reviews
     WHERE created_at > now() - (${days}::int * interval '1 day')
       AND is_test = ${testFlag}
   `;
+  const rows = allRows.filter((r) => !isBackportReview(r.review_path));
 
   const withFindings = rows.filter((r) => r.findings_list != null);
   const readBandCounts = withFindings.map((r) => readBandCount(r.findings_list));
@@ -920,6 +931,7 @@ export async function getQualityStats(sql: postgres.Sql, window: StatsWindow, po
     ...buildWindowMeta(window, totalN),
     population,
     otherPopulationCount,
+    backportReviewsExcluded: allRows.length - rows.length,
     readBandSampleSize: withFindings.length,
     avgReadBandItems: readBandCounts.length > 0 ? readBandCounts.reduce((a, b) => a + b, 0) / readBandCounts.length : null,
     belowBandCount,

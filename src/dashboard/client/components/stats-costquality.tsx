@@ -942,6 +942,10 @@ function VerdictDistributionSection({ data }: { data: QualityStats }) {
   );
 }
 
+export function describeBackportExclusion(n: number): string {
+  return `Leaves out ${countOf(n, 'backport review')} (cherry-picks). Those only check the port matches its source, so they rarely raise critical or major findings.`;
+}
+
 function QualityCardBody({ data }: { data: QualityStats }) {
   return (
     <div class="quality-card__body">
@@ -949,6 +953,9 @@ function QualityCardBody({ data }: { data: QualityStats }) {
         <p class="quality-panel__low-sample">
           Small sample: n={data.sampleSize} in this window — every statistic below is a small-sample reading.
         </p>
+      )}
+      {data.backportReviewsExcluded > 0 && (
+        <p class="quality-panel__low-sample">{describeBackportExclusion(data.backportReviewsExcluded)}</p>
       )}
       <ReadBandGauge view={buildReadBandGaugeView(data)} />
       <SeverityDistributionSection data={data} />

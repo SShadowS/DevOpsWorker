@@ -25,6 +25,7 @@ import {
   READ_BAND_DANGER_ZONE_PCT,
   READ_BAND_HEALTHY_ZONE_START_PCT,
   READ_BAND_HEALTHY_ZONE_END_PCT,
+  describeBackportExclusion,
 } from '../../src/dashboard/client/components/stats-costquality.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
 import type { CostStats, QualityStats, SubAgentCoverage, CostPerReadBandItem, ModelUsageEntry } from '../../src/dashboard/stats.ts';
@@ -83,6 +84,7 @@ function qualityFixture(overrides: Partial<QualityStats> = {}): QualityStats {
     lowSample: false,
     population: 'prod',
     otherPopulationCount: 0,
+    backportReviewsExcluded: 0,
     readBandSampleSize: 310,
     avgReadBandItems: 2.96,
     belowBandCount: 40,
@@ -822,5 +824,12 @@ describe('cost card structure — secondary net', () => {
     // split around the <IntegrityModelUsageLink> element, not just re-typed.
     expect(cardSrc).not.toContain('Same model-cost breakdown as the Integrity panel\'s "Model usage" table');
     expect(cardSrc).toContain("navigateToPanel('health', 'stats-slot-integrity')");
+  });
+});
+
+describe('describeBackportExclusion', () => {
+  test('names how many backport reviews the quality card leaves out', () => {
+    expect(describeBackportExclusion(83)).toContain('83 backport reviews');
+    expect(describeBackportExclusion(1)).toContain('1 backport review ');
   });
 });

@@ -11,6 +11,7 @@ import {
   isTestFlag,
   MIN_RELIABLE_SAMPLE,
   readBandCount,
+  isBackportReview,
   severityDistribution,
   verdictDistribution,
   computeCostPerReadBandItem,
@@ -49,6 +50,16 @@ import type { GitInvocation } from '../../src/dashboard/stats.ts';
 // ---------------------------------------------------------------------------
 // Window handling
 // ---------------------------------------------------------------------------
+
+describe('isBackportReview', () => {
+  test('a sanity-path row is a backport review', () => {
+    expect(isBackportReview('sanity:49388')).toBe(true);
+  });
+  test('a full-path row, or a row from before routing existed, is not', () => {
+    expect(isBackportReview('full:not a cherry-pick')).toBe(false);
+    expect(isBackportReview(null)).toBe(false);
+  });
+});
 
 describe('parseWindow', () => {
   test('accepts 7d', () => expect(parseWindow('7d')).toBe('7d'));
