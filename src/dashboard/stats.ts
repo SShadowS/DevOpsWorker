@@ -138,6 +138,19 @@ export function isBackportReview(reviewPath: string | null): boolean {
   return reviewPath?.startsWith('sanity:') ?? false;
 }
 
+/** How far back, before the window starts, the quality card looks to learn
+ *  what a normal number of critical or major findings per review is. Eight
+ *  weeks spans a release cycle, so one code-freeze week cannot set "normal". */
+export const READ_BAND_BASELINE_DAYS = 56;
+
+/** The average critical or major count over the reviews before the window.
+ *  Below MIN_RELIABLE_SAMPLE reviews there is no baseline: comparing against
+ *  a handful of reviews would raise or hide an alarm by chance. */
+export function computeReadBandBaseline(readBandCounts: number[]): { avg: number | null; sampleSize: number } {
+  const n = readBandCounts.length;
+  return { avg: n >= MIN_RELIABLE_SAMPLE ? readBandCounts.reduce((a, b) => a + b, 0) / n : null, sampleSize: n };
+}
+
 export function severityDistribution(rows: Array<PRFinding[] | null>): Record<string, number> {
   const dist: Record<string, number> = { critical: 0, major: 0, minor: 0, nitpick: 0 };
   for (const findings of rows) {
@@ -892,6 +905,12 @@ export async function getCostStats(sql: postgres.Sql, window: StatsWindow, popul
 export interface QualityStats extends WindowMeta, PopulationMeta {
   /** Backport reviews in the window, left out of every figure below. */
   backportReviewsExcluded: number;
+  /** Average critical or major findings per review over the
+   *  READ_BAND_BASELINE_DAYS before the window, backports left out. Null when
+   *  too few reviews to trust (see computeReadBandBaseline). */
+  baselineAvgReadBandItems: number | null;
+  baselineSampleSize: number;
+  baselineDays: number;
   readBandSampleSize: number;
   avgReadBandItems: number | null;
   belowBandCount: number;
@@ -906,13 +925,22 @@ export async function getQualityStats(sql: postgres.Sql, window: StatsWindow, po
   const totalN = await countInWindowForPopulation(sql, days, testFlag);
   const otherPopulationCount = await countInWindowForPopulation(sql, days, !testFlag);
 
-  const allRows = await sql<Array<{ findings_list: PRFinding[] | null; recommendation: string | null; review_path: string | null }>>`
-    SELECT findings_list, recommendation, review_path
+  // One fetch covers the window and the baseline weeks before it; in_window
+  // splits them using the database clock, the same clock every other query uses.
+  const fetched = await sql<Array<{ findings_list: PRFinding[] | null; recommendation: string | null; review_path: string | null; in_window: boolean }>>`
+    SELECT findings_list, recommendation, review_path,
+      created_at > now() - (${days}::int * interval '1 day') AS in_window
     FROM pr_reviews
-    WHERE created_at > now() - (${days}::int * interval '1 day')
+    WHERE created_at > now() - ((${days}::int + ${READ_BAND_BASELINE_DAYS}::int) * interval '1 day')
       AND is_test = ${testFlag}
   `;
+  const allRows = fetched.filter((r) => r.in_window);
   const rows = allRows.filter((r) => !isBackportReview(r.review_path));
+  const baseline = computeReadBandBaseline(
+    fetched
+      .filter((r) => !r.in_window && !isBackportReview(r.review_path) && r.findings_list != null)
+      .map((r) => readBandCount(r.findings_list)),
+  );
 
   const withFindings = rows.filter((r) => r.findings_list != null);
   const readBandCounts = withFindings.map((r) => readBandCount(r.findings_list));
@@ -932,6 +960,9 @@ export async function getQualityStats(sql: postgres.Sql, window: StatsWindow, po
     population,
     otherPopulationCount,
     backportReviewsExcluded: allRows.length - rows.length,
+    baselineAvgReadBandItems: baseline.avg,
+    baselineSampleSize: baseline.sampleSize,
+    baselineDays: READ_BAND_BASELINE_DAYS,
     readBandSampleSize: withFindings.length,
     avgReadBandItems: readBandCounts.length > 0 ? readBandCounts.reduce((a, b) => a + b, 0) / readBandCounts.length : null,
     belowBandCount,

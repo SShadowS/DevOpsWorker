@@ -55,7 +55,8 @@ const TERMS: readonly GlossaryTerm[] = [
 //       point (never accent — a documented instrument/coverage limitation,
 //       not a confirmed finding; see the "Known instrument caveat:" tag).
 //   C1. Read-band gauge — a single value positioned against a shaded danger
-//       zone (<2.5) and a healthy band (3.5-4), so drift toward the danger
+//       zone (under half the previous 8 weeks' average) and a healthy zone
+//       (80% of that average and up), so drift toward the danger
 //       zone is visible before the value actually crosses into it.
 //   C2. Severity distribution — a stacked bar with a SOLID divider between
 //       the read-band (critical+major) and below-band (minor+nitpick)
@@ -174,40 +175,30 @@ export function assessModelBreakdownCost(modelBreakdown: ModelUsageEntry[]): Mod
 // Quality — read-band gauge (avg read-band items vs danger/healthy zones)
 // ---------------------------------------------------------------------------
 
-/** Below this, a review is surfacing too few critical/major findings on
- *  average — a genuine, actionable finding (task-8-brief: "shaded danger
- *  zone below 2.5"). */
-export const READ_BAND_DANGER_MAX = 2.5;
-/** "Healthy is ≈3.5-4" (task-8-brief) — a target BAND, not a hard pass/fail
- *  line; values above 4 are not flagged as unhealthy, there is simply no
- *  named ceiling. */
-export const READ_BAND_HEALTHY_RANGE: readonly [number, number] = [3.5, 4];
-/** Display-scale upper bound for the gauge only — a judgement call (mirrors
- *  `BAR_MAX_COMMITS` in stats-ribbon.tsx), not a measured figure. Chosen so
- *  the wide danger zone (0-2.5) reads as the dominant lower half of the
- *  scale and the healthy band still has visible width, rather than being
- *  compressed to a sliver by an arbitrarily large ceiling. A value above
- *  this is clamped for the marker's POSITION only — the exact value is
- *  always in the accompanying text, never silently rounded. */
-export const READ_BAND_GAUGE_SCALE_MAX = 5;
-
-export const READ_BAND_DANGER_ZONE_PCT = (READ_BAND_DANGER_MAX / READ_BAND_GAUGE_SCALE_MAX) * 100;
-export const READ_BAND_HEALTHY_ZONE_START_PCT = (READ_BAND_HEALTHY_RANGE[0] / READ_BAND_GAUGE_SCALE_MAX) * 100;
-export const READ_BAND_HEALTHY_ZONE_END_PCT = (READ_BAND_HEALTHY_RANGE[1] / READ_BAND_GAUGE_SCALE_MAX) * 100;
+/** The gauge compares the window against the reviewer's own recent past
+ *  (QualityStats.baselineAvgReadBandItems), not a fixed number. A fixed bar
+ *  cannot tell a regression from a week of translation PRs or a code freeze,
+ *  and the original bar (2.5) sat above every week ever recorded.
+ *  Below DANGER_RATIO of the baseline is a finding; below WATCH_RATIO is lower
+ *  than normal but not yet alarming. */
+export const READ_BAND_DANGER_RATIO = 0.5;
+export const READ_BAND_WATCH_RATIO = 0.8;
+/** The track spans 0 to twice the baseline, so the baseline sits mid-track
+ *  and the zone edges are fixed percentages whatever the baseline is. */
+export const READ_BAND_GAUGE_SCALE_RATIO = 2;
+export const READ_BAND_DANGER_ZONE_PCT = (READ_BAND_DANGER_RATIO / READ_BAND_GAUGE_SCALE_RATIO) * 100;
+export const READ_BAND_HEALTHY_ZONE_START_PCT = (READ_BAND_WATCH_RATIO / READ_BAND_GAUGE_SCALE_RATIO) * 100;
+export const READ_BAND_BASELINE_PCT = (1 / READ_BAND_GAUGE_SCALE_RATIO) * 100;
 
 export type ReadBandLevel = 'danger' | 'watch' | 'healthy' | 'unknown';
 
-/** Three levels, not two — this is the reason the gauge exists rather than a
- *  binary pass/fail dot. `'watch'` (>=2.5, <3.5) is the band between danger
- *  and healthy: not yet a confirmed finding, but distinctly NOT healthy
- *  either. Without it, a value like today's live ~2.96-3.0 would have to be
- *  rounded into 'healthy' (false reassurance) or 'danger' (false alarm) —
- *  exactly the "make sure the design reads correctly at that value" case
- *  task-8-brief calls out by name. */
-export function classifyReadBandLevel(avgReadBandItems: number | null): ReadBandLevel {
-  if (avgReadBandItems == null) return 'unknown';
-  if (avgReadBandItems < READ_BAND_DANGER_MAX) return 'danger';
-  if (avgReadBandItems < READ_BAND_HEALTHY_RANGE[0]) return 'watch';
+/** Three levels plus unknown. Unknown covers both "no findings data in the
+ *  window" and "no usable baseline" (null, or zero — nothing to be below). */
+export function classifyReadBandLevel(avgReadBandItems: number | null, baseline: number | null): ReadBandLevel {
+  if (avgReadBandItems == null || baseline == null || baseline <= 0) return 'unknown';
+  const ratio = avgReadBandItems / baseline;
+  if (ratio < READ_BAND_DANGER_RATIO) return 'danger';
+  if (ratio < READ_BAND_WATCH_RATIO) return 'watch';
   return 'healthy';
 }
 
@@ -221,12 +212,11 @@ export function readBandSectionStatus(level: ReadBandLevel): 'attention' | 'neut
   return level === 'danger' ? 'attention' : 'neutral';
 }
 
-/** 0..100 marker position on the gauge track. Clamped to the scale's bounds
- *  — see `READ_BAND_GAUGE_SCALE_MAX`'s doc comment for why the clamp is
- *  positional only. */
-export function readBandGaugePosition(value: number): number {
-  const clamped = Math.min(Math.max(value, 0), READ_BAND_GAUGE_SCALE_MAX);
-  return (clamped / READ_BAND_GAUGE_SCALE_MAX) * 100;
+/** 0..100 marker position on the gauge track (0 to twice the baseline).
+ *  Clamped for POSITION only — the exact value is always in the text. */
+export function readBandGaugePosition(value: number, baseline: number): number {
+  const clamped = Math.min(Math.max(value / (baseline * READ_BAND_GAUGE_SCALE_RATIO), 0), 1);
+  return clamped * 100;
 }
 
 export interface ReadBandCoverage {
@@ -274,8 +264,11 @@ export function buildReadBandLowCoverageHeadline(coverage: ReadBandCoverage): st
 export interface ReadBandGaugeView {
   level: ReadBandLevel;
   value: number | null;
-  /** 0..100, or `null` when there is no value to place on the track. */
+  /** 0..100, or `null` when there is no value or no baseline to place it against. */
   position: number | null;
+  /** The previous weeks' average, or null when there is none to compare against. */
+  baseline: number | null;
+  baselineDays: number;
   sampleSize: number;
   /** From the endpoint's own `WindowMeta.lowSample` (whole-window row
    *  count) — deliberately DISTINCT from `coverage.lowCoverage` below, the
@@ -298,29 +291,35 @@ export interface ReadBandGaugeView {
  *  (see `ReadBandGauge` in this file), so a screen-reader user gets the same clause a sighted user
  *  reads instead of the bare enum key spliced into a sentence. Mirrors Task 6's precedent that an
  *  aria-label and its adjacent visible text must render the same clause from one source of truth. */
-export function describeReadBandLevel(level: ReadBandLevel): string {
+export function describeReadBandLevel(level: ReadBandLevel, baseline: number | null, baselineDays: number): string {
+  const weeks = Math.round(baselineDays / 7);
+  const usual = baseline == null ? '' : `the average of ${baseline.toFixed(2)} over the previous ${weeks} weeks`;
   switch (level) {
     case 'danger':
-      return 'in the danger zone (below 2.5) — reviews are surfacing too few critical or major findings on average';
+      return `less than half of ${usual} — reviews are surfacing far fewer critical or major findings than normal`;
     case 'watch':
-      return 'below the healthy band (3.5-4) and approaching the danger zone (below 2.5)';
+      return `below ${usual}, but not yet under half of it`;
     case 'healthy':
-      return 'within or above the healthy band (3.5-4)';
+      return `in line with or above ${usual}`;
     case 'unknown':
-      return 'no findings data to classify';
+      return baseline == null || baseline <= 0
+        ? `not enough reviews in the previous ${weeks} weeks to compare against`
+        : 'no findings data to classify';
   }
 }
 
 export function buildReadBandGaugeView(quality: QualityStats): ReadBandGaugeView {
-  const { avgReadBandItems, readBandSampleSize, lowSample, sampleSize } = quality;
-  const level = classifyReadBandLevel(avgReadBandItems);
-  const position = avgReadBandItems == null ? null : readBandGaugePosition(avgReadBandItems);
+  const { avgReadBandItems, readBandSampleSize, lowSample, sampleSize, baselineAvgReadBandItems: baseline, baselineDays } = quality;
+  const level = classifyReadBandLevel(avgReadBandItems, baseline);
+  const position = avgReadBandItems == null || level === 'unknown' ? null : readBandGaugePosition(avgReadBandItems, baseline!);
   const valueText = avgReadBandItems == null ? 'n/a' : avgReadBandItems.toFixed(2);
-  const levelText = describeReadBandLevel(level);
+  const levelText = describeReadBandLevel(level, baseline, baselineDays);
   return {
     level,
     value: avgReadBandItems,
     position,
+    baseline,
+    baselineDays,
     sampleSize: readBandSampleSize,
     lowSample,
     // Backport reviews are left out of every figure on this card, so out of the denominator too.
@@ -784,12 +783,12 @@ function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
     <QualitySection title="Critical or major findings per review" status={readBandSectionStatus(view.level)}>
       {view.value == null ? (
         <p class="quality-section__empty">No findings data recorded in this window.</p>
-      ) : (
+      ) : view.position == null ? null : (
         <>
           <div
             class="read-band-gauge__track"
             role="img"
-            aria-label={`Average critical or major findings per review: ${view.value.toFixed(2)}, ${describeReadBandLevel(view.level)}`}
+            aria-label={`Average critical or major findings per review: ${view.value.toFixed(2)}, ${describeReadBandLevel(view.level, view.baseline, view.baselineDays)}`}
           >
             <div
               class="read-band-gauge__zone read-band-gauge__zone--danger"
@@ -799,15 +798,15 @@ function ReadBandGauge({ view }: { view: ReadBandGaugeView }) {
             <div
               class="read-band-gauge__zone read-band-gauge__zone--healthy"
               aria-hidden="true"
-              style={{ left: `${READ_BAND_HEALTHY_ZONE_START_PCT}%`, width: `${READ_BAND_HEALTHY_ZONE_END_PCT - READ_BAND_HEALTHY_ZONE_START_PCT}%` }}
+              style={{ left: `${READ_BAND_HEALTHY_ZONE_START_PCT}%`, width: `${100 - READ_BAND_HEALTHY_ZONE_START_PCT}%` }}
             />
+            <div class="read-band-gauge__baseline" aria-hidden="true" style={{ left: `${READ_BAND_BASELINE_PCT}%` }} />
             <div class={`read-band-gauge__marker read-band-gauge__marker--${view.level}`} aria-hidden="true" style={{ left: `${view.position}%` }} />
           </div>
           <div class="read-band-gauge__scale-labels" aria-hidden="true">
             <span class="read-band-gauge__scale-label" style={{ left: '0%' }}>0</span>
-            <span class="read-band-gauge__scale-label" style={{ left: `${READ_BAND_DANGER_ZONE_PCT}%` }}>2.5 danger</span>
-            <span class="read-band-gauge__scale-label" style={{ left: `${READ_BAND_HEALTHY_ZONE_START_PCT}%` }}>3.5</span>
-            <span class="read-band-gauge__scale-label" style={{ left: `${READ_BAND_HEALTHY_ZONE_END_PCT}%` }}>4 healthy</span>
+            <span class="read-band-gauge__scale-label" style={{ left: `${READ_BAND_DANGER_ZONE_PCT}%` }}>{(view.baseline! * READ_BAND_DANGER_RATIO).toFixed(2)} half</span>
+            <span class="read-band-gauge__scale-label" style={{ left: `${READ_BAND_BASELINE_PCT}%` }}>{view.baseline!.toFixed(2)} usual</span>
           </div>
         </>
       )}

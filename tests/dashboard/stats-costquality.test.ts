@@ -19,12 +19,9 @@ import {
   buildReadBandSplitView,
   buildCostPanelView,
   buildQualityPanelView,
-  READ_BAND_DANGER_MAX,
-  READ_BAND_HEALTHY_RANGE,
-  READ_BAND_GAUGE_SCALE_MAX,
   READ_BAND_DANGER_ZONE_PCT,
   READ_BAND_HEALTHY_ZONE_START_PCT,
-  READ_BAND_HEALTHY_ZONE_END_PCT,
+  READ_BAND_BASELINE_PCT,
   describeBackportExclusion,
 } from '../../src/dashboard/client/components/stats-costquality.tsx';
 import type { FetchState } from '../../src/dashboard/client/stats-store.ts';
@@ -85,6 +82,9 @@ function qualityFixture(overrides: Partial<QualityStats> = {}): QualityStats {
     population: 'prod',
     otherPopulationCount: 0,
     backportReviewsExcluded: 0,
+    baselineAvgReadBandItems: 1.0,
+    baselineSampleSize: 500,
+    baselineDays: 56,
     readBandSampleSize: 310,
     avgReadBandItems: 2.96,
     belowBandCount: 40,
@@ -308,77 +308,70 @@ describe('assessModelBreakdownCost', () => {
 // ---------------------------------------------------------------------------
 
 describe('classifyReadBandLevel', () => {
-  test('null -> unknown', () => {
-    expect(classifyReadBandLevel(null)).toBe('unknown');
+  test('no value, no baseline, or a zero baseline -> unknown', () => {
+    expect(classifyReadBandLevel(null, 1)).toBe('unknown');
+    expect(classifyReadBandLevel(0.5, null)).toBe('unknown');
+    expect(classifyReadBandLevel(0.5, 0)).toBe('unknown');
   });
-  test('below 2.5 -> danger', () => {
-    expect(classifyReadBandLevel(0)).toBe('danger');
-    expect(classifyReadBandLevel(2.49)).toBe('danger');
+  test('under half the baseline -> danger; exactly half is not', () => {
+    expect(classifyReadBandLevel(0.15, 0.8)).toBe('danger');
+    expect(classifyReadBandLevel(0.4, 0.8)).toBe('watch');
   });
-  test('exactly at the danger boundary (2.5) is NOT danger', () => {
-    expect(classifyReadBandLevel(READ_BAND_DANGER_MAX)).toBe('watch');
+  test('under 80% of the baseline -> watch; exactly 80% is healthy', () => {
+    expect(classifyReadBandLevel(0.63, 0.8)).toBe('watch');
+    expect(classifyReadBandLevel(0.8, 1)).toBe('healthy');
   });
-  test("today's live value (~2.96-3.0) classifies as watch, not healthy and not danger", () => {
-    expect(classifyReadBandLevel(2.96)).toBe('watch');
-    expect(classifyReadBandLevel(3.0)).toBe('watch');
+  test('above the baseline is healthy (no upper bound is flagged)', () => {
+    expect(classifyReadBandLevel(3, 0.8)).toBe('healthy');
   });
-  test('exactly at the healthy floor (3.5) is healthy', () => {
-    expect(classifyReadBandLevel(READ_BAND_HEALTHY_RANGE[0])).toBe('healthy');
-  });
-  test('above the named healthy ceiling is still healthy (no upper bound is flagged)', () => {
-    expect(classifyReadBandLevel(6)).toBe('healthy');
+  test('the same value reads differently against a different baseline', () => {
+    expect(classifyReadBandLevel(0.6, 0.7)).toBe('healthy');
+    expect(classifyReadBandLevel(0.6, 1.6)).toBe('danger');
+    expect(classifyReadBandLevel(0.6, 1.0)).toBe('watch');
   });
 });
 
-// Task 8 (C25): extracted so the gauge's aria-label and its visible summary
-// text render the SAME clause from one source, instead of the aria-label
-// splicing the bare enum key into a sentence ("classified as watch" reads as
-// nothing a screen reader should say). Printed at all four levels — this is
-// an enum, not a count, so "0/1/2" is the four reachable branches.
 describe('describeReadBandLevel', () => {
-  test('danger', () => {
-    expect(describeReadBandLevel('danger'))
-      .toBe('in the danger zone (below 2.5) — reviews are surfacing too few critical or major findings on average');
+  test('danger names the baseline and the period in plain words', () => {
+    expect(describeReadBandLevel('danger', 0.8, 56))
+      .toBe('less than half of the average of 0.80 over the previous 8 weeks — reviews are surfacing far fewer critical or major findings than normal');
   });
   test('watch', () => {
-    expect(describeReadBandLevel('watch'))
-      .toBe('below the healthy band (3.5-4) and approaching the danger zone (below 2.5)');
+    expect(describeReadBandLevel('watch', 0.8, 56)).toBe('below the average of 0.80 over the previous 8 weeks, but not yet under half of it');
   });
   test('healthy', () => {
-    expect(describeReadBandLevel('healthy')).toBe('within or above the healthy band (3.5-4)');
+    expect(describeReadBandLevel('healthy', 0.8, 56)).toBe('in line with or above the average of 0.80 over the previous 8 weeks');
   });
-  test('unknown', () => {
-    expect(describeReadBandLevel('unknown')).toBe('no findings data to classify');
+  test('unknown tells "no baseline" apart from "no data in the window"', () => {
+    expect(describeReadBandLevel('unknown', null, 56)).toBe('not enough reviews in the previous 8 weeks to compare against');
+    expect(describeReadBandLevel('unknown', 0.8, 56)).toBe('no findings data to classify');
   });
-  test('all four branches are textually distinct (guards against two levels collapsing to one clause)', () => {
-    const texts = (['danger', 'watch', 'healthy', 'unknown'] as const).map(describeReadBandLevel);
+  test('all four levels are textually distinct', () => {
+    const texts = (['danger', 'watch', 'healthy', 'unknown'] as const).map((l) => describeReadBandLevel(l, 0.8, 56));
     expect(new Set(texts).size).toBe(4);
   });
 });
 
 describe('readBandGaugePosition', () => {
-  test('0 -> 0%, scale max -> 100%', () => {
-    expect(readBandGaugePosition(0)).toBe(0);
-    expect(readBandGaugePosition(READ_BAND_GAUGE_SCALE_MAX)).toBe(100);
+  test('0 -> 0%, the baseline -> the baseline tick, twice the baseline -> 100%', () => {
+    expect(readBandGaugePosition(0, 0.8)).toBe(0);
+    expect(readBandGaugePosition(0.8, 0.8)).toBeCloseTo(READ_BAND_BASELINE_PCT, 10);
+    expect(readBandGaugePosition(1.6, 0.8)).toBe(100);
   });
-  test('the danger boundary lands exactly on the exported zone-width constant', () => {
-    expect(readBandGaugePosition(READ_BAND_DANGER_MAX)).toBeCloseTo(READ_BAND_DANGER_ZONE_PCT, 10);
+  test('half the baseline lands exactly on the danger zone edge', () => {
+    expect(readBandGaugePosition(0.4, 0.8)).toBeCloseTo(READ_BAND_DANGER_ZONE_PCT, 10);
   });
-  test('a value past the scale max clamps the POSITION to 100%, never exceeding the track', () => {
-    expect(readBandGaugePosition(999)).toBe(100);
-  });
-  test('a negative value clamps to 0%', () => {
-    expect(readBandGaugePosition(-5)).toBe(0);
+  test('values off the track clamp the POSITION only', () => {
+    expect(readBandGaugePosition(999, 0.8)).toBe(100);
+    expect(readBandGaugePosition(-5, 0.8)).toBe(0);
   });
 });
 
 describe('gauge zone geometry constants', () => {
-  test('danger zone starts at 0 and ends at 50% of a 0-5 scale', () => {
-    expect(READ_BAND_DANGER_ZONE_PCT).toBe(50);
-  });
-  test('healthy zone spans 70%-80% of a 0-5 scale', () => {
-    expect(READ_BAND_HEALTHY_ZONE_START_PCT).toBe(70);
-    expect(READ_BAND_HEALTHY_ZONE_END_PCT).toBe(80);
+  test('danger ends at 25%, healthy starts at 40%, the baseline tick sits at 50%', () => {
+    expect(READ_BAND_DANGER_ZONE_PCT).toBe(25);
+    expect(READ_BAND_HEALTHY_ZONE_START_PCT).toBe(40);
+    expect(READ_BAND_BASELINE_PCT).toBe(50);
   });
 });
 
@@ -390,15 +383,21 @@ describe('buildReadBandGaugeView', () => {
     expect(view.text).toContain('n/a');
   });
 
-  test("today's live reading (2.96, n=310) -> watch, positioned, sample size and lowSample both carried through", () => {
-    const view = buildReadBandGaugeView(qualityFixture({ avgReadBandItems: 2.96, readBandSampleSize: 310, lowSample: false }));
+  test('no baseline -> unknown, no position, and the text says why', () => {
+    const view = buildReadBandGaugeView(qualityFixture({ avgReadBandItems: 0.6, baselineAvgReadBandItems: null }));
+    expect(view.level).toBe('unknown');
+    expect(view.position).toBeNull();
+    expect(view.text).toContain('not enough reviews in the previous 8 weeks');
+  });
+
+  test('the code-freeze reading (0.63 against 0.80) -> watch, positioned, sample size carried through', () => {
+    const view = buildReadBandGaugeView(qualityFixture({ avgReadBandItems: 0.63, baselineAvgReadBandItems: 0.8, readBandSampleSize: 1054 }));
     expect(view.level).toBe('watch');
     expect(view.position).not.toBeNull();
-    expect(view.sampleSize).toBe(310);
-    expect(view.lowSample).toBe(false);
-    expect(view.text).toContain('2.96');
-    expect(view.text).toContain('n=310');
-    expect(view.text).toContain('approaching the danger zone');
+    expect(view.baseline).toBe(0.8);
+    expect(view.text).toContain('0.63');
+    expect(view.text).toContain('n=1054');
+    expect(view.text).toContain('0.80');
   });
 
   test('a small window sample carries lowSample=true from WindowMeta, not a re-derived threshold', () => {
@@ -406,13 +405,13 @@ describe('buildReadBandGaugeView', () => {
     expect(view.lowSample).toBe(true);
   });
 
-  test('a value in the danger zone reads as danger with the reason named in words', () => {
-    const view = buildReadBandGaugeView(qualityFixture({ avgReadBandItems: 1.2 }));
+  test('under half the baseline reads as danger with the reason in words', () => {
+    const view = buildReadBandGaugeView(qualityFixture({ avgReadBandItems: 0.3, baselineAvgReadBandItems: 0.8 }));
     expect(view.level).toBe('danger');
-    expect(view.text).toContain('danger zone');
+    expect(view.text).toContain('less than half');
   });
 
-  test('fix round 1 — carries coverage alongside the value, computed from readBandSampleSize/sampleSize', () => {
+  test('carries coverage alongside the value, computed from readBandSampleSize/sampleSize', () => {
     const view = buildReadBandGaugeView(qualityFixture({ readBandSampleSize: 76, sampleSize: 334 }));
     expect(view.coverage.rowsWithFindings).toBe(76);
     expect(view.coverage.totalRows).toBe(334);
@@ -420,21 +419,18 @@ describe('buildReadBandGaugeView', () => {
     expect(view.coverage.lowCoverage).toBe(true);
   });
 
-  test('fix round 1 — lowSample and coverage.lowCoverage are independent: today\'s live 30d reading is lowSample=false, lowCoverage=true', () => {
+  test('lowSample and coverage.lowCoverage are independent', () => {
     const view = buildReadBandGaugeView(qualityFixture({ lowSample: false, readBandSampleSize: 76, sampleSize: 334 }));
     expect(view.lowSample).toBe(false);
     expect(view.coverage.lowCoverage).toBe(true);
   });
 
-  // Task 8 (C25): the aria-label the component renders is built as
-  // `` `...${view.value}, ${describeReadBandLevel(view.level)}` `` — this
-  // proves the visible text's own level clause is the SAME string
-  // `describeReadBandLevel` produces, at all four levels, without rendering
-  // the component tree (which this file's own convention disallows).
-  test('the visible text\'s level clause is exactly what describeReadBandLevel(view.level) produces, at every level', () => {
-    for (const avg of [1.2, 2.96, 4.0, null]) {
+  // The aria-label is built from the same describeReadBandLevel call, so the
+  // visible text must contain exactly that clause at every level.
+  test("the visible text's level clause is exactly what describeReadBandLevel produces, at every level", () => {
+    for (const avg of [0.2, 0.7, 1.2, null]) {
       const view = buildReadBandGaugeView(qualityFixture({ avgReadBandItems: avg }));
-      expect(view.text).toContain(describeReadBandLevel(view.level));
+      expect(view.text).toContain(describeReadBandLevel(view.level, view.baseline, view.baselineDays));
     }
   });
 });

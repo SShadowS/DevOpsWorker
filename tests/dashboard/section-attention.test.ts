@@ -125,6 +125,8 @@ function qualityFixture(avgReadBandItems: number | null): QualityStats {
     avgReadBandItems,
     readBandSampleSize: 76,
     backportReviewsExcluded: 0,
+    baselineAvgReadBandItems: 5.0, // 2.0 is under half (danger), 3.0 is under 80% (watch)
+    baselineDays: 56,
     sampleSize: 334,
     lowSample: false,
   } as unknown as QualityStats;

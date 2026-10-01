@@ -12,6 +12,7 @@ import {
   MIN_RELIABLE_SAMPLE,
   readBandCount,
   isBackportReview,
+  computeReadBandBaseline,
   severityDistribution,
   verdictDistribution,
   computeCostPerReadBandItem,
@@ -58,6 +59,16 @@ describe('isBackportReview', () => {
   test('a full-path row, or a row from before routing existed, is not', () => {
     expect(isBackportReview('full:not a cherry-pick')).toBe(false);
     expect(isBackportReview(null)).toBe(false);
+  });
+});
+
+describe('computeReadBandBaseline', () => {
+  test('averages the critical or major counts of the earlier reviews', () => {
+    expect(computeReadBandBaseline([1, 0, 2, 1, 0, 1, 3, 0, 1, 1])).toEqual({ avg: 1, sampleSize: 10 });
+  });
+  test('fewer than MIN_RELIABLE_SAMPLE earlier reviews gives no baseline, but still reports the count', () => {
+    expect(computeReadBandBaseline([2, 2, 2])).toEqual({ avg: null, sampleSize: 3 });
+    expect(computeReadBandBaseline([])).toEqual({ avg: null, sampleSize: 0 });
   });
 });
 
