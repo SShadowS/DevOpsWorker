@@ -124,6 +124,7 @@ function qualityFixture(avgReadBandItems: number | null): QualityStats {
   return {
     avgReadBandItems,
     readBandSampleSize: 76,
+    backportReviewsExcluded: 0,
     sampleSize: 334,
     lowSample: false,
   } as unknown as QualityStats;

@@ -833,3 +833,10 @@ describe('describeBackportExclusion', () => {
     expect(describeBackportExclusion(1)).toContain('1 backport review ');
   });
 });
+
+describe('buildReadBandGaugeView coverage', () => {
+  test('backport reviews are left out of the coverage denominator too', () => {
+    const view = buildReadBandGaugeView(qualityFixture({ sampleSize: 1394, backportReviewsExcluded: 339, readBandSampleSize: 1054 }));
+    expect(view.coverage.totalRows).toBe(1055);
+  });
+});

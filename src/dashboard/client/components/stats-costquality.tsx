@@ -323,7 +323,8 @@ export function buildReadBandGaugeView(quality: QualityStats): ReadBandGaugeView
     position,
     sampleSize: readBandSampleSize,
     lowSample,
-    coverage: computeReadBandCoverage(readBandSampleSize, sampleSize),
+    // Backport reviews are left out of every figure on this card, so out of the denominator too.
+    coverage: computeReadBandCoverage(readBandSampleSize, sampleSize - quality.backportReviewsExcluded),
     text: `avg critical or major findings per review: ${valueText} — ${levelText} (n=${readBandSampleSize})`,
   };
 }
