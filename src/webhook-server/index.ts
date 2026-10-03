@@ -91,7 +91,7 @@ export function dedupScopeFor(
 export async function startWebhookServer(options: WebhookServerOptions): Promise<void> {
   const { port, webhookSecret } = options;
 
-  const { stateStore, actionStore, runnerStatus, webhookEventStore, registryStore } = await connectStores();
+  const { stateStore, runnerStatus, webhookEventStore, registryStore } = await connectStores();
 
   // Cleanup old events on startup and every hour
   webhookEventStore.cleanupOldEvents().catch?.(() => {});
@@ -191,9 +191,19 @@ export async function startWebhookServer(options: WebhookServerOptions): Promise
         }
 
         // Dedup — see `dedupScopeFor` for why the three triggers differ.
+        // Checked and queued in one step, so two webhooks for the same PR arriving
+        // together cannot both queue a review.
         const scope = dedupScopeFor(event);
-        const dupe = await webhookEventStore.hasMatchingAction(0, 'review-pr', scope.key, scope.value, scope.pendingOnly);
-        if (dupe) {
+        const queuedId = await webhookEventStore.queueUnlessMatching(
+          {
+            workItemId: 0,
+            type: 'review-pr',
+            feedback: buildReviewPrActionFeedback(event, repo.key),
+            createdAt: new Date().toISOString(),
+          },
+          scope.key, scope.value, scope.pendingOnly,
+        );
+        if (queuedId === null) {
           const why = scope.key === 'commentKey'
             ? `comment ${scope.value} on PR #${event.pr.id} already triggered a review`
             : scope.pendingOnly
@@ -206,17 +216,10 @@ export async function startWebhookServer(options: WebhookServerOptions): Promise
           );
         }
 
-        // Queue the review action
         const trigger = event.commentKey
           ? `/review comment ${event.commentKey}`
           : event.publishedFromDraft ? 'draft published' : 'PR creation';
-        log(`Queuing review for PR #${event.pr.id} in ${event.pr.repositoryName} (trigger: ${trigger})`);
-        await actionStore.write({
-          workItemId: 0,
-          type: 'review-pr',
-          feedback: buildReviewPrActionFeedback(event, repo.key),
-          createdAt: new Date().toISOString(),
-        });
+        log(`Queued review for PR #${event.pr.id} in ${event.pr.repositoryName} (trigger: ${trigger})`);
 
         return Response.json({ ok: true, queued: true, prId: event.pr.id }, { status: 202 });
       }
