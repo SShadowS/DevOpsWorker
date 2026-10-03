@@ -1,5 +1,8 @@
 import { describe, test, expect } from 'bun:test';
-import { buildDockerArgs } from '../../src/sdk/docker.ts';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildDockerArgs, readContainerMemoryPeakMb } from '../../src/sdk/docker.ts';
 import type { ContainerConfig } from '../../src/sdk/docker.ts';
 import type { RepoConfig } from '../../src/config/repo-config.ts';
 
@@ -72,6 +75,40 @@ describe('buildDockerArgs', () => {
     }
   });
 
+  test('caps container memory when DO_CONTAINER_MEMORY is set', () => {
+    const prev = process.env['DO_CONTAINER_MEMORY'];
+    process.env['DO_CONTAINER_MEMORY'] = '2g';
+    try {
+      const config: ContainerConfig = {
+        workItemId: 3, repoKey: 'test', repo: testRepo, command: 'run',
+        env: {}, stateVolume: 'state', workspaceVolume: 'wi-3', imageName: 'devopsworker:latest',
+      };
+      const args = buildDockerArgs(config);
+      const memIdx = args.indexOf('--memory');
+      expect(memIdx).toBeGreaterThan(-1);
+      expect(args[memIdx + 1]).toBe('2g');
+      // A docker run option: must come before the image name, or docker passes it to the container.
+      expect(memIdx).toBeLessThan(args.indexOf('devopsworker:latest'));
+    } finally {
+      if (prev === undefined) delete process.env['DO_CONTAINER_MEMORY'];
+      else process.env['DO_CONTAINER_MEMORY'] = prev;
+    }
+  });
+
+  test('sets no memory cap when DO_CONTAINER_MEMORY is unset', () => {
+    const prev = process.env['DO_CONTAINER_MEMORY'];
+    delete process.env['DO_CONTAINER_MEMORY'];
+    try {
+      const config: ContainerConfig = {
+        workItemId: 4, repoKey: 'test', repo: testRepo, command: 'run',
+        env: {}, stateVolume: 'state', workspaceVolume: 'wi-4', imageName: 'devopsworker:latest',
+      };
+      expect(buildDockerArgs(config)).not.toContain('--memory');
+    } finally {
+      if (prev !== undefined) process.env['DO_CONTAINER_MEMORY'] = prev;
+    }
+  });
+
   test('uses continue command for checkpoint resume', () => {
     const config: ContainerConfig = {
       workItemId: 789,
@@ -112,5 +149,25 @@ describe('buildDockerArgs', () => {
     expect(args[imageIdx + 1]).toBe('reflect');
     expect(args[imageIdx + 2]).toBe('--cycle-date');
     expect(args[imageIdx + 3]).toBe('2026-08-15');
+  });
+});
+
+describe('readContainerMemoryPeakMb', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mem-peak-'));
+
+  test('reads the cgroup peak in bytes and returns whole MiB', () => {
+    const file = join(dir, 'memory.peak');
+    writeFileSync(file, '508559360\n'); // 485 MiB
+    expect(readContainerMemoryPeakMb(file)).toBe(485);
+  });
+
+  test('returns null when the file does not exist (not in a cgroup v2 container)', () => {
+    expect(readContainerMemoryPeakMb(join(dir, 'missing'))).toBeNull();
+  });
+
+  test('returns null when the file holds something other than a number', () => {
+    const file = join(dir, 'garbage');
+    writeFileSync(file, 'max\n');
+    expect(readContainerMemoryPeakMb(file)).toBeNull();
   });
 });

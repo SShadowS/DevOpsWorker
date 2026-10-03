@@ -14,6 +14,7 @@ import { connectStores } from '../db/connect-stores.ts';
 import type { AppliedLevers } from '../pipeline/pr-review-store.interface.ts';
 import { notifyPipelineError } from '../sdk/discord-notify.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
+import { readContainerMemoryPeakMb } from '../sdk/docker.ts';
 import type { PipelineConfig } from '../types/pipeline.types.ts';
 import type { AgentResult } from '../types/agent.types.ts';
 import {
@@ -1718,6 +1719,7 @@ export async function reviewPR(args: string[]): Promise<void> {
           // identified the port, so there is no disagreement to record.
           observedCherryPick: 'observedCherryPick' in result.output ? (result.output.observedCherryPick ?? null) : null,
           observedCherryPickSource: 'observedCherryPickSource' in result.output ? (result.output.observedCherryPickSource ?? null) : null,
+          memoryPeakMb: readContainerMemoryPeakMb(),
         });
         console.log(`[review-pr] Saved review to database`);
       } catch (saveErr) {
@@ -1774,6 +1776,7 @@ export async function reviewPR(args: string[]): Promise<void> {
         // Null, not false — "we never found out" is not "it is not a port".
         observedCherryPick: null,
         observedCherryPickSource: null,
+        memoryPeakMb: readContainerMemoryPeakMb(),
       });
     }
 

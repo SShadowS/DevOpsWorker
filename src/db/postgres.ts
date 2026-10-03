@@ -183,6 +183,11 @@ ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS observed_cherry_pick BOOLEAN;
 -- source PR in a parseable form. So this cannot drive the cheap path on its own —
 -- only the router's pre-flight detection can.
 ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS observed_cherry_pick_source INTEGER;
+-- Highest memory the review container used, in MiB, read from its cgroup just
+-- before the row is saved. Used to size the per-container memory cap
+-- (DO_CONTAINER_MEMORY). Null outside a container. A review killed for running
+-- out of memory writes no row at all; the watcher reports that one instead.
+ALTER TABLE pr_reviews ADD COLUMN IF NOT EXISTS memory_peak_mb INTEGER;
 
 CREATE TABLE IF NOT EXISTS finding_outcomes (
   pr_id           INTEGER NOT NULL,

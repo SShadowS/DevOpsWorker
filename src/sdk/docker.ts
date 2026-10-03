@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { RepoConfig } from '../config/repo-config.ts';
 
 export interface ContainerConfig {
@@ -44,6 +45,12 @@ export function buildDockerArgs(config: ContainerConfig): string[] {
     args.push('-v', `${hostPrivateDir}:/app/private:ro`);
     args.push('-e', 'PRIVATE_DIR=/app/private');
   }
+
+  // Memory cap per container (e.g. "2g"). On a small host one runaway container
+  // would otherwise make the kernel kill processes in other containers; with a
+  // cap only the runaway is killed. Unset = no cap, the default.
+  const memoryLimit = process.env['DO_CONTAINER_MEMORY'];
+  if (memoryLimit) args.push('--memory', memoryLimit);
 
   // Env vars
   for (const [key, value] of Object.entries(config.env)) {
@@ -167,4 +174,19 @@ export function containerDatabaseUrl(hostUrl: string, service = 'postgres'): str
     /@(localhost|127\.0\.0\.1|host\.docker\.internal)(:\d+)?/,
     (_m, _h, port) => `@${service}${port ?? ''}`,
   );
+}
+
+/**
+ * Peak memory this container has used so far, in whole MiB, read from inside the
+ * container. cgroup v2 keeps the high-water mark in `memory.peak`. Null when not
+ * running in such a container (a local run, an older kernel) or the file is
+ * unreadable. Recorded per review to size `DO_CONTAINER_MEMORY` from real data.
+ */
+export function readContainerMemoryPeakMb(path = '/sys/fs/cgroup/memory.peak'): number | null {
+  try {
+    const bytes = Number(readFileSync(path, 'utf8').trim());
+    return Number.isFinite(bytes) ? Math.round(bytes / (1024 * 1024)) : null;
+  } catch {
+    return null;
+  }
 }

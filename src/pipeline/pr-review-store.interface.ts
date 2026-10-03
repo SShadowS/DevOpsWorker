@@ -122,6 +122,10 @@ export interface PRReviewRow {
    *  without naming which PR it came from, which is why this cannot drive the
    *  cheap review path. */
   observedCherryPickSource: number | null;
+  /** Highest memory the review container used, in MiB. Null outside a container
+   *  and for rows written before this was captured. Write-only: recorded to size
+   *  the per-container memory cap, not read back by the app. */
+  memoryPeakMb?: number | null;
 }
 
 export interface IPRReviewStore {

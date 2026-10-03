@@ -6,7 +6,7 @@ export class PgPRReviewStore implements IPRReviewStore {
 
   async save(row: Omit<PRReviewRow, 'id'>): Promise<number> {
     const [result] = await this.sql`
-      INSERT INTO pr_reviews (pr_id, repo_key, source_branch, target_branch, title, recommendation, findings, findings_count, comment_id, cost_usd, duration_ms, turns, tool_calls, session_id, error, review_body, action_id, review_run_id, sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, reviewed_commit_sha, base_commit_sha, applied_levers, image_sha, is_test, observed_cherry_pick, observed_cherry_pick_source)
+      INSERT INTO pr_reviews (pr_id, repo_key, source_branch, target_branch, title, recommendation, findings, findings_count, comment_id, cost_usd, duration_ms, turns, tool_calls, session_id, error, review_body, action_id, review_run_id, sub_agents, model_usage, findings_list, inline_threads, review_path, tree_source, reviewed_commit_sha, base_commit_sha, applied_levers, image_sha, is_test, observed_cherry_pick, observed_cherry_pick_source, memory_peak_mb)
       VALUES (
         ${row.prId}, ${row.repoKey}, ${row.sourceBranch}, ${row.targetBranch},
         ${row.title}, ${row.recommendation},
@@ -27,7 +27,8 @@ export class PgPRReviewStore implements IPRReviewStore {
         ${row.imageSha ?? null},
         ${row.isTest},
         ${row.observedCherryPick ?? null},
-        ${row.observedCherryPickSource ?? null}
+        ${row.observedCherryPickSource ?? null},
+        ${row.memoryPeakMb ?? null}
       )
       RETURNING id
     `;
