@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadConfig, readAllSettingsSafely } from './config.ts';
 import type { ISettingsStore } from '../config/settings-store.interface.ts';
 import { runPRReview, detectCherryPick, isHistoryBlind } from '../agents/pr-reviewer/config.ts';
-import type { PRFinding, PRReviewResult, PrSubAgent } from '../agents/pr-reviewer/schema.ts';
+import { PR_SUB_AGENTS, type PRFinding, type PRReviewResult, type PrSubAgent } from '../agents/pr-reviewer/schema.ts';
 import { runBackportReview } from '../agents/cherry-pick-reviewer/config.ts';
 import type { BackportReview } from '../agents/cherry-pick-reviewer/schema.ts';
 import { findRepoByRepositoryId } from '../config/repos.ts';
@@ -15,7 +15,7 @@ import type { AppliedLevers } from '../pipeline/pr-review-store.interface.ts';
 import { notifyPipelineError } from '../sdk/discord-notify.ts';
 import { PipelineLogger } from '../sdk/pipeline-logger.ts';
 import { readContainerMemoryPeakMb } from '../sdk/docker.ts';
-import type { PipelineConfig } from '../types/pipeline.types.ts';
+import type { PipelineConfig, SubAgentUsage } from '../types/pipeline.types.ts';
 import type { AgentResult } from '../types/agent.types.ts';
 import {
   fetchReviewThreadsRaw,
@@ -42,6 +42,39 @@ import { reconcileFindings } from '../sdk/ado/reconcile-findings.ts';
 import { extractKey, findingKey, FINDING_MARKER_RE, markerFor } from '../sdk/ado/finding-key.ts';
 import { fetchFileAtCommit } from '../sdk/ado/items.ts';
 import { buildSuggestionBlock, suggestionEndLine, suggestionApplies } from '../sdk/ado/suggestion.ts';
+
+/** Hidden marker before the coverage line, so a rerun replaces it instead of adding a second. */
+export const COVERAGE_MARKER = '<!-- review-coverage -->';
+
+/**
+ * One small line for the bottom of the summary comment: how many of the seven
+ * specialists actually ran, read from the run's telemetry rather than from what the
+ * reviewer says about itself. At low effort the reviewer could skip all of them and
+ * still approve; a reader who sees "none of 7 ran" on a large change knows to ask
+ * for a fresh review instead of trusting the approval.
+ */
+export function reviewCoverageLine(
+  path: 'full' | 'sanity',
+  subAgents: Record<string, SubAgentUsage> | undefined,
+): string {
+  if (path === 'sanity') {
+    return '<sub>Cherry-pick check: compared with the original PR; the specialist review is not repeated.</sub>';
+  }
+  const ranNames = new Set(Object.values(subAgents ?? {}).map((s) => s.name));
+  const ran = PR_SUB_AGENTS.filter((a) => ranNames.has(a));
+  const total = PR_SUB_AGENTS.length;
+  if (ran.length === 0) return `<sub>Specialists: none of ${total} ran; the reviewer checked the change on its own.</sub>`;
+  if (ran.length === total) return `<sub>Specialists: ${total} of ${total} ran.</sub>`;
+  const notRun = PR_SUB_AGENTS.filter((a) => !ranNames.has(a));
+  return `<sub>Specialists: ${ran.length} of ${total} ran. Not run: ${notRun.join(', ')}.</sub>`;
+}
+
+/** `content` with the coverage line at the bottom, replacing any earlier one. */
+export function withCoverageLine(content: string, line: string): string {
+  const at = content.indexOf(COVERAGE_MARKER);
+  const body = (at === -1 ? content : content.slice(0, at)).trimEnd();
+  return `${body}\n\n${COVERAGE_MARKER}\n${line}`;
+}
 
 export function makeReviewRunId(prId: number): string {
   return `pr-${prId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1663,17 +1696,30 @@ export async function reviewPR(args: string[]): Promise<void> {
     //
     // Never fatal: the review is already done and saved-or-about-to-be, and
     // failing it over a thread-status call would throw away the work.
-    if (!noPost && isApprovedRecommendation(result.output?.recommendation)) {
+    //
+    // The same summary thread also gets the coverage line (reviewCoverageLine) at its
+    // bottom, from telemetry: what actually ran, not what the reviewer says ran.
+    if (!noPost) {
+      const approved = isApprovedRecommendation(result.output?.recommendation);
+      const coverage = reviewCoverageLine(route.path === 'sanity' ? 'sanity' : 'full', result.subAgents);
+      console.log(`[review-pr] coverage: ${coverage.replace(/<\/?sub>/g, '')}`);
       try {
         const summary = findBotSummaryThread(await fetchReviewThreadsRaw(prId, config));
-        if (summary) {
-          await closePRThread(prId, summary.id, config);
-          console.log(`[review-pr] approved — closed summary thread ${summary.id}`);
+        if (!summary) {
+          console.log('[review-pr] no summary thread found — coverage line not added' + (approved ? ', nothing to close' : ''));
         } else {
-          console.log('[review-pr] approved, but no summary thread found to close');
+          try {
+            await updateThreadComment(prId, summary.id, summary.firstCommentId, withCoverageLine(summary.rawContent, coverage), config);
+          } catch (err) {
+            console.warn(`[review-pr] could not add the coverage line: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          if (approved) {
+            await closePRThread(prId, summary.id, config);
+            console.log(`[review-pr] approved — closed summary thread ${summary.id}`);
+          }
         }
       } catch (err) {
-        console.warn(`[review-pr] could not close the summary thread: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[review-pr] could not update the summary thread: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
