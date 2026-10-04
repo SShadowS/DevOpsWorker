@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { IUserStore } from './user-store.interface.ts';
 import type { ISessionStore } from './session-store.interface.ts';
 import type { IAuthEventStore, AuthEventKind } from './auth-event-store.interface.ts';
@@ -13,6 +14,52 @@ export interface AuthDeps {
   rateLimiter: LoginRateLimiter;
   secureCookies: boolean;
   authEventStore: IAuthEventStore;
+  /**
+   * Shared secret between the edge proxy and this server (`EDGE_AUTH_SECRET`). When
+   * set, a request carrying it in `X-Edge-Secret` is trusted for the signed-in email
+   * the proxy puts in `X-Auth-Request-Email`. Unset = the headers are never trusted.
+   */
+  edgeAuthSecret?: string;
+}
+
+/** Constant-time string compare, so the secret cannot be guessed one byte at a time. */
+function secretMatches(given: string | null, expected: string): boolean {
+  if (!given) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * The person the edge proxy signed in, as a dashboard user — created on first visit.
+ *
+ * The edge (Caddy + oauth2-proxy) signs people in with the organisation's identity
+ * provider and passes their email on. Anyone it lets through may look at the dashboard,
+ * so an unknown email gets an `operator` account with no local password; an admin
+ * raises it to admin in the users screen. An existing account keeps its role, and a
+ * disabled one stays refused.
+ *
+ * The email header alone proves nothing: any container on the same Docker network can
+ * reach this server and set it. Only the edge knows the secret, which is what makes
+ * the email trustworthy. Fail closed: any doubt returns null.
+ */
+async function edgeUser(req: Request, deps: AuthDeps): Promise<AuthUser | null> {
+  if (!deps.edgeAuthSecret || !secretMatches(req.headers.get('x-edge-secret'), deps.edgeAuthSecret)) return null;
+  const email = req.headers.get('x-auth-request-email')?.trim().toLowerCase();
+  if (!email || email.length > 254 || !/^[^@\s]+@[^@\s]+$/.test(email)) return null;
+
+  let user: AuthUser | null = await deps.userStore.findByEmail(email);
+  if (!user) {
+    try {
+      user = await deps.userStore.create({ email, displayName: email, role: 'operator', passwordHash: null });
+      console.log(`[auth] created operator account for ${email} on first sign-in`);
+    } catch {
+      // Two first requests at once: the other one created it.
+      user = await deps.userStore.findByEmail(email);
+    }
+  }
+  if (!user || user.disabled) return null;
+  return { id: user.id, email: user.email, displayName: user.displayName, role: user.role, disabled: user.disabled };
 }
 
 /** Best-effort: a logging failure must never stop someone logging in or out,
@@ -30,12 +77,13 @@ function userJson(user: AuthUser): { email: string; displayName: string; role: s
   return { email: user.email, displayName: user.displayName, role: user.role };
 }
 
-/** Session cookie → user, or null. Never throws (fail closed → null). */
+/** Session cookie → user; else the edge-signed-in user (see edgeUser); else null.
+ *  Never throws (fail closed → null). A local login wins over the edge identity. */
 export async function authenticate(req: Request, deps: AuthDeps): Promise<AuthUser | null> {
   try {
     const token = parseCookies(req.headers.get('cookie'))[SESSION_COOKIE];
-    if (!token) return null;
-    return await resolveSession(deps.userStore, deps.sessionStore, token);
+    const fromSession = token ? await resolveSession(deps.userStore, deps.sessionStore, token) : null;
+    return fromSession ?? await edgeUser(req, deps);
   } catch {
     return null;
   }

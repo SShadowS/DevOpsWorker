@@ -116,13 +116,21 @@ export function startDashboard(options: DashboardOptions): DashboardHandle {
     console.warn(`[dashboard] Warning: failed to refresh repo/companion registry from database: ${err instanceof Error ? err.message : err}`);
   });
 
+  // EDGE_AUTH_SECRET: set only where an edge proxy signs people in and passes their
+  // email on (see edgeUser in src/auth/http.ts). A short value is ignored, not trusted.
+  const edgeSecret = process.env['EDGE_AUTH_SECRET'] ?? '';
+  if (edgeSecret && edgeSecret.length < 16) {
+    console.warn('[dashboard] EDGE_AUTH_SECRET is shorter than 16 characters — ignoring it; edge sign-in is off');
+  }
   const authDeps: AuthDeps = {
     userStore: options.userStore,
     sessionStore: options.sessionStore,
     rateLimiter: new LoginRateLimiter(),
     secureCookies: process.env['DASHBOARD_SECURE_COOKIES'] === '1',
     authEventStore: options.authEventStore,
+    edgeAuthSecret: edgeSecret.length >= 16 ? edgeSecret : undefined,
   };
+  if (authDeps.edgeAuthSecret) console.log('[dashboard] edge sign-in on: signed-in users get an operator account on first visit');
 
   // See resolveClientIp() in src/auth/http.ts for why this is off unless a
   // deployment explicitly says its only path in is a proxy that sets
