@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKMessage, SDKRateLimitInfo, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { PipelineLogger } from './pipeline-logger.ts';
 import type { StageTokenUsage, StageModelUsage, SubAgentUsage } from '../types/pipeline.types.ts';
 
@@ -178,11 +178,12 @@ export async function consumeAgentStream(
       }
     }
 
-    // Detect rate limit events (Claude MAX subscription or API quota).
-    // Cast needed: SDK types may not include 'rate_limit_event' in the message type union.
-    if ((message as any).type === 'rate_limit_event') {
+    // Detect rate limit events (claude.ai subscription plans). Log what the event says:
+    // the SDK sends one at the start of most plan sessions with status=allowed, so
+    // "an event arrived" alone cannot tell a plan near or over its limit from a normal run.
+    if (message.type === 'rate_limit_event') {
       rateLimitHit = true;
-      logger?.log('RATE LIMIT EVENT detected');
+      logger?.log(`RATE LIMIT EVENT: ${describeRateLimit(message.rate_limit_info)}`);
     }
 
     // --- Real-time progress: assistant messages (new turn + tool calls) ---
@@ -469,4 +470,15 @@ export function parseAgentOutput<T extends z.ZodType>(
   }
   logger?.log(`Zod parse FAILED: ${JSON.stringify(parsed.error.issues.slice(0, 5))}`);
   return { status: 'invalid', error: parsed.error };
+}
+
+/** One line for the log: status, which limit, how much is used, when it resets. */
+function describeRateLimit(info: SDKRateLimitInfo | undefined): string {
+  if (!info) return 'no details';
+  const parts = [`status=${info.status}`];
+  if (info.rateLimitType) parts.push(`limit=${info.rateLimitType}`);
+  if (typeof info.utilization === 'number') parts.push(`used=${Math.round(info.utilization * 100)}%`);
+  if (typeof info.resetsAt === 'number') parts.push(`resets=${new Date(info.resetsAt * 1000).toISOString()}`);
+  if (info.isUsingOverage) parts.push('using-overage');
+  return parts.join(' ');
 }

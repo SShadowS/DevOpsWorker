@@ -209,6 +209,38 @@ describe('consumeAgentStream', () => {
     expect(result.rateLimitHit).toBe(true);
   });
 
+  test('logs what the rate_limit_event says, not only that one arrived', async () => {
+    const logger = fakeLogger();
+    const stream = asStream(fakeMessages(
+      initMessage(),
+      {
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'allowed_warning', rateLimitType: 'seven_day_opus',
+          utilization: 0.93, resetsAt: Date.UTC(2026, 9, 6, 12, 0) / 1000,
+        },
+      },
+      resultSuccess(),
+    ));
+
+    await consumeAgentStream(stream, { agentName: 'test-agent', logger: asLogger(logger) });
+
+    const lines = (logger.log.mock.calls as unknown as unknown[][]).map(c => String(c[0])).filter(l => l.startsWith('RATE LIMIT'));
+    expect(lines).toEqual([
+      'RATE LIMIT EVENT: status=allowed_warning limit=seven_day_opus used=93% resets=2026-10-06T12:00:00.000Z',
+    ]);
+  });
+
+  test('a rate_limit_event without details still logs its arrival', async () => {
+    const logger = fakeLogger();
+    const stream = asStream(fakeMessages(initMessage(), { type: 'rate_limit_event' }, resultSuccess()));
+
+    await consumeAgentStream(stream, { agentName: 'test-agent', logger: asLogger(logger) });
+
+    const lines = (logger.log.mock.calls as unknown as unknown[][]).map(c => String(c[0])).filter(l => l.startsWith('RATE LIMIT'));
+    expect(lines).toEqual(['RATE LIMIT EVENT: no details']);
+  });
+
   test('does not flag rate limit when no rate_limit_event message occurs', async () => {
     const stream = asStream(fakeMessages(initMessage(), resultSuccess()));
     const result = await consumeAgentStream(stream, { agentName: 'test-agent' });
