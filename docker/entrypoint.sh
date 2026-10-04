@@ -66,25 +66,8 @@ if [ "${COMMAND}" = "reflect" ]; then
   exec bun run src/cli/index.ts "${COMMAND}" "$@"
 fi
 
-# --- Retry helper for transient network issues ---
-MAX_RETRIES=5
-RETRY_DELAY=15
-
-retry_git() {
-  local attempt
-  for attempt in $(seq 1 "${MAX_RETRIES}"); do
-    if "$@"; then
-      return 0
-    fi
-    if [ "${attempt}" -lt "${MAX_RETRIES}" ]; then
-      echo "Git operation failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${RETRY_DELAY}s..."
-      sleep "${RETRY_DELAY}"
-      RETRY_DELAY=$((RETRY_DELAY * 2))
-    fi
-  done
-  echo "Git operation failed after ${MAX_RETRIES} attempts"
-  return 1
-}
+# --- Git helpers: retry_git, and cache_companion for the shared companion cache ---
+. /companion-cache.sh
 
 # --- Resolve workspace layout from config ---
 SESSION_ROOT="/workspace/session"
@@ -190,28 +173,11 @@ if [ -n "${COMPANIONS}" ]; then
     [ -L "${SESSION_DIR}" ] && continue
     [ -d "${SESSION_DIR}/.git" ] && continue
 
-    # Cache: clone or pull
-    if [ ! -d "${CACHE_DIR}/.git" ]; then
-      echo "Cloning companion ${COMP_NAME} (branch: ${COMP_BRANCH})..."
-      mkdir -p "/state/repos"
-      retry_git git clone --depth 1 --single-branch --branch "${COMP_BRANCH}" "${COMP_URL}" "${CACHE_DIR}" || {
-        echo "WARNING: Failed to clone ${COMP_NAME} — skipping"
-        continue
-      }
-    else
-      echo "Refreshing companion ${COMP_NAME}..."
-      cd "${CACHE_DIR}"
-      git pull --ff-only || {
-        echo "WARNING: pull failed for ${COMP_NAME}, re-cloning..."
-        cd /app
-        rm -rf "${CACHE_DIR}"
-        retry_git git clone --depth 1 --single-branch --branch "${COMP_BRANCH}" "${COMP_URL}" "${CACHE_DIR}" || {
-          echo "WARNING: Failed to re-clone ${COMP_NAME} — skipping"
-          continue
-        }
-      }
-      cd /app
-    fi
+    # Cache: clone or pull, under a per-companion lock (see companion-cache.sh)
+    cache_companion "${COMP_NAME}" "${COMP_URL}" "${COMP_BRANCH}" /state/repos || {
+      echo "WARNING: Failed to clone ${COMP_NAME} — skipping"
+      continue
+    }
 
     # Stage into the session workspace.
     # symlinkOnly companions (huge + LSP-covered as a dependency, e.g. the BC code-
@@ -225,7 +191,8 @@ if [ -n "${COMPANIONS}" ]; then
       ln -sf "${CACHE_DIR}" "${SESSION_DIR}"
     else
       echo "Local clone for companion ${COMP_NAME} (real, searchable dir)..."
-      git clone --local "${CACHE_DIR}" "${SESSION_DIR}"
+      # Shared lock: another container may be pulling this cache right now.
+      flock -s "/state/repos/.${COMP_NAME}.lock" git clone --local "${CACHE_DIR}" "${SESSION_DIR}"
     fi
   done
 fi

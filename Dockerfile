@@ -104,10 +104,11 @@ COPY docker/claude-settings.json /root/.claude/settings.json
 
 # Copy entrypoint and fetch scripts (sed strips Windows CRLF line endings)
 COPY docker/entrypoint.sh /entrypoint.sh
+COPY docker/companion-cache.sh /companion-cache.sh
 COPY docker/fetch-al-extension.sh /fetch-al-extension.sh
 COPY docker/fetch-al-lsp-plugin.sh /fetch-al-lsp-plugin.sh
 COPY docker/fetch-al-symbols.sh /fetch-al-symbols.sh
-RUN sed -i 's/\r$//' /entrypoint.sh /fetch-al-extension.sh /fetch-al-lsp-plugin.sh /fetch-al-symbols.sh \
+RUN sed -i 's/\r$//' /entrypoint.sh /companion-cache.sh /fetch-al-extension.sh /fetch-al-lsp-plugin.sh /fetch-al-symbols.sh \
     && chmod +x /entrypoint.sh /fetch-al-extension.sh /fetch-al-lsp-plugin.sh /fetch-al-symbols.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
