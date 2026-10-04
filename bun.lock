@@ -5,20 +5,20 @@
     "": {
       "name": "devopsworker",
       "dependencies": {
-        "@anthropic-ai/claude-agent-sdk": "latest",
-        "@anthropic-ai/sdk": "latest",
-        "@preact/signals": "latest",
-        "@sshadows/tree-sitter-al": "latest",
-        "@typesafe-ai/sdk": "latest",
-        "postgres": "latest",
-        "preact": "latest",
-        "web-tree-sitter": "latest",
-        "zod": "latest",
+        "@anthropic-ai/claude-agent-sdk": "^0.3.284",
+        "@anthropic-ai/sdk": "^0.129.0",
+        "@preact/signals": "^2.11.2",
+        "@sshadows/tree-sitter-al": "^4.4.1",
+        "@typesafe-ai/sdk": "^0.6.0",
+        "postgres": "^3.4.9",
+        "preact": "^11.0.0",
+        "web-tree-sitter": "^0.27.0",
+        "zod": "^4.6.5",
       },
       "devDependencies": {
-        "@modelcontextprotocol/sdk": "latest",
-        "@types/bun": "latest",
-        "typescript": "latest",
+        "@modelcontextprotocol/sdk": "^1.31.0",
+        "@types/bun": "^1.4.2",
+        "typescript": "^7.0.2",
       },
     },
   },
@@ -243,7 +243,7 @@
 
     "postgres": ["postgres@3.4.9", "", {}, "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="],
 
-    "preact": ["preact@10.29.8", "", { "peerDependencies": { "preact-render-to-string": ">=5" }, "optionalPeers": ["preact-render-to-string"] }, "sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q=="],
+    "preact": ["preact@11.0.0", "", { "peerDependencies": { "preact-render-to-string": ">=6.7.0" }, "optionalPeers": ["preact-render-to-string"] }, "sha512-LRTLKuSe6VYPhvBDjwFaX+nuZnpsw6IN2GSboisAvhGsncylBmrbDCERhgKDn6yP2mAwbGvsB5OVyTe33M8gBg=="],
 
     "proxy-addr": ["proxy-addr@2.0.7", "", { "dependencies": { "forwarded": "0.2.0", "ipaddr.js": "1.9.1" } }, "sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg=="],
 
