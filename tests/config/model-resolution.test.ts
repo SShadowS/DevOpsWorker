@@ -147,11 +147,19 @@ describe('DEFAULT_EFFORT reaches models.effort', () => {
   test('the pr-reviewer runs at its own pin (low) whatever DEFAULT_EFFORT says', () => {
     // Low is the chosen cost trade-off; PR_REVIEW_EFFORT=medium buys reliable
     // sub-agent dispatch (see the comment on the pin in pr-reviewer/config.ts).
-    const cfg = createPRReviewConfig(loadConfig('.'), {
-      prId: 1, repoKey: 'r', repoUrl: 'u', repositoryId: 'g', project: 'p',
-      sourceBranch: 's', targetBranch: 't', treeSource: 'merge-preview',
-    });
-    expect(cfg.effort).toBe('low');
+    // Cleared here: Bun loads the workspace .env into the test process, and a
+    // deployment that sets PR_REVIEW_EFFORT would otherwise fail this test.
+    const saved = process.env['PR_REVIEW_EFFORT'];
+    delete process.env['PR_REVIEW_EFFORT'];
+    try {
+      const cfg = createPRReviewConfig(loadConfig('.'), {
+        prId: 1, repoKey: 'r', repoUrl: 'u', repositoryId: 'g', project: 'p',
+        sourceBranch: 's', targetBranch: 't', treeSource: 'merge-preview',
+      });
+      expect(cfg.effort).toBe('low');
+    } finally {
+      if (saved !== undefined) process.env['PR_REVIEW_EFFORT'] = saved;
+    }
   });
 
   test('PR_REVIEW_EFFORT overrides the pr-reviewer pin; a typo leaves the pin', () => {
