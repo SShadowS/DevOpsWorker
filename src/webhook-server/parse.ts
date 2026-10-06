@@ -254,3 +254,14 @@ export function parseCommentKey(
   if (threadId <= 0 || commentId <= 0) return null;
   return { threadId, commentId };
 }
+
+/**
+ * The prefix from `prefixes` that the PR's source branch starts with, if any.
+ * `prefixes` is the comma-separated PR_REVIEW_SKIP_BRANCHES setting (e.g. "automation/"),
+ * matched against the branch name without `refs/heads/`. Used to skip auto-review of
+ * bot PRs that open in bulk; an explicit /review comment still reviews them.
+ */
+export function skippedBranchPrefix(sourceRef: string, prefixes: string | undefined): string | undefined {
+  const branch = sourceRef.replace(/^refs\/heads\//, '');
+  return (prefixes ?? '').split(',').map((p) => p.trim()).filter(Boolean).find((p) => branch.startsWith(p));
+}

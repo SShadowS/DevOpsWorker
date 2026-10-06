@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { parseWebhookPayload, parseCommentKey } from '../../src/webhook-server/parse.ts';
+import { parseWebhookPayload, parseCommentKey, skippedBranchPrefix } from '../../src/webhook-server/parse.ts';
 
 function prCreatedPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -361,5 +361,21 @@ describe('parseWebhookPayload — a draft being published', () => {
     const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     const payload = { ...prUpdatedPayload('Jane Roe published the pull request'), createdDate: stale };
     expect(() => parseWebhookPayload(payload)).toThrow('too old');
+  });
+});
+
+describe('skippedBranchPrefix', () => {
+  test('returns the configured prefix the source branch starts with', () => {
+    expect(skippedBranchPrefix('refs/heads/automation/feature/bump/261005', 'release/, automation/')).toBe('automation/');
+  });
+
+  test('matches the branch name without refs/heads/', () => {
+    expect(skippedBranchPrefix('refs/heads/refs-cleanup', 'refs/')).toBeUndefined();
+  });
+
+  test('returns undefined when nothing matches or nothing is configured', () => {
+    expect(skippedBranchPrefix('refs/heads/feature/x', 'automation/')).toBeUndefined();
+    expect(skippedBranchPrefix('refs/heads/feature/x', undefined)).toBeUndefined();
+    expect(skippedBranchPrefix('refs/heads/feature/x', ' , ')).toBeUndefined();
   });
 });

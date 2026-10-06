@@ -2,7 +2,7 @@ import { connectStores } from '../db/connect-stores.ts';
 import { findRepoByRepositoryId } from '../config/repos.ts';
 import { refreshRegistryIfStale } from '../config/hydrate.ts';
 import { validateSignature } from './validate.ts';
-import { parseWebhookPayload, type PRWebhookEvent } from './parse.ts';
+import { parseWebhookPayload, skippedBranchPrefix, type PRWebhookEvent } from './parse.ts';
 import type { IStateStore } from '../pipeline/state-store.interface.ts';
 import type { IWebhookEventStore } from '../pipeline/webhook-event-store.interface.ts';
 
@@ -181,6 +181,14 @@ export async function startWebhookServer(options: WebhookServerOptions): Promise
         if (!event.commentKey && event.pr.isDraft && repo.config.reviewDrafts !== true) {
           log(`Webhook ignored: PR #${event.pr.id} in ${event.pr.repositoryName} — draft PR (reviewDrafts not enabled for ${repo.key})`);
           return Response.json({ ok: true, ignored: true, reason: 'draft PR' }, { status: 200 });
+        }
+
+        // Skip auto-review for branches named in PR_REVIEW_SKIP_BRANCHES (bot PRs that
+        // open in bulk). An explicit /review comment still reviews them.
+        const skipPrefix = event.commentKey ? undefined : skippedBranchPrefix(event.pr.sourceBranch, process.env.PR_REVIEW_SKIP_BRANCHES);
+        if (skipPrefix) {
+          log(`Webhook ignored: PR #${event.pr.id} in ${event.pr.repositoryName} — source branch starts with "${skipPrefix}" (PR_REVIEW_SKIP_BRANCHES; use /review to review it)`);
+          return Response.json({ ok: true, ignored: true, reason: 'skipped branch' }, { status: 200 });
         }
 
         // Skip auto-review for pipeline-created PRs (they get reviewed through the pipeline).
