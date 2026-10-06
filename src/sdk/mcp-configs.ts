@@ -12,12 +12,21 @@ import type { PipelineConfig, PipelineState } from '../types/pipeline.types.ts';
 /**
  * Azure DevOps MCP server — provides work item, PR, pipeline, and repo tools.
  * Used by agents that need DevOps read or write access.
+ *
+ * Runs the globally installed binary when there is one (the container image installs
+ * it). Going through npx adds an npm resolution step on every start; with the CPU
+ * saturated by parallel reviews that pushed startup past the MCP connect timeout, and
+ * the reviewer finished without being able to post its comment.
  */
-export function azureDevOpsMcp(config: PipelineConfig): McpServerConfig {
+export function azureDevOpsMcp(
+  config: PipelineConfig,
+  which: (bin: string) => string | null = Bun.which,
+): McpServerConfig {
+  const installed = which('mcp-server-azure-devops');
   return {
     type: 'stdio',
-    command: 'npx',
-    args: ['-y', '@sshadows/mcp-server-azure-devops'],
+    command: installed ?? 'npx',
+    args: installed ? [] : ['-y', '@sshadows/mcp-server-azure-devops'],
     env: {
       AZURE_DEVOPS_ORG_URL: config.azureDevOps.orgUrl,
       AZURE_DEVOPS_AUTH_METHOD: 'pat',

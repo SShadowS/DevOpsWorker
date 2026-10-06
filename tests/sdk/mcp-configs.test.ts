@@ -165,13 +165,15 @@ describe('azureDevOpsMcp', () => {
     expect(mcp.command).not.toBe('cmd');
   });
 
-  test('uses npx as command', () => {
-    const mcp = azureDevOpsMcp(stubConfig);
-    expect(mcp.command).toBe('npx');
+  test('runs the installed binary directly when it is on PATH', () => {
+    const mcp = azureDevOpsMcp(stubConfig, () => '/usr/local/bin/mcp-server-azure-devops');
+    expect(mcp.command).toBe('/usr/local/bin/mcp-server-azure-devops');
+    expect(mcp.args).toEqual([]);
   });
 
-  test('passes -y and package name as args', () => {
-    const mcp = azureDevOpsMcp(stubConfig);
+  test('falls back to npx when the binary is not installed', () => {
+    const mcp = azureDevOpsMcp(stubConfig, () => null);
+    expect(mcp.command).toBe('npx');
     expect(mcp.args).toEqual(['-y', '@sshadows/mcp-server-azure-devops']);
   });
 
