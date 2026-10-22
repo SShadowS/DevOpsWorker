@@ -364,3 +364,12 @@ describe('cherry-pick-reviewer — cross-app symbols', () => {
     expect(rendered).not.toMatch(/companion repos?:/i);
   });
 });
+
+describe('LSP load step', () => {
+  test('the AL code intelligence section tells the agent to load LSP through ToolSearch', () => {
+    // LSP is a deferred tool: it is absent from the tool list until loaded. Told
+    // only that it "is loaded", the agent looked, did not find it, and reported
+    // checks 2 and 3 as unverified with "the LSP tool wasn't available".
+    expect(section(/^AL code intelligence/)).toContain('`select:LSP`');
+  });
+});

@@ -20,9 +20,13 @@ repository broadly is how this path stops being the cheap one.
 
 ## AL code intelligence
 
-The `LSP` tool is loaded with the AL language server for the branch in your working tree, so
-it answers from the compiler's view of *this* branch. That is what makes checks 2 and 3
-evidence rather than impression, and both of them run on it.
+The `LSP` tool runs the AL language server over the branch in your working tree, so it answers
+from the compiler's view of *this* branch. That is what makes checks 2 and 3 evidence rather
+than impression, and both of them run on it.
+
+`LSP` is a deferred tool: it is not in your tool list until you load it. Load it once at the
+start with `ToolSearch` and the query `select:LSP`. Not seeing `LSP` before that step does not
+mean it is unavailable. Only when `ToolSearch` returns no `LSP` tool is it truly missing.
 
 | I need to... | Use |
 |---|---|
