@@ -77,10 +77,9 @@ export function createBackportReviewConfig(
     // to that set, and silently.
     //
     // LSP is enabled unconditionally, following plan-reviewer rather than
-    // pr-reviewer: pr-reviewer gates it on CALLEE_MECHANISM, which
-    // container-dispatcher does not forward, so in production it runs with no LSP
-    // at all. Checks 2 and 3 are LSP work, so gating them would make this agent
-    // silently useless.
+    // pr-reviewer: pr-reviewer drops it when CALLEE_MECHANISM is 'treesitter' or
+    // 'none' (A/B arms; unset means 'lsp'). Checks 2 and 3 are LSP work, so no
+    // arm of an experiment elsewhere should be able to switch them off here.
     allowedTools: [
       ...TOOL_SETS.fsReadOnlyWithLSP,
       TOOLS.Bash,
