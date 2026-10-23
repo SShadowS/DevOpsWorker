@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { SDKMessage, SDKRateLimitInfo, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { PipelineLogger } from './pipeline-logger.ts';
+import { AgentExecutionError } from './errors.ts';
 import type { StageTokenUsage, StageModelUsage, SubAgentUsage } from '../types/pipeline.types.ts';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,9 @@ export interface ConsumeStreamContext {
    *  attribution fallback when no sub-agent dispatch is in scope). */
   agentName: string;
   logger?: PipelineLogger;
+  /** Tools that must appear in the SDK's init message. A missing one fails the
+   *  run before the first model turn instead of letting it run without the tool. */
+  requiredTools?: string[];
 }
 
 export interface ConsumedAgentStream {
@@ -120,6 +124,19 @@ export async function consumeAgentStream(
     // Capture session ID from init message
     if (message.type === 'system' && message.subtype === 'init') {
       sessionId = message.session_id;
+      // A plugin can load and still register no tool: the AL LSP plugin's
+      // .lsp.json once carried a field this SDK rejected, the server was dropped
+      // without an error, and every agent ran without LSP for nine days.
+      const registered = new Set((message as { tools?: string[] }).tools ?? []);
+      const missing = (ctx.requiredTools ?? []).filter((t) => !registered.has(t));
+      if (missing.length > 0) {
+        logger?.log(`REQUIRED TOOL MISSING: ${missing.join(', ')} is not registered in this session`);
+        throw new AgentExecutionError(agentName, {
+          subtype: 'required_tool_missing',
+          missing,
+          message: `${missing.join(', ')} is not registered in this session. Check that the SDK accepts the plugin's config.`,
+        });
+      }
     }
 
     // --- Sub-agents that run as BACKGROUND TASKS ---

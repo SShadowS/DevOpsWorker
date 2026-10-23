@@ -7,6 +7,8 @@ import {
   consumeAgentStream,
   resolveActiveAgent,
 } from '../../src/sdk/agent-stream.ts';
+import { AgentExecutionError } from '../../src/sdk/errors.ts';
+import { isRetryableError } from '../../src/sdk/run-agent.ts';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -918,5 +920,31 @@ describe('tool result logging', () => {
     );
 
     expect(loggedResult(fake)).toBe('no findings');
+  });
+});
+
+describe('consumeAgentStream requiredTools', () => {
+  test('throws a non-retryable error when a required tool is missing from the init message', async () => {
+    // The AL LSP plugin can load and still register no LSP tool: plugin v1.18.10
+    // added a .lsp.json field SDK 0.3.284 rejects, and every review ran without
+    // LSP for nine days with no error anywhere.
+    const stream = fakeMessages(
+      { ...initMessage(), tools: ['Read', 'Grep'] },
+      resultSuccess(),
+    );
+    const err = await consumeAgentStream(asStream(stream), { agentName: 'a', requiredTools: ['LSP'] })
+      .then(() => undefined, (e: unknown) => e);
+    expect(err).toBeInstanceOf(AgentExecutionError);
+    expect((err as AgentExecutionError).details).toMatchObject({ subtype: 'required_tool_missing', missing: ['LSP'] });
+    expect(isRetryableError(err)).toBe(false);
+  });
+
+  test('passes when every required tool is registered', async () => {
+    const stream = fakeMessages(
+      { ...initMessage(), tools: ['Read', 'LSP'] },
+      resultSuccess(),
+    );
+    const out = await consumeAgentStream(asStream(stream), { agentName: 'a', requiredTools: ['LSP'] });
+    expect(out.resultMessage).toBeDefined();
   });
 });

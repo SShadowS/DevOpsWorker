@@ -50,6 +50,8 @@ export function initAgentRuntime(): void {
 const NON_RETRYABLE_SUBTYPES = new Set([
   'error_max_turns',
   'error_max_budget',
+  // Set by consumeAgentStream: a tool that did not register will not register on retry.
+  'required_tool_missing',
 ]);
 
 /**
@@ -343,7 +345,12 @@ export async function runAgent<T extends z.ZodType>(
         const {
           resultMessage, sessionId, costUsd, durationMs, turns,
           lastAssistantText, rateLimitHit, tokens, toolCalls, modelUsage, subAgents,
-        } = await consumeAgentStream(stream, { agentName, logger });
+        } = await consumeAgentStream(stream, {
+          agentName,
+          logger,
+          // An agent handed a plugin and told to use LSP must actually get it.
+          requiredTools: config.plugins?.length && effectiveTools.includes('LSP') ? ['LSP'] : [],
+        });
 
         if (!resultMessage) {
           const err = new AgentExecutionError(config.name, 'No result message received from agent');
