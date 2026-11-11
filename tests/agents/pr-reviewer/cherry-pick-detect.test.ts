@@ -273,6 +273,32 @@ describe('detectCherryPick — multi-source ports stay on the full path', () => 
     expect(r.multiSourcePrIds).toBeUndefined();
   });
 
+  test('the cherry-pick tool\'s bulleted `!<id>:` list, HTML line breaks and all, is several sources', () => {
+    // PR 61366: reviewed twice against !59693 alone, and both reviews reported
+    // the second source's work as divergence.
+    const r = detectCherryPick({
+      title: 'Cherry-pick: feat(#85622): Demo eDocuments: let CDN resolve the receiver',
+      description: 'Cherry-pick of <strong>!59693</strong> and <strong>!61061</strong> to development/29.x.<br><br>'
+        + '<strong>Original Pull Requests:</strong><br>'
+        + '• !59693: feat(#85622): Demo eDocuments: let CDN resolve the receiver — completed 2026-11-03<br>'
+        + '• !61061: #85622 - Demo eDocuments: mocks act only in the scenario\'s own companies — completed 2026-11-09<br><br>'
+        + 'Cherry-picked in chronological order by completion date.',
+    });
+    expect(r.isCherryPick).toBe(true);
+    expect(r.originalPrId).toBeUndefined();
+    expect(r.multiSourcePrIds).toEqual([59693, 61061]);
+  });
+
+  test('the same list with ONE entry still resolves that single source', () => {
+    const r = detectCherryPick({
+      title: 'Cherry-pick: fix something',
+      description: 'Cherry-pick of <strong>!59693</strong> to development/29.x.<br><br>'
+        + '<strong>Original Pull Requests:</strong><br>• !59693: fix something — completed 2026-11-03',
+    });
+    expect(r.originalPrId).toBe(59693);
+    expect(r.multiSourcePrIds).toBeUndefined();
+  });
+
   test('an explicit trailer settles it even with several merged parents listed', () => {
     const r = detectCherryPick({ ...MULTI, description: `${MULTI.description}\nCherry picked from !42379` });
     expect(r.originalPrId).toBe(42379);

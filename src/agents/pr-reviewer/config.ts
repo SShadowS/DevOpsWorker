@@ -133,9 +133,16 @@ export function detectCherryPick(pr: { title: string; description?: string }): C
   //
   // One id per line, deliberately: nested prefixes on a single line are a port of a
   // port (one chain, nearest ancestor first), not two separate sources.
+  //
+  // The cherry-pick tool writes a second list shape, as HTML: `• !59693: <title><br>`,
+  // one entry per source. PR 61366 carried two; neither is a `Merged PR` line and the
+  // description has no real newline, so this check saw one line with no parent, the
+  // bare-`!<id>` fallback below took the first, and the other PR's work was reported
+  // as divergence. `<br>` is a line break here, and a line that STARTS with `!<id>:`
+  // is a list entry — mid-sentence `!<id>` is still prose and still ignored.
   const parentsPerLine = (text: string | undefined): number[] =>
-    (text?.split(/\r?\n/) ?? [])
-      .map((line) => line.match(/merged pr (\d+):/i))
+    (text?.split(/\r?\n|<br\s*\/?>/i) ?? [])
+      .map((line) => line.match(/merged pr (\d+):/i) ?? line.match(/^[\s\-*•]*!(\d+):/))
       .filter((m): m is RegExpMatchArray => m !== null)
       .map((m) => parseInt(m[1]!, 10));
   const distinctParents = [...new Set([...parentsPerLine(pr.title), ...parentsPerLine(pr.description)])];
